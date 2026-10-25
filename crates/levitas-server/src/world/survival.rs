@@ -218,6 +218,7 @@ impl World {
     }
 
     fn die(&mut self, id: i32, kind: Damage) {
+        self.close_container(id);
         let p = self.players.get_mut(&id).expect("player exists");
         p.alive = false;
         p.eating = None;

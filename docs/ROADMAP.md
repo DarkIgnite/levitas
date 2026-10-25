@@ -38,7 +38,13 @@ Each milestone ends with something that can be tested in a real 1.21.8 client.
 - [x] Server-side player inventory (container clicks trusted, not yet simulated)
 - [x] Commands: /gamemode, /give, /kill
 - [ ] Mining speed validation (needs block hardness data)
-- [ ] Crafting (2x2 and crafting table), furnace, chests
+- [x] Crafting in the 2x2 grid and crafting tables (shaped, mirrored, shapeless)
+- [x] Chests and barrels: shared contents, lid animation, contents drop when broken
+- [x] Furnaces: fuel, smelting recipes, progress bars, lit block state
+- [x] Click validation: items cannot appear except a crafting result whose ingredients are used up
+- [ ] Server-side click simulation (shift-click crafting several at once, drag splitting)
+- [ ] Special recipes (dyeing, fireworks, map cloning), stonecutter, smithing, blast furnace, smoker
+- [ ] Double chests and block orientation when placing
 - [ ] Day/night cycle, weather
 
 ## Milestone 4: Entities and mobs

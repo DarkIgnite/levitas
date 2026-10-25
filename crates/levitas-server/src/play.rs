@@ -18,6 +18,8 @@ const KEEP_ALIVE_INTERVAL: Duration = Duration::from_secs(10);
 /// The protocol caps the slots one container click may change.
 const MAX_CHANGED_SLOTS: i32 = 128;
 const CLIENT_COMMAND_RESPAWN: i32 = 0;
+/// Flag in the player input packet for the sneak key.
+const INPUT_SNEAK: u8 = 0x20;
 const PLAYER_COMMAND_START_SPRINTING: i32 = 1;
 const PLAYER_COMMAND_STOP_SPRINTING: i32 = 2;
 
@@ -164,7 +166,7 @@ fn decode(id: i32, packet: &[u8]) -> io::Result<Option<Event>> {
         serverbound::CONTAINER_CLICK => {
             let window = r.varint()?;
             let _state_id = r.varint()?;
-            let _slot = r.i16()?;
+            let slot = r.i16()?;
             let _button = r.u8()?;
             let _mode = r.varint()?;
             let count = r.varint()?;
@@ -179,6 +181,7 @@ fn decode(id: i32, packet: &[u8]) -> io::Result<Option<Event>> {
             Event::ContainerClick {
                 id,
                 window,
+                slot,
                 changed,
                 carried: hashed_stack(&mut r)?,
             }
@@ -191,6 +194,10 @@ fn decode(id: i32, packet: &[u8]) -> io::Result<Option<Event>> {
             id,
             hand: r.varint()?,
             sequence: r.varint()?,
+        },
+        serverbound::PLAYER_INPUT => Event::Sneak {
+            id,
+            sneaking: r.u8()? & INPUT_SNEAK != 0,
         },
         serverbound::CLIENT_COMMAND => match r.varint()? {
             CLIENT_COMMAND_RESPAWN => Event::Respawn { id },

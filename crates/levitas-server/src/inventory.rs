@@ -1,8 +1,6 @@
 //! The player inventory, in the slot layout of the player's inventory menu:
 //! 0 crafting result, 1-4 crafting grid, 5-8 armor, 9-35 main, 36-44 hotbar, 45 offhand.
 
-use std::collections::HashMap;
-
 use levitas_protocol::Writer;
 use levitas_registry::ItemInfo;
 
@@ -110,17 +108,6 @@ impl Inventory {
         Stack::new(item, taken)
     }
 
-    /// Item counts across all slots and the cursor.
-    pub fn totals(&self) -> HashMap<i32, i32> {
-        let mut totals = HashMap::new();
-        for s in self.slots.iter().chain([&self.carried]) {
-            if !s.is_empty() {
-                *totals.entry(s.item).or_insert(0) += s.count;
-            }
-        }
-        totals
-    }
-
     /// Empties the inventory, returning everything that was in it.
     pub fn drain(&mut self) -> Vec<Stack> {
         let all = self
@@ -140,24 +127,38 @@ impl Inventory {
         self.state_id
     }
 
+    /// Updates one slot of the player inventory window.
     pub fn set_slot_packet(&mut self, slot: usize) -> Writer {
+        let stack = self.slots[slot];
+        self.window_slot_packet(0, slot, stack)
+    }
+
+    /// Updates one slot of any window the player has open.
+    pub fn window_slot_packet(&mut self, window: i32, slot: usize, stack: Stack) -> Writer {
         use levitas_registry::packet::play::clientbound;
         let state_id = self.next_state_id();
         let packet = Writer::packet(clientbound::CONTAINER_SET_SLOT)
-            .varint(0) // player inventory window
+            .varint(window)
             .varint(state_id)
             .i16(slot as i16);
-        write_stack(packet, self.slots[slot])
+        write_stack(packet, stack)
     }
 
+    /// The whole player inventory window.
     pub fn content_packet(&mut self) -> Writer {
+        let slots = self.slots;
+        self.window_content_packet(0, &slots)
+    }
+
+    /// Every slot of a window, plus the cursor stack.
+    pub fn window_content_packet(&mut self, window: i32, slots: &[Stack]) -> Writer {
         use levitas_registry::packet::play::clientbound;
         let state_id = self.next_state_id();
         let mut packet = Writer::packet(clientbound::CONTAINER_SET_CONTENT)
-            .varint(0)
+            .varint(window)
             .varint(state_id)
-            .varint(SLOTS as i32);
-        for &s in &self.slots {
+            .varint(slots.len() as i32);
+        for &s in slots {
             packet = write_stack(packet, s);
         }
         write_stack(packet, self.carried)
@@ -201,12 +202,12 @@ mod tests {
     }
 
     #[test]
-    fn take_and_totals() {
+    fn take() {
         let mut inv = Inventory::new();
         let dirt = item("minecraft:dirt");
         inv.add(dirt, 5);
         assert_eq!(inv.take(HOTBAR, 2), Stack::new(dirt, 2));
-        assert_eq!(inv.totals()[&dirt], 3);
+        assert_eq!(inv.slots[HOTBAR], Stack::new(dirt, 3));
         assert_eq!(inv.take(HOTBAR, 9), Stack::new(dirt, 3));
         assert!(inv.slots[HOTBAR].is_empty());
     }

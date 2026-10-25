@@ -3,6 +3,7 @@ mod flat;
 mod inventory;
 mod loot;
 mod play;
+mod recipes;
 mod rng;
 #[cfg(test)]
 mod tests;

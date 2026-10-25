@@ -1,0 +1,376 @@
+//! Crafting and smelting recipes, loaded from the vanilla recipe JSON. Shaped (including
+//! mirrored), shapeless and smelting recipes are supported; special recipes (fireworks,
+//! map cloning, dyeing, ...), transmute recipes, stonecutting and smithing are not yet.
+
+use std::collections::HashMap;
+
+use levitas_registry::{ItemInfo, TagRegistry, RECIPES_JSON};
+use serde_json::Value;
+
+use crate::inventory::Stack;
+
+/// Item IDs an ingredient slot accepts, sorted.
+type Ingredient = Vec<i32>;
+
+struct Shaped {
+    width: usize,
+    height: usize,
+    /// Row-major cells; `None` must be empty.
+    cells: Vec<Option<Ingredient>>,
+    result: Stack,
+}
+
+struct Shapeless {
+    ingredients: Vec<Ingredient>,
+    result: Stack,
+}
+
+#[derive(Clone)]
+pub struct Smelting {
+    pub result: Stack,
+    pub cook_time: i32,
+}
+
+pub struct Recipes {
+    shaped: Vec<Shaped>,
+    shapeless: Vec<Shapeless>,
+    /// Smelting recipes by input item.
+    smelting: HashMap<i32, Smelting>,
+}
+
+impl Recipes {
+    pub fn load() -> Self {
+        let all: serde_json::Map<String, Value> =
+            serde_json::from_str(RECIPES_JSON).expect("recipes are valid JSON");
+        let mut recipes = Recipes {
+            shaped: Vec::new(),
+            shapeless: Vec::new(),
+            smelting: HashMap::new(),
+        };
+        for recipe in all.values() {
+            // Recipes naming unknown items or tags are skipped rather than half-loaded.
+            let _ = recipes.add(recipe);
+        }
+        recipes
+    }
+
+    fn add(&mut self, recipe: &Value) -> Option<()> {
+        match recipe["type"].as_str()? {
+            "minecraft:crafting_shaped" => {
+                let pattern: Vec<&str> = recipe["pattern"]
+                    .as_array()?
+                    .iter()
+                    .map(|row| row.as_str())
+                    .collect::<Option<_>>()?;
+                let key = recipe["key"].as_object()?;
+                let width = pattern.iter().map(|r| r.chars().count()).max()?;
+                let mut cells = Vec::new();
+                for row in &pattern {
+                    let mut chars: Vec<char> = row.chars().collect();
+                    chars.resize(width, ' ');
+                    for c in chars {
+                        cells.push(match c {
+                            ' ' => None,
+                            c => Some(ingredient(key.get(&c.to_string())?)?),
+                        });
+                    }
+                }
+                self.shaped.push(Shaped {
+                    width,
+                    height: pattern.len(),
+                    cells,
+                    result: result(&recipe["result"])?,
+                });
+            }
+            "minecraft:crafting_shapeless" => {
+                let ingredients = recipe["ingredients"]
+                    .as_array()?
+                    .iter()
+                    .map(ingredient)
+                    .collect::<Option<_>>()?;
+                self.shapeless.push(Shapeless {
+                    ingredients,
+                    result: result(&recipe["result"])?,
+                });
+            }
+            "minecraft:smelting" => {
+                let smelting = Smelting {
+                    result: result(&recipe["result"])?,
+                    cook_time: recipe["cookingtime"].as_i64().unwrap_or(200) as i32,
+                };
+                for item in ingredient(&recipe["ingredient"])? {
+                    self.smelting.entry(item).or_insert(smelting.clone());
+                }
+            }
+            _ => {}
+        }
+        Some(())
+    }
+
+    /// The result of a square crafting grid (`size` 2 or 3, row-major), or an empty stack.
+    pub fn craft(&self, grid: &[Stack], size: usize) -> Stack {
+        let items: Vec<Option<i32>> = grid
+            .iter()
+            .map(|s| (!s.is_empty()).then_some(s.item))
+            .collect();
+        let Some(bounds) = Bounds::of(&items, size) else {
+            return Stack::EMPTY;
+        };
+        for recipe in &self.shaped {
+            if recipe.width == bounds.width()
+                && recipe.height == bounds.height()
+                && (recipe.matches(&items, size, &bounds, false)
+                    || recipe.matches(&items, size, &bounds, true))
+            {
+                return recipe.result;
+            }
+        }
+        let present: Vec<i32> = items.iter().flatten().copied().collect();
+        for recipe in &self.shapeless {
+            if recipe.ingredients.len() == present.len()
+                && assign(
+                    &recipe.ingredients,
+                    &present,
+                    &mut vec![false; present.len()],
+                )
+            {
+                return recipe.result;
+            }
+        }
+        Stack::EMPTY
+    }
+
+    pub fn smelting(&self, item: i32) -> Option<&Smelting> {
+        self.smelting.get(&item)
+    }
+}
+
+impl Shaped {
+    fn matches(&self, items: &[Option<i32>], size: usize, b: &Bounds, mirrored: bool) -> bool {
+        (0..self.height).all(|row| {
+            (0..self.width).all(|col| {
+                let pattern_col = if mirrored { self.width - 1 - col } else { col };
+                let cell = &self.cells[row * self.width + pattern_col];
+                let item = items[(b.top + row) * size + b.left + col];
+                match (cell, item) {
+                    (None, None) => true,
+                    (Some(ingredient), Some(item)) => ingredient.binary_search(&item).is_ok(),
+                    _ => false,
+                }
+            })
+        })
+    }
+}
+
+/// The smallest rectangle containing every non-empty grid cell.
+struct Bounds {
+    top: usize,
+    left: usize,
+    bottom: usize,
+    right: usize,
+}
+
+impl Bounds {
+    fn of(items: &[Option<i32>], size: usize) -> Option<Self> {
+        let filled: Vec<(usize, usize)> = (0..items.len())
+            .filter(|&i| items[i].is_some())
+            .map(|i| (i / size, i % size))
+            .collect();
+        Some(Bounds {
+            top: filled.iter().map(|c| c.0).min()?,
+            left: filled.iter().map(|c| c.1).min()?,
+            bottom: filled.iter().map(|c| c.0).max()?,
+            right: filled.iter().map(|c| c.1).max()?,
+        })
+    }
+
+    fn width(&self) -> usize {
+        self.right - self.left + 1
+    }
+
+    fn height(&self) -> usize {
+        self.bottom - self.top + 1
+    }
+}
+
+/// Whether every ingredient can be matched to a distinct item (simple backtracking).
+fn assign(ingredients: &[Ingredient], items: &[i32], used: &mut [bool]) -> bool {
+    let Some((first, rest)) = ingredients.split_first() else {
+        return true;
+    };
+    for i in 0..items.len() {
+        if !used[i] && first.binary_search(&items[i]).is_ok() {
+            used[i] = true;
+            if assign(rest, items, used) {
+                return true;
+            }
+            used[i] = false;
+        }
+    }
+    false
+}
+
+/// An ingredient: an item ID, a `#tag`, or a list of those.
+fn ingredient(value: &Value) -> Option<Ingredient> {
+    let mut items = Vec::new();
+    let specs: Vec<&str> = match value {
+        Value::String(s) => vec![s.as_str()],
+        Value::Array(list) => list.iter().map(Value::as_str).collect::<Option<_>>()?,
+        _ => return None,
+    };
+    for spec in specs {
+        match spec.strip_prefix('#') {
+            Some(tag) => {
+                let members = TagRegistry::get("minecraft:item")?.members(tag);
+                if members.is_empty() {
+                    return None;
+                }
+                items.extend(members.iter().map(|&id| id as i32));
+            }
+            None => items.push(ItemInfo::id_of(spec)?),
+        }
+    }
+    items.sort_unstable();
+    items.dedup();
+    Some(items)
+}
+
+fn result(value: &Value) -> Option<Stack> {
+    let item = ItemInfo::id_of(value["id"].as_str()?)?;
+    let count = value["count"].as_i64().unwrap_or(1) as i32;
+    Some(Stack::new(item, count))
+}
+
+/// Burn time in ticks of an item used as furnace fuel, or 0. Fuel values are part of the
+/// game code rather than the generated data, so the common ones are listed here.
+pub fn fuel_ticks(item: i32) -> i32 {
+    let Some(info) = ItemInfo::get(item) else {
+        return 0;
+    };
+    let in_tag = |tag: &str| {
+        TagRegistry::get("minecraft:item")
+            .is_some_and(|t| t.members(tag).binary_search(&i64::from(item)).is_ok())
+    };
+    match info.name {
+        "minecraft:lava_bucket" => 20_000,
+        "minecraft:coal_block" => 16_000,
+        "minecraft:dried_kelp_block" => 4_001,
+        "minecraft:blaze_rod" => 2_400,
+        "minecraft:coal" | "minecraft:charcoal" => 1_600,
+        "minecraft:crafting_table" | "minecraft:chest" | "minecraft:barrel" => 300,
+        "minecraft:stick" | "minecraft:bowl" => 100,
+        "minecraft:bamboo" | "minecraft:scaffolding" => 50,
+        name if name.starts_with("minecraft:wooden_") => 200,
+        _ if in_tag("minecraft:logs") || in_tag("minecraft:planks") => 300,
+        _ if in_tag("minecraft:wooden_stairs") || in_tag("minecraft:wooden_fences") => 300,
+        _ if in_tag("minecraft:wooden_slabs") => 150,
+        _ if in_tag("minecraft:saplings") || in_tag("minecraft:wool") => 100,
+        _ if in_tag("minecraft:wool_carpets") => 67,
+        _ => 0,
+    }
+}
+
+/// What is left in the fuel slot after burning one of `item` (a lava bucket leaves a
+/// bucket).
+pub fn fuel_remainder(item: i32) -> Option<i32> {
+    let name = ItemInfo::get(item)?.name;
+    (name == "minecraft:lava_bucket").then(|| ItemInfo::id_of("minecraft:bucket"))?
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn item(name: &str) -> i32 {
+        ItemInfo::id_of(name).unwrap()
+    }
+
+    fn grid(size: usize, cells: &[(usize, &str)]) -> Vec<Stack> {
+        let mut g = vec![Stack::EMPTY; size * size];
+        for &(i, name) in cells {
+            g[i] = Stack::new(item(name), 1);
+        }
+        g
+    }
+
+    #[test]
+    fn shapeless_planks_from_any_slot() {
+        let r = Recipes::load();
+        let planks = Stack::new(item("minecraft:oak_planks"), 4);
+        assert_eq!(r.craft(&grid(2, &[(3, "minecraft:oak_log")]), 2), planks);
+        assert_eq!(r.craft(&grid(3, &[(4, "minecraft:oak_log")]), 3), planks);
+    }
+
+    #[test]
+    fn shaped_recipes_fit_anywhere_in_the_grid() {
+        let r = Recipes::load();
+        let sticks = Stack::new(item("minecraft:stick"), 4);
+        assert_eq!(
+            r.craft(
+                &grid(
+                    2,
+                    &[(1, "minecraft:oak_planks"), (3, "minecraft:birch_planks")]
+                ),
+                2
+            ),
+            sticks
+        );
+        assert_eq!(
+            r.craft(
+                &grid(
+                    3,
+                    &[(2, "minecraft:oak_planks"), (5, "minecraft:oak_planks")]
+                ),
+                3
+            ),
+            sticks
+        );
+        let table = r.craft(
+            &grid(
+                2,
+                &[
+                    (0, "minecraft:oak_planks"),
+                    (1, "minecraft:oak_planks"),
+                    (2, "minecraft:oak_planks"),
+                    (3, "minecraft:oak_planks"),
+                ],
+            ),
+            2,
+        );
+        assert_eq!(table, Stack::new(item("minecraft:crafting_table"), 1));
+    }
+
+    #[test]
+    fn three_by_three_and_mirrored() {
+        let r = Recipes::load();
+        let p = "minecraft:oak_planks";
+        let s = "minecraft:stick";
+        let pickaxe = grid(3, &[(0, p), (1, p), (2, p), (4, s), (7, s)]);
+        assert_eq!(
+            r.craft(&pickaxe, 3),
+            Stack::new(item("minecraft:wooden_pickaxe"), 1)
+        );
+        // The axe pattern and its mirror image both work.
+        let axe = grid(3, &[(0, p), (1, p), (3, p), (4, s), (7, s)]);
+        let mirrored = grid(3, &[(1, p), (2, p), (5, p), (4, s), (7, s)]);
+        let wooden_axe = Stack::new(item("minecraft:wooden_axe"), 1);
+        assert_eq!(r.craft(&axe, 3), wooden_axe);
+        assert_eq!(r.craft(&mirrored, 3), wooden_axe);
+        assert!(r.craft(&grid(3, &[(0, p), (8, s)]), 3).is_empty());
+    }
+
+    #[test]
+    fn smelting_and_fuel() {
+        let r = Recipes::load();
+        let iron = r.smelting(item("minecraft:raw_iron")).unwrap();
+        assert_eq!(iron.result, Stack::new(item("minecraft:iron_ingot"), 1));
+        assert_eq!(iron.cook_time, 200);
+        assert_eq!(fuel_ticks(item("minecraft:coal")), 1600);
+        assert_eq!(fuel_ticks(item("minecraft:oak_planks")), 300);
+        assert_eq!(fuel_ticks(item("minecraft:dirt")), 0);
+        assert_eq!(
+            fuel_remainder(item("minecraft:lava_bucket")),
+            Some(item("minecraft:bucket"))
+        );
+    }
+}

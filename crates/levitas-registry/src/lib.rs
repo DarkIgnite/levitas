@@ -76,6 +76,23 @@ impl BlockInfo {
         }
         None
     }
+
+    /// `state` with property `name` set to `value`, or `None` if the block has no such
+    /// property or value.
+    pub fn with(&self, state: u16, name: &str, value: &str) -> Option<u16> {
+        let mut index = usize::from(state - self.first_state);
+        let mut stride = 1;
+        for (prop, values) in self.properties.iter().rev() {
+            let current = index / stride % values.len();
+            if *prop == name {
+                let new = values.iter().position(|v| *v == value)?;
+                index = index + new * stride - current * stride;
+                return Some(self.first_state + index as u16);
+            }
+            stride *= values.len();
+        }
+        None
+    }
 }
 
 pub struct ItemInfo {
@@ -142,6 +159,18 @@ mod tests {
         assert_eq!(info.property(block::GRASS_BLOCK, "snowy"), Some("false"));
         let wheat = BlockInfo::of(block::WHEAT);
         assert_eq!(wheat.property(wheat.first_state + 7, "age"), Some("7"));
+
+        let furnace = BlockInfo::of(block::FURNACE);
+        let lit = furnace.with(block::FURNACE, "lit", "true").unwrap();
+        assert_eq!(furnace.property(lit, "lit"), Some("true"));
+        assert_eq!(
+            furnace.property(lit, "facing"),
+            furnace.property(block::FURNACE, "facing")
+        );
+        assert_eq!(furnace.with(lit, "lit", "false"), Some(block::FURNACE));
+        assert_eq!(furnace.with(lit, "lit", "maybe"), None);
+        assert!(RECIPES_JSON.contains("minecraft:crafting_table"));
+        assert_ne!(menu::GENERIC_9X3, menu::CRAFTING);
     }
 
     #[test]

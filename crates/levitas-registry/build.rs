@@ -54,7 +54,22 @@ fn main() {
     tags(&data, &synced, &mut out);
 
     let out_dir = PathBuf::from(std::env::var("OUT_DIR").unwrap());
-    block_loot(&data, &out_dir, &mut out);
+    embed_json_dir(
+        &data,
+        &out_dir,
+        "loot_table/blocks",
+        "BLOCK_LOOT_JSON",
+        "Block loot tables as JSON: an object mapping block names to loot tables.",
+        &mut out,
+    );
+    embed_json_dir(
+        &data,
+        &out_dir,
+        "recipe",
+        "RECIPES_JSON",
+        "Recipes as JSON: an object mapping recipe names to recipes.",
+        &mut out,
+    );
     fs::write(out_dir.join("generated.rs"), out).unwrap();
 }
 
@@ -195,11 +210,25 @@ fn items_and_entities(data: &Path, block_defaults: &HashMap<String, u64>, out: &
         list
     };
 
-    out.push_str("/// Entity type IDs.\npub mod entity_type {\n");
-    for (name, id) in entries("minecraft:entity_type") {
-        writeln!(out, "pub const {}: i32 = {id};", const_name(&name)).unwrap();
+    for (module, registry, doc) in [
+        ("entity_type", "minecraft:entity_type", "Entity type IDs."),
+        (
+            "menu",
+            "minecraft:menu",
+            "Menu (container screen) type IDs.",
+        ),
+        (
+            "block_entity_type",
+            "minecraft:block_entity_type",
+            "Block entity type IDs.",
+        ),
+    ] {
+        writeln!(out, "/// {doc}\npub mod {module} {{").unwrap();
+        for (name, id) in entries(registry) {
+            writeln!(out, "pub const {}: i32 = {id};", const_name(&name)).unwrap();
+        }
+        out.push_str("}\n\n");
     }
-    out.push_str("}\n\n");
 
     let block_ids: HashMap<String, i64> = entries("minecraft:block")
         .into_iter()
@@ -264,22 +293,29 @@ fn items_and_entities(data: &Path, block_defaults: &HashMap<String, u64>, out: &
 }
 
 /// Collects every block loot table into one JSON object keyed by block name.
-fn block_loot(data: &Path, out_dir: &Path, out: &mut String) {
-    let dir = data.join("data/minecraft/loot_table/blocks");
-    let mut tables = serde_json::Map::new();
+/// Collects every JSON file under `data/minecraft/<dir>` into one JSON object keyed by
+/// entry name, and exposes it as the string constant `name`.
+fn embed_json_dir(data: &Path, out_dir: &Path, dir: &str, name: &str, doc: &str, out: &mut String) {
+    let dir = data.join("data/minecraft").join(dir);
+    let mut entries = serde_json::Map::new();
     let mut names = Vec::new();
     collect_entries(&dir, &dir, &mut names);
     names.sort();
-    for name in names {
-        let path = dir.join(format!("{}.json", name.strip_prefix("minecraft:").unwrap()));
-        tables.insert(name, read_json(&path));
+    for entry in names {
+        let path = dir.join(format!(
+            "{}.json",
+            entry.strip_prefix("minecraft:").unwrap()
+        ));
+        entries.insert(entry, read_json(&path));
     }
-    let json = serde_json::to_string(&Value::Object(tables)).unwrap();
-    fs::write(out_dir.join("block_loot.json"), json).unwrap();
-    out.push_str(
-        "/// Block loot tables as JSON: an object mapping block names to loot tables.\n\
-         pub static BLOCK_LOOT_JSON: &str = include_str!(concat!(env!(\"OUT_DIR\"), \"/block_loot.json\"));\n\n",
-    );
+    let file = format!("{}.json", name.to_lowercase());
+    let json = serde_json::to_string(&Value::Object(entries)).unwrap();
+    fs::write(out_dir.join(&file), json).unwrap();
+    writeln!(
+        out,
+        "/// {doc}\npub static {name}: &str = include_str!(concat!(env!(\"OUT_DIR\"), \"/{file}\"));\n"
+    )
+    .unwrap();
 }
 
 /// Collects entry names of each synced registry, sorted so their IDs are stable.

@@ -3,6 +3,7 @@
 //! packet frames, so world state needs no locks.
 
 mod commands;
+mod containers;
 mod items;
 mod survival;
 
@@ -22,7 +23,9 @@ use crate::connection::Profile;
 use crate::flat::{FlatGenerator, SURFACE_Y};
 use crate::inventory::{Inventory, Stack, CRAFTING_GRID, HOTBAR, OFFHAND, SLOTS};
 use crate::loot::{LootContext, LootTables};
+use crate::recipes::Recipes;
 use crate::rng::Rng;
+use containers::{BlockEntity, Open};
 use items::ItemEntity;
 use survival::MAX_HEALTH;
 
@@ -102,6 +105,7 @@ pub enum Event {
     ContainerClick {
         id: i32,
         window: i32,
+        slot: i16,
         changed: Vec<(i16, Stack)>,
         carried: Stack,
     },
@@ -120,6 +124,10 @@ pub enum Event {
     Sprint {
         id: i32,
         sprinting: bool,
+    },
+    Sneak {
+        id: i32,
+        sneaking: bool,
     },
     Respawn {
         id: i32,
@@ -164,11 +172,15 @@ struct Player {
     food_timer: u32,
     fall_distance: f64,
     sprinting: bool,
+    sneaking: bool,
     alive: bool,
     /// Hand and start tick of the food being eaten.
     eating: Option<(i32, u64)>,
     /// Health, food or saturation changed and the client has not been told.
     health_dirty: bool,
+    /// A container window open besides the inventory.
+    open: Option<Open>,
+    next_window: i32,
     /// Set when the player's outgoing queue overflowed or closed.
     kicked: bool,
 }
@@ -196,9 +208,12 @@ impl Player {
             food_timer: 0,
             fall_distance: 0.0,
             sprinting: false,
+            sneaking: false,
             alive: true,
             eating: None,
             health_dirty: false,
+            open: None,
+            next_window: 0,
             kicked: false,
         }
     }
@@ -227,10 +242,12 @@ struct World {
     chunks: HashMap<(i32, i32), Chunk>,
     players: HashMap<i32, Player>,
     items: HashMap<i32, ItemEntity>,
+    block_entities: HashMap<BlockPos, BlockEntity>,
     generator: FlatGenerator,
     /// Light data shared by every chunk packet: full sky light, no block light.
     light: Vec<u8>,
     loot: LootTables,
+    recipes: Recipes,
     rng: Rng,
     tick: u64,
 }
@@ -245,9 +262,11 @@ impl World {
             chunks: HashMap::new(),
             players: HashMap::new(),
             items: HashMap::new(),
+            block_entities: HashMap::new(),
             generator: FlatGenerator::new(),
             light: full_sky_light(),
             loot: LootTables::load(),
+            recipes: Recipes::load(),
             rng: Rng::from_time(),
             tick: 0,
         }
@@ -304,10 +323,11 @@ impl World {
             Event::ContainerClick {
                 id,
                 window,
+                slot,
                 changed,
                 carried,
-            } => self.container_click(id, window, changed, carried),
-            Event::ContainerClose { id, window } => self.container_close(id, window),
+            } => self.container_click(id, window, slot, changed, carried),
+            Event::ContainerClose { id, window } => self.container_closed(id, window),
             Event::HeldSlot { id, slot } => {
                 if let (Some(p), Ok(slot)) = (self.players.get_mut(&id), usize::try_from(slot)) {
                     if slot < 9 {
@@ -326,6 +346,11 @@ impl World {
             Event::Sprint { id, sprinting } => {
                 if let Some(p) = self.players.get_mut(&id) {
                     p.sprinting = sprinting;
+                }
+            }
+            Event::Sneak { id, sneaking } => {
+                if let Some(p) = self.players.get_mut(&id) {
+                    p.sneaking = sneaking;
                 }
             }
             Event::Respawn { id } => self.respawn(id),
@@ -390,6 +415,7 @@ impl World {
     }
 
     fn leave(&mut self, id: i32) {
+        self.close_container(id);
         let Some(player) = self.players.remove(&id) else {
             return;
         };
@@ -526,6 +552,7 @@ impl World {
 
     fn break_block(&mut self, id: i32, pos: BlockPos, state: u16) {
         self.set_block(pos, block::AIR);
+        self.remove_block_entity(pos);
         let effect = Writer::packet(clientbound::LEVEL_EVENT)
             .i32(LEVEL_EVENT_BLOCK_BREAK)
             .position(pos)
@@ -560,6 +587,12 @@ impl World {
         let stack = p.inventory.slots[slot];
         let (alive, survival) = (p.alive, p.survival());
         let state = ItemInfo::get(stack.item).map_or(block::AIR, |i| i.block);
+        // Using a container opens it, unless sneaking with something in hand.
+        let sneak_place = p.sneaking && !stack.is_empty();
+        let clicked = self.block(pos);
+        if alive && hand == 0 && !sneak_place && self.open_container(id, pos, clicked) {
+            return self.ack(id, sequence);
+        }
         if alive && !stack.is_empty() && state != block::AIR {
             // Placing on grass or similar replaces it; otherwise place against the face.
             let target = if block_has_tag(self.block(pos), "minecraft:replaceable") {
@@ -571,6 +604,9 @@ impl World {
             let in_world = (MIN_Y..=MAX_Y).contains(&target.y);
             if in_world && block_has_tag(current, "minecraft:replaceable") {
                 self.set_block(target, state);
+                if let Some(entity) = BlockEntity::for_block(state) {
+                    self.block_entities.insert(target, entity);
+                }
                 if survival {
                     let p = self.players.get_mut(&id).expect("player exists");
                     p.inventory.take(slot, 1);
@@ -598,67 +634,6 @@ impl World {
             }
         } else if let Some(s) = usize::try_from(slot).ok().filter(|&s| s < SLOTS) {
             p.inventory.slots[s] = stack;
-        }
-    }
-
-    fn container_click(
-        &mut self,
-        id: i32,
-        window: i32,
-        changed: Vec<(i16, Stack)>,
-        carried: Stack,
-    ) {
-        let Some(p) = self.players.get_mut(&id) else {
-            return;
-        };
-        if window != 0 {
-            return; // other containers are not implemented yet
-        }
-        let before = p.inventory.totals();
-        for (slot, stack) in changed {
-            if let Some(s) = usize::try_from(slot).ok().filter(|&s| s < SLOTS) {
-                p.inventory.slots[s] = stack;
-            }
-        }
-        p.inventory.carried = carried;
-        // Whatever left the inventory was thrown out (Q, or a click outside the window).
-        let after = p.inventory.totals();
-        let thrown: Vec<Stack> = before
-            .into_iter()
-            .filter_map(|(item, count)| {
-                let lost = count - after.get(&item).copied().unwrap_or(0);
-                (lost > 0).then(|| Stack::new(item, lost))
-            })
-            .collect();
-        for stack in thrown {
-            self.throw_from_player(id, stack);
-        }
-    }
-
-    /// Closing the inventory returns the crafting grid and cursor items to the inventory,
-    /// dropping what does not fit, as vanilla does.
-    fn container_close(&mut self, id: i32, window: i32) {
-        let Some(p) = self.players.get_mut(&id) else {
-            return;
-        };
-        if window != 0 {
-            return;
-        }
-        let mut returned: Vec<Stack> = CRAFTING_GRID
-            .map(|s| std::mem::take(&mut p.inventory.slots[s]))
-            .collect();
-        returned.push(std::mem::take(&mut p.inventory.carried));
-        let mut overflow = Vec::new();
-        for stack in returned.into_iter().filter(|s| !s.is_empty()) {
-            let (_, left) = p.inventory.add(stack.item, stack.count);
-            if left > 0 {
-                overflow.push(Stack::new(stack.item, left));
-            }
-        }
-        let content = p.inventory.content_packet();
-        self.send(id, content);
-        for stack in overflow {
-            self.throw_from_player(id, stack);
         }
     }
 
@@ -706,6 +681,7 @@ impl World {
         }
         self.tick_survival();
         self.tick_items();
+        self.tick_furnaces();
     }
 
     /// Recenters a player's chunk view, unloading chunks that left the view distance and
@@ -766,7 +742,14 @@ impl World {
         let mut body = Vec::new();
         varint::write(&mut body, 0); // heightmaps: none, the client computes them
         self.chunk(x, z).encode_sections(&mut body);
-        varint::write(&mut body, 0); // block entities
+        let entities = self.block_entities_in(x, z);
+        varint::write(&mut body, entities.len() as i32);
+        for (pos, kind) in entities {
+            body.push(((pos.x & 15) << 4 | (pos.z & 15)) as u8);
+            body.extend_from_slice(&(pos.y as i16).to_be_bytes());
+            varint::write(&mut body, kind);
+            body.extend_from_slice(&[0x0A, 0x00]); // empty NBT compound: no extra data
+        }
         body.extend_from_slice(&self.light);
         frame(
             Writer::packet(clientbound::LEVEL_CHUNK_WITH_LIGHT)
