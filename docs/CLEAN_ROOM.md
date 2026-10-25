@@ -11,6 +11,9 @@ Levitas is GPL-3.0 open source. To keep it legally distributable, every contribu
 - Observing a running vanilla/Leaf server: packet captures, in-game behaviour, timings.
 - The Minecraft Wiki's descriptions of game mechanics.
 - Open-source code under GPL-3.0-compatible licenses, with attribution.
+- Block hardness and collision shapes from [PrismarineJS minecraft-data](https://github.com/PrismarineJS/minecraft-data)
+  (MIT), downloaded by `tools/datagen.py` at a pinned commit. The official data generator
+  does not output these.
 
 ## Not allowed
 

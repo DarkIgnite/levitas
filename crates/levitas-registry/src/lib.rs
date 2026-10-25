@@ -40,6 +40,34 @@ impl TagRegistry {
     }
 }
 
+/// Face numbering used by the protocol and by [`SHAPE_STURDY`]: down, up, north, south,
+/// west, east.
+pub const FACE_DOWN: usize = 0;
+pub const FACE_UP: usize = 1;
+
+/// Collision boxes of a block state, as `[min_x, min_y, min_z, max_x, max_y, max_z]` in
+/// block units.
+pub fn collision_boxes(state: u16) -> &'static [[f32; 6]] {
+    SHAPES[usize::from(STATE_SHAPE[usize::from(state)])]
+}
+
+/// Whether a block state's face (protocol numbering) is fully solid, so blocks such as
+/// torches, ladders and buttons can be attached to it.
+pub fn face_sturdy(state: u16, face: usize) -> bool {
+    SHAPE_STURDY[usize::from(STATE_SHAPE[usize::from(state)])] & (1 << face) != 0
+}
+
+/// Whether a block state is a full, solid cube.
+pub fn is_full_cube(state: u16) -> bool {
+    SHAPE_STURDY[usize::from(STATE_SHAPE[usize::from(state)])] == 0b11_1111
+}
+
+/// The ID of a sound event such as `minecraft:block.wooden_door.open`.
+pub fn sound_id(name: &str) -> Option<i32> {
+    let i = SOUND_EVENTS.binary_search_by_key(&name, |(n, _)| n).ok()?;
+    Some(SOUND_EVENTS[i].1)
+}
+
 /// Whether the block of `state` is in the block tag `tag`.
 pub fn block_has_tag(state: u16, tag: &str) -> bool {
     let Some(&block) = STATE_BLOCK.get(usize::from(state)) else {
@@ -55,6 +83,14 @@ pub struct BlockInfo {
     pub default_state: u16,
     /// Property names with their possible values, in state ID order.
     pub properties: &'static [(&'static str, &'static [&'static str])],
+    /// Mining hardness; -1 for unbreakable blocks such as bedrock.
+    pub hardness: f32,
+    /// Explosion resistance.
+    pub resistance: f32,
+    /// Light level the block gives off (0-15).
+    pub light_emission: u8,
+    /// How much light the block absorbs (0-15).
+    pub light_filter: u8,
 }
 
 impl BlockInfo {
@@ -204,6 +240,26 @@ mod tests {
         assert_eq!(stairs.properties_of(east).len(), stairs.properties.len());
         assert!(BlockInfo::by_name("minecraft:not_a_block").is_none());
         assert_eq!(DATA_VERSION, 4440);
+
+        assert_eq!(BlockInfo::of(block::STONE).hardness, 1.5);
+        assert_eq!(BlockInfo::of(block::BEDROCK).hardness, -1.0);
+        assert_eq!(BlockInfo::of(block::GLOWSTONE).light_emission, 15);
+        assert!(is_full_cube(block::STONE));
+        assert!(collision_boxes(block::AIR).is_empty());
+        // A bottom slab is solid underneath only; stairs facing north have a solid back.
+        let slab = block::OAK_SLAB;
+        assert!(face_sturdy(slab, FACE_DOWN) && !face_sturdy(slab, FACE_UP));
+        let stairs = BlockInfo::by_name("minecraft:oak_stairs").unwrap();
+        let north = stairs.state_with([
+            ("facing", "north"),
+            ("half", "bottom"),
+            ("shape", "straight"),
+        ]);
+        assert!(
+            face_sturdy(north, 2) && !face_sturdy(north, 3),
+            "north face solid, south not"
+        );
+        assert!(sound_id("minecraft:block.wooden_door.open").is_some());
         assert_ne!(menu::GENERIC_9X3, menu::CRAFTING);
     }
 

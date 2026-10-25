@@ -137,6 +137,18 @@ fn blocks(data: &Path, out: &mut String) -> HashMap<String, u64> {
     let mut state_count = 0;
     let mut state_block = Vec::new();
     let mut rows = vec![String::new(); block_ids.as_object().unwrap().len()];
+    // Hardness, resistance and light come from minecraft-data (see tools/datagen.py).
+    let extra: HashMap<String, Value> = read_json(&data.join("minecraft-data/blocks.json"))
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|b| {
+            (
+                format!("minecraft:{}", b["name"].as_str().unwrap()),
+                b.clone(),
+            )
+        })
+        .collect();
     out.push_str("/// Default block state ID of every block.\npub mod block {\n");
     for (name, block) in blocks.as_object().unwrap() {
         let states = block["states"].as_array().unwrap();
@@ -189,10 +201,16 @@ fn blocks(data: &Path, out: &mut String) -> HashMap<String, u64> {
             .iter()
             .map(|(k, values)| format!("({k:?}, &{values:?})"))
             .collect();
+        let e = &extra[name];
         rows[block_id as usize] = format!(
             "BlockInfo {{ name: {name:?}, first_state: {first}, default_state: {default}, \
-             properties: &[{}] }},",
-            props.join(", ")
+             properties: &[{}], hardness: {:?}, resistance: {:?}, light_emission: {}, \
+             light_filter: {} }},",
+            props.join(", "),
+            e["hardness"].as_f64().unwrap_or(-1.0) as f32,
+            e["resistance"].as_f64().unwrap_or(0.0) as f32,
+            e["emitLight"].as_u64().unwrap_or(0),
+            e["filterLight"].as_u64().unwrap_or(0),
         );
     }
     out.push_str("}\n\n");
@@ -214,7 +232,96 @@ fn blocks(data: &Path, out: &mut String) -> HashMap<String, u64> {
         rows.join("\n")
     )
     .unwrap();
+    shapes(data, &blocks, state_count, out);
     defaults
+}
+
+/// Collision boxes of every block state, and which faces of each shape are fully covered.
+fn shapes(data: &Path, blocks: &Value, state_count: usize, out: &mut String) {
+    let collision = read_json(&data.join("minecraft-data/blockCollisionShapes.json"));
+    let mut state_shape = vec![0u64; state_count];
+    for (name, block) in blocks.as_object().unwrap() {
+        let short = name.strip_prefix("minecraft:").unwrap();
+        let states = block["states"].as_array().unwrap();
+        let first = states
+            .iter()
+            .map(|s| s["id"].as_u64().unwrap())
+            .min()
+            .unwrap();
+        for state in states {
+            let id = state["id"].as_u64().unwrap();
+            state_shape[id as usize] = match &collision["blocks"][short] {
+                Value::Array(per_state) => per_state[(id - first) as usize].as_u64().unwrap(),
+                one => one.as_u64().unwrap(),
+            };
+        }
+    }
+    let count = collision["shapes"].as_object().unwrap().len();
+    let mut shapes = Vec::with_capacity(count);
+    let mut sturdy = Vec::with_capacity(count);
+    for i in 0..count {
+        let boxes: Vec<[f32; 6]> = collision["shapes"][i.to_string()]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|b| {
+                let v: Vec<f32> = b
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|x| x.as_f64().unwrap() as f32)
+                    .collect();
+                [v[0], v[1], v[2], v[3], v[4], v[5]]
+            })
+            .collect();
+        sturdy.push(sturdy_faces(&boxes));
+        shapes.push(format!("&{boxes:?}"));
+    }
+    writeln!(
+        out,
+        "/// Collision shapes: lists of boxes `[min_x, min_y, min_z, max_x, max_y, max_z]`.\n\
+         pub static SHAPES: &[&[[f32; 6]]] = &[{}];\n\
+         /// Shape index of every block state.\npub static STATE_SHAPE: &[u16] = &{state_shape:?};\n\
+         /// Per shape, one bit per face (down, up, north, south, west, east) that the shape\n\
+         /// covers completely, so things can be attached to it.\n\
+         pub static SHAPE_STURDY: &[u8] = &{sturdy:?};\n",
+        shapes.join(", ")
+    )
+    .unwrap();
+}
+
+/// Which faces of the unit cube a set of boxes covers completely, sampled on the 1/16 grid.
+fn sturdy_faces(boxes: &[[f32; 6]]) -> u8 {
+    // Per face (in protocol order): the axis it is perpendicular to, whether it is the
+    // maximum side, and the two axes spanning it.
+    const FACES: [(usize, bool, usize, usize); 6] = [
+        (1, false, 0, 2),
+        (1, true, 0, 2),
+        (2, false, 0, 1),
+        (2, true, 0, 1),
+        (0, false, 2, 1),
+        (0, true, 2, 1),
+    ];
+    let mut mask = 0;
+    for (bit, &(axis, max_side, u, v)) in FACES.iter().enumerate() {
+        let covered = (0..16).all(|i| {
+            (0..16).all(|j| {
+                let (pu, pv) = ((i as f32 + 0.5) / 16.0, (j as f32 + 0.5) / 16.0);
+                boxes.iter().any(|b| {
+                    let on_face = if max_side {
+                        b[axis + 3] >= 1.0
+                    } else {
+                        b[axis] <= 0.0
+                    };
+                    on_face && b[u] <= pu && pu <= b[u + 3] && b[v] <= pv && pv <= b[v + 3]
+                })
+            })
+        });
+        if covered {
+            mask |= 1 << bit;
+        }
+    }
+    mask
 }
 
 /// Entity type IDs and the item table.
@@ -230,6 +337,19 @@ fn items_and_entities(data: &Path, block_defaults: &HashMap<String, u64>, out: &
         list.sort_by_key(|(_, id)| *id);
         list
     };
+
+    let mut sounds: Vec<(String, u64)> = entries("minecraft:sound_event");
+    sounds.sort();
+    let sounds: Vec<String> = sounds
+        .iter()
+        .map(|(n, id)| format!("({n:?}, {id})"))
+        .collect();
+    writeln!(
+        out,
+        "/// Sound event names with their IDs, sorted by name.\npub static SOUND_EVENTS: &[(&str, i32)] = &[{}];\n",
+        sounds.join(", ")
+    )
+    .unwrap();
 
     for (module, registry, doc) in [
         ("entity_type", "minecraft:entity_type", "Entity type IDs."),
