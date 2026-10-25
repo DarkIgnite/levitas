@@ -5,6 +5,7 @@ use levitas_nbt::{Compound, Tag};
 use levitas_registry::{block, BlockInfo, SyncedRegistry, DATA_VERSION};
 
 use crate::chunk::{Chunk, Section, MIN_Y, SECTIONS};
+use crate::light::{ChunkLight, LightLayer, LIGHT_SECTIONS};
 use crate::paletted::{bits_for, Kind, PalettedContainer};
 
 /// A chunk read from disk.
@@ -34,30 +35,21 @@ pub fn to_nbt(
     game_time: i64,
 ) -> Compound {
     let mut sections = Vec::new();
-    for (i, section) in chunk.sections().iter().enumerate() {
-        let y = (MIN_Y >> 4) + i as i32;
-        let states = palette_and_data(&section.blocks().values(), 4, |state| {
-            let info = BlockInfo::of(state);
-            let mut entry = Compound::new().with("Name", info.name);
-            if !info.properties.is_empty() {
-                let mut props = Compound::new();
-                for (name, value) in info.properties_of(state) {
-                    props.insert(name, value);
-                }
-                entry.insert("Properties", props);
-            }
-            Tag::Compound(entry)
-        });
-        let biome_names = biomes().entries;
-        let biomes = palette_and_data(&section.biomes().values(), 1, |biome| {
-            Tag::String(biome_names[usize::from(biome)].to_owned())
-        });
-        sections.push(Tag::Compound(
-            Compound::new()
-                .with("Y", y as i8)
-                .with("block_states", states)
-                .with("biomes", biomes),
-        ));
+    let nibbles = |layer: &LightLayer| -> Vec<i8> {
+        layer.to_nibbles().into_iter().map(|b| b as i8).collect()
+    };
+    // Light covers a section below and above the world, which hold nothing else.
+    for i in 0..LIGHT_SECTIONS {
+        let mut entry = Compound::new()
+            .with("Y", (FIRST_LIGHT_Y + i as i32) as i8)
+            .with("SkyLight", nibbles(&chunk.light.sky[i]));
+        if chunk.light.block[i] != LightLayer::Uniform(0) {
+            entry.insert("BlockLight", nibbles(&chunk.light.block[i]));
+        }
+        if let Some(section) = i.checked_sub(1).and_then(|s| chunk.sections().get(s)) {
+            add_blocks(&mut entry, section);
+        }
+        sections.push(Tag::Compound(entry));
     }
     Compound::new()
         .with("DataVersion", DATA_VERSION)
@@ -67,8 +59,7 @@ pub fn to_nbt(
         .with("Status", "minecraft:full")
         .with("LastUpdate", game_time)
         .with("InhabitedTime", 0i64)
-        // No light is stored: readers relight the chunk.
-        .with("isLightOn", false)
+        .with("isLightOn", true)
         .with("sections", sections)
         .with(
             "block_entities",
@@ -91,6 +82,31 @@ pub fn to_nbt(
                 .with("starts", Compound::new())
                 .with("References", Compound::new()),
         )
+}
+
+/// Section Y of the light-only section below the world.
+const FIRST_LIGHT_Y: i32 = (MIN_Y >> 4) - 1;
+
+/// Adds a section's block states and biomes to its saved compound.
+fn add_blocks(saved: &mut Compound, section: &Section) {
+    let states = palette_and_data(&section.blocks().values(), 4, |state| {
+        let info = BlockInfo::of(state);
+        let mut entry = Compound::new().with("Name", info.name);
+        if !info.properties.is_empty() {
+            let mut props = Compound::new();
+            for (name, value) in info.properties_of(state) {
+                props.insert(name, value);
+            }
+            entry.insert("Properties", props);
+        }
+        Tag::Compound(entry)
+    });
+    let biome_names = biomes().entries;
+    let biomes = palette_and_data(&section.biomes().values(), 1, |biome| {
+        Tag::String(biome_names[usize::from(biome)].to_owned())
+    });
+    saved.insert("block_states", states);
+    saved.insert("biomes", biomes);
 }
 
 /// A palette (first-seen order) and the packed indices; `data` is left out when the
@@ -170,12 +186,26 @@ pub fn from_nbt(nbt: &Compound) -> Result<Option<LoadedChunk>, ChunkError> {
     let mut sections: Vec<Section> = (0..SECTIONS)
         .map(|_| Section::empty(plains, biome_kind()))
         .collect();
+    // Chunks saved without light get full daylight until a light engine relights them.
+    let lit = nbt.int("isLightOn") == Some(1);
+    let mut light = ChunkLight::full_sky();
 
     for tag in nbt.list("sections").unwrap_or_default() {
         let Some(section) = tag.as_compound() else {
             return Err(ChunkError::Corrupt("section is not a compound"));
         };
         let y = section.int("Y").unwrap_or(i64::MIN);
+        if let Some(i) = usize::try_from(y - i64::from(FIRST_LIGHT_Y))
+            .ok()
+            .filter(|&i| lit && i < LIGHT_SECTIONS)
+        {
+            if let Some(sky) = section.byte_array("SkyLight") {
+                light.sky[i] = LightLayer::from_nibbles(&to_bytes(sky));
+            }
+            if let Some(block) = section.byte_array("BlockLight") {
+                light.block[i] = LightLayer::from_nibbles(&to_bytes(block));
+            }
+        }
         let Some(index) = usize::try_from(y - i64::from(MIN_Y >> 4))
             .ok()
             .filter(|&i| i < SECTIONS)
@@ -219,11 +249,17 @@ pub fn from_nbt(nbt: &Compound) -> Result<Option<LoadedChunk>, ChunkError> {
         .iter()
         .filter_map(|t| t.as_compound().cloned())
         .collect();
+    let mut chunk = Chunk::from_sections(sections);
+    chunk.light = light;
     Ok(Some(LoadedChunk {
-        chunk: Chunk::from_sections(sections),
+        chunk,
         block_entities,
         block_ticks: nbt.list("block_ticks").unwrap_or_default().to_vec(),
     }))
+}
+
+fn to_bytes(array: &[i8]) -> Vec<u8> {
+    array.iter().map(|&b| b as u8).collect()
 }
 
 /// A palette entry `{Name, Properties}` as a block state ID; unknown blocks are air.
@@ -249,6 +285,9 @@ mod tests {
 
     fn sample_chunk() -> Chunk {
         let mut chunk = Chunk::empty(0, biome_kind());
+        chunk.light.sky[1] = LightLayer::Uniform(0);
+        chunk.light.sky[6].set(1, 2, 3, 7);
+        chunk.light.block[6].set(4, 5, 6, 14);
         let stairs = BlockInfo::by_name("minecraft:oak_stairs").unwrap();
         let east = stairs.state_with([("facing", "east"), ("waterlogged", "true")]);
         chunk.set(0, MIN_Y, 0, block::BEDROCK);
@@ -285,14 +324,15 @@ mod tests {
             assert_eq!(a.biomes().values(), b.biomes().values());
         }
         assert_eq!(loaded.block_entities, vec![entity]);
+        assert_eq!(loaded.chunk.light, chunk.light);
     }
 
     #[test]
     fn vanilla_style_palette_entries() {
         let nbt = to_nbt(&sample_chunk(), 0, 0, Vec::new(), Vec::new(), 0);
         let sections = nbt.list("sections").unwrap();
-        // y = 70 is section 4 (y 64..80) counting from section -4.
-        let section = sections[8].as_compound().unwrap();
+        // y = 70 is section 4 (y 64..80); the list starts with the light-only section -5.
+        let section = sections[9].as_compound().unwrap();
         assert_eq!(section.int("Y"), Some(4));
         let palette = section
             .compound("block_states")
@@ -305,7 +345,7 @@ mod tests {
         assert_eq!(props.str("facing"), Some("east"));
         assert_eq!(props.str("waterlogged"), Some("true"));
         // A single-entry palette has no data.
-        let top = sections[23]
+        let top = sections[24]
             .as_compound()
             .unwrap()
             .compound("block_states")

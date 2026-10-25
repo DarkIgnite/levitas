@@ -7,6 +7,7 @@
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 
+use levitas_pumpkin::PumpkinTerrain;
 use levitas_world::Chunk;
 use tokio::sync::mpsc as tokio_mpsc;
 
@@ -21,6 +22,16 @@ pub trait Terrain: Send + Sync {
     /// saving until something changes in them.
     fn is_cheap(&self) -> bool {
         false
+    }
+}
+
+impl Terrain for PumpkinTerrain {
+    fn generate(&self, x: i32, z: i32) -> Chunk {
+        PumpkinTerrain::generate(self, x, z)
+    }
+
+    fn spawn_point(&self) -> [i32; 3] {
+        PumpkinTerrain::spawn_point(self)
     }
 }
 

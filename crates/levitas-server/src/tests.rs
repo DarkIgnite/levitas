@@ -23,15 +23,20 @@ fn temp_world() -> PathBuf {
     dir
 }
 
-/// Starts a server on the world in `dir`; returns its address and its world channel.
+/// Starts a server on the flat world in `dir`; returns its address and its world
+/// channel.
 async fn server_in(dir: PathBuf) -> (SocketAddr, mpsc::Sender<Event>) {
+    server_with(dir, world::WorldKind::Flat).await
+}
+
+async fn server_with(dir: PathBuf, kind: world::WorldKind) -> (SocketAddr, mpsc::Sender<Event>) {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     let world = world::spawn(
         dir,
         world::NewWorld {
-            kind: world::WorldKind::Flat,
-            seed: Some(0),
+            kind,
+            seed: Some(12345),
         },
     );
     let events = world.clone();
@@ -159,6 +164,37 @@ async fn joins_and_streams_chunks() {
     .await;
     let body = read_until(&mut client, play::clientbound::CHUNK_BATCH_FINISHED).await;
     assert_eq!(Reader::new(&body).varint().unwrap(), side);
+}
+
+#[tokio::test]
+async fn generated_world_streams_real_terrain() {
+    let dir = temp_world();
+    let (addr, world) = server_with(dir.clone(), world::WorldKind::Noise).await;
+    let mut client = join(addr, "DarkIgnite", 7).await;
+    let side = 2 * VIEW_DISTANCE + 1;
+    let (mut chunks, mut spawn_y) = (0, None);
+    while chunks < side * side || spawn_y.is_none() {
+        let packet = read_frame(&mut client).await.unwrap();
+        let mut r = Reader::new(&packet);
+        match r.varint().unwrap() {
+            play::clientbound::LEVEL_CHUNK_WITH_LIGHT => chunks += 1,
+            play::clientbound::PLAYER_POSITION => {
+                r.varint().unwrap();
+                r.f64().unwrap();
+                spawn_y = Some(r.f64().unwrap());
+            }
+            _ => {}
+        }
+    }
+    // Players spawn on the surface of real terrain, well above the bedrock.
+    let spawn_y = spawn_y.unwrap();
+    assert!(spawn_y > 0.0, "spawned at y {spawn_y}");
+
+    // Generated chunks are saved, so the same terrain comes back after a restart.
+    shutdown(&world).await;
+    let regions = std::fs::read_dir(dir.join("region")).unwrap().count();
+    assert!(regions > 0, "no region files saved");
+    let _ = std::fs::remove_dir_all(dir);
 }
 
 #[tokio::test]

@@ -32,6 +32,7 @@ use crate::terrain::{default_workers, Generated, GenerationPool, Terrain};
 use building::ScheduledTick;
 use containers::{BlockEntity, Open};
 use items::ItemEntity;
+use levitas_pumpkin::PumpkinTerrain;
 #[cfg(test)]
 pub use storage::uuid_string;
 pub use storage::WorldKind;
@@ -181,9 +182,10 @@ pub fn spawn(dir: impl Into<PathBuf>, new: NewWorld) -> mpsc::Sender<Event> {
 }
 
 /// The terrain generator for a world of this kind.
-fn terrain_for(kind: WorldKind, _seed: i64) -> Arc<dyn Terrain> {
+fn terrain_for(kind: WorldKind, seed: i64) -> Arc<dyn Terrain> {
     match kind {
-        WorldKind::Flat | WorldKind::Noise => Arc::new(FlatGenerator::new()),
+        WorldKind::Flat => Arc::new(FlatGenerator::new()),
+        WorldKind::Noise => Arc::new(PumpkinTerrain::new(seed)),
     }
 }
 
@@ -819,10 +821,10 @@ impl World {
         self.tick_survival();
         self.tick_items();
         self.tick_furnaces();
-        if self.tick % AUTOSAVE_TICKS == 0 {
+        if self.tick.is_multiple_of(AUTOSAVE_TICKS) {
             self.save_all();
         }
-        if self.tick % UNLOAD_TICKS == 0 {
+        if self.tick.is_multiple_of(UNLOAD_TICKS) {
             self.unload_unseen_chunks();
         }
     }

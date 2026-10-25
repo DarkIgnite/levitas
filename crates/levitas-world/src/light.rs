@@ -62,6 +62,13 @@ impl LightLayer {
         }
     }
 
+    /// The layer as the protocol's and Anvil's 2048-byte nibble array.
+    pub fn to_nibbles(&self) -> Vec<u8> {
+        let mut out = Vec::with_capacity(NIBBLE_BYTES);
+        self.write_nibbles(&mut out);
+        out
+    }
+
     fn write_nibbles(&self, out: &mut Vec<u8>) {
         match self {
             LightLayer::Uniform(level) => out.resize(out.len() + NIBBLE_BYTES, level * 0x11),

@@ -233,7 +233,7 @@ impl World {
         let mut damage = Vec::new();
         let mut eaten = Vec::new();
         for (&id, p) in self.players.iter_mut().filter(|(_, p)| p.alive) {
-            if p.pos[1] < VOID_Y && tick % 10 == 0 {
+            if p.pos[1] < VOID_Y && tick.is_multiple_of(10) {
                 damage.push((id, 4.0, Damage::Void));
             }
             if let Some((hand, start)) = p.eating {

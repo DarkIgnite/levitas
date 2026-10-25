@@ -1,7 +1,8 @@
 # Roadmap
 
-The plan: make every vanilla survival feature work on the flat test world first, then
-world generation, then the plugin API for survival-economy servers. Each phase ends with
+The plan: make every vanilla survival feature work, then the plugin API for
+survival-economy servers. Real terrain came early (Phase 12, through Pumpkin's generator)
+so the owner can play a normal world while the remaining phases land. Each phase ends with
 something that can be tested in a real 1.21.8 client.
 
 ## Definition of done
@@ -81,7 +82,9 @@ Known gaps are listed under each phase instead of being hidden.
 - [ ] Lava and water interaction (cobblestone, stone, obsidian, basalt)
 - [ ] Swimming, drowning, fire and lava damage, burning, fire spread
 - [ ] Falling blocks: sand, gravel, concrete powder, anvils, pointed dripstone
-- [ ] Real lighting: sky light and block light, propagated and updated on change
+- [ ] Real lighting: sky light and block light, propagated and updated on change.
+      Generated chunks get correct light from the generator and keep it on disk, but
+      placing or breaking blocks does not update light yet.
 - [ ] Ice melting, snow layers, frosted ice
 
 ## Phase 4: Combat and basic entities
@@ -161,9 +164,16 @@ Known gaps are listed under each phase instead of being hidden.
 
 ## Phase 12: World generation
 
-- [ ] Noise terrain, biomes and climate, carvers (caves, ravines), aquifers
-- [ ] Features: trees, ores, flowers, lakes, ...
+- [x] Noise terrain, biomes and climate, carvers (caves, ravines), aquifers: generated
+      by [Pumpkin](https://github.com/Pumpkin-MC/Pumpkin)'s `pumpkin-world` (GPL-3.0)
+      through `levitas-pumpkin`, on worker threads. New worlds use it by default;
+      `LEVITAS_WORLD_TYPE=flat` makes the flat test world, `LEVITAS_SEED` picks the seed.
+      Pumpkin targets a newer Minecraft version, so its newer blocks and biomes become
+      their closest 1.21.8 relatives (poplar wood as birch, sulfur as sandstone, ...).
+- [x] Features: trees, ores, flowers, lakes, ...
 - [ ] Structures: villages, strongholds, mineshafts, temples, monuments, ...
+      Pumpkin places them, but their chests, spawners and other block entities are not
+      created yet, so structure chests are empty.
 - [ ] Nether and End generation
 - [ ] Loading existing Leaf/vanilla worlds (pre-generated terrain)
 

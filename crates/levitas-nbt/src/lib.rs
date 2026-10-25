@@ -392,8 +392,10 @@ impl<'a> Reader<'a> {
                 let bytes = self.take(len * 4)?;
                 Tag::IntArray(
                     bytes
-                        .chunks_exact(4)
-                        .map(|c| i32::from_be_bytes(c.try_into().unwrap()))
+                        .as_chunks::<4>()
+                        .0
+                        .iter()
+                        .map(|&c| i32::from_be_bytes(c))
                         .collect(),
                 )
             }
@@ -402,8 +404,10 @@ impl<'a> Reader<'a> {
                 let bytes = self.take(len * 8)?;
                 Tag::LongArray(
                     bytes
-                        .chunks_exact(8)
-                        .map(|c| i64::from_be_bytes(c.try_into().unwrap()))
+                        .as_chunks::<8>()
+                        .0
+                        .iter()
+                        .map(|&c| i64::from_be_bytes(c))
                         .collect(),
                 )
             }

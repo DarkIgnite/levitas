@@ -306,7 +306,7 @@ impl Player {
         self.food_timer = nbt.int("foodTickTimer").unwrap_or(0).max(0) as u32;
         let overworld = nbt
             .str("Dimension")
-            .map_or(true, |d| d == "minecraft:overworld");
+            .is_none_or(|d| d == "minecraft:overworld");
         let pos: Vec<f64> = nbt
             .list("Pos")
             .unwrap_or_default()

@@ -7,13 +7,24 @@ version = "0.1.0"
 edition = "2021"
 license = "GPL-3.0-only"
 repository = "https://github.com/DarkIgnite/levitas"
-rust-version = "1.80"
+rust-version = "1.96"
 
 [workspace.dependencies]
 levitas-protocol = { path = "crates/levitas-protocol" }
 levitas-nbt = { path = "crates/levitas-nbt" }
 levitas-registry = { path = "crates/levitas-registry" }
 levitas-world = { path = "crates/levitas-world" }
+levitas-pumpkin = { path = "crates/levitas-pumpkin" }
+
+# World generation is far too slow unoptimized, even in tests.
+[profile.dev.package.pumpkin-world]
+opt-level = 3
+
+[profile.dev.package.pumpkin-data]
+opt-level = 3
+
+[profile.dev.package.pumpkin-util]
+opt-level = 3
 
 [profile.release]
 lto = "thin"
