@@ -280,8 +280,6 @@ struct World {
     block_entities: HashMap<BlockPos, BlockEntity>,
     scheduled: Vec<ScheduledTick>,
     generator: FlatGenerator,
-    /// Light data shared by every chunk packet: full sky light, no block light.
-    light: Vec<u8>,
     loot: LootTables,
     recipes: Recipes,
     rng: Rng,
@@ -311,7 +309,6 @@ impl World {
             block_entities: HashMap::new(),
             scheduled: Vec::new(),
             generator: FlatGenerator::new(),
-            light: full_sky_light(),
             loot: LootTables::load(),
             recipes: Recipes::load(),
             rng: Rng::from_time(),
@@ -846,7 +843,7 @@ impl World {
             varint::write(&mut body, kind);
             body.extend_from_slice(&[0x0A, 0x00]); // empty NBT compound: no extra data
         }
-        body.extend_from_slice(&self.light);
+        self.chunk(x, z).light.encode(&mut body);
         frame(
             Writer::packet(clientbound::LEVEL_CHUNK_WITH_LIGHT)
                 .i32(x)
@@ -984,31 +981,4 @@ fn spawn_player(id: i32, p: &Player) -> [Writer; 2] {
             .varint(id)
             .u8(angle(p.yaw)),
     ]
-}
-
-/// Light data for a chunk packet: full sky light in every section, no block light.
-fn full_sky_light() -> Vec<u8> {
-    // Light covers one extra section below and above the world.
-    const LIGHT_SECTIONS: usize = levitas_world::chunk::SECTIONS + 2;
-    let all = (1u64 << LIGHT_SECTIONS) - 1;
-    let mut out = Vec::new();
-    let bitset = |out: &mut Vec<u8>, bits: u64| {
-        if bits == 0 {
-            varint::write(out, 0);
-        } else {
-            varint::write(out, 1);
-            out.extend_from_slice(&bits.to_be_bytes());
-        }
-    };
-    bitset(&mut out, all); // sky light mask
-    bitset(&mut out, 0); // block light mask
-    bitset(&mut out, 0); // empty sky light mask
-    bitset(&mut out, all); // empty block light mask
-    varint::write(&mut out, LIGHT_SECTIONS as i32);
-    for _ in 0..LIGHT_SECTIONS {
-        varint::write(&mut out, 2048);
-        out.resize(out.len() + 2048, 0xFF);
-    }
-    varint::write(&mut out, 0); // block light arrays
-    out
 }

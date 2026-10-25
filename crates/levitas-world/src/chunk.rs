@@ -3,6 +3,7 @@
 use levitas_protocol::varint;
 use levitas_registry::block;
 
+use crate::light::ChunkLight;
 use crate::paletted::{Kind, PalettedContainer};
 
 pub const MIN_Y: i32 = -64;
@@ -72,19 +73,25 @@ impl Section {
 #[derive(Debug, Clone)]
 pub struct Chunk {
     sections: Vec<Section>,
+    pub light: ChunkLight,
 }
 
 impl Chunk {
     pub fn empty(biome: u16, biome_kind: Kind) -> Self {
         Self {
             sections: vec![Section::empty(biome, biome_kind); SECTIONS],
+            light: ChunkLight::full_sky(),
         }
     }
 
     /// A chunk from its sections, bottom to top; there must be [`SECTIONS`] of them.
+    /// Light starts as full daylight.
     pub fn from_sections(sections: Vec<Section>) -> Self {
         assert_eq!(sections.len(), SECTIONS);
-        Self { sections }
+        Self {
+            sections,
+            light: ChunkLight::full_sky(),
+        }
     }
 
     pub fn sections(&self) -> &[Section] {
