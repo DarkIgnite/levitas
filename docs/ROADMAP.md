@@ -1,65 +1,170 @@
 # Roadmap
 
-Each milestone ends with something that can be tested in a real 1.21.8 client.
+The plan: make every vanilla survival feature work on the flat test world first, then
+world generation, then the plugin API for survival-economy servers. Each phase ends with
+something that can be tested in a real 1.21.8 client.
 
-## Milestone 0: Foundation
+## Definition of done
 
-- [x] Project name, license (GPL-3.0), clean-room policy
-- [x] Cargo workspace and crate skeletons
-- [x] Rust toolchain installed, workspace builds
-- [ ] CI (fmt, clippy, test)
-- [x] Data-generator pipeline for `levitas-registry`
+A feature is only ticked off when:
 
-## Milestone 1: Join the server
+- it behaves like vanilla 1.21.8, checked against public documentation (minecraft.wiki),
+  the data generator output, and by observing a real server, never by translating
+  Mojang, Paper or Leaf code (see [CLEAN_ROOM.md](CLEAN_ROOM.md));
+- it has automated tests: unit tests for the rules, and an end-to-end test that drives
+  the server through the network protocol like a client would;
+- it has been tried in the real game client;
+- `cargo fmt`, `cargo clippy --all-targets -- -D warnings` and `cargo test` pass.
 
-- [x] Handshake, Status (server list ping with MOTD and player count)
-- [x] Login, offline mode
-- [ ] Online mode (encryption, Mojang session check) and compression
-- [x] Configuration phase: registries, tags, known packs
-- [x] Flat test world, chunks streamed around the player as they move
-- [ ] Load an existing Anvil world
-- [x] Movement, keep-alive, own tab-list entry, chat echo
-- [x] Shared world: players see each other move and swing, chat broadcast
+Known gaps are listed under each phase instead of being hidden.
 
-## Milestone 2: Interaction
+## Done so far
 
-- [x] Break and place blocks (creative), block updates to other players
-- [ ] Placement orientation (stairs, logs, slabs, doors, ...) instead of default states
-- [ ] Inventory, creative and survival item handling, item drops
-- [ ] Commands (Brigadier command tree), console
-- [ ] Saving chunks and player data back to Anvil
-
-## Milestone 3: Basic survival
-
+- [x] Project name, license (GPL-3.0), clean-room policy, Cargo workspace
+- [x] Data-generator pipeline: packets, blocks and states, items, tags, synced
+      registries, loot tables and recipes generated from the official server.jar
+- [x] Handshake, server list status and ping
+- [x] Offline-mode login, configuration phase (registries, tags, known packs)
+- [x] Flat test world streamed around players as they move
+- [x] Shared world: players see each other move, look and swing; chat broadcast
+- [x] Paletted chunk storage matching the 1.21.5+ network format
+- [x] Breaking and placing blocks, sent to every player nearby
 - [x] Survival mode: mining with loot-table drops and correct-tool checks
-- [x] Dropped items: physics, pickup, Q / click-outside throwing, death drops
+- [x] Dropped items: physics, pickup, throwing (Q, click outside), death drops
 - [x] Health, fall/void/starvation damage, hunger, regeneration, eating
 - [x] Death screen and respawn
-- [x] Server-side player inventory (container clicks trusted, not yet simulated)
-- [x] Commands: /gamemode, /give, /kill
-- [ ] Mining speed validation (needs block hardness data)
+- [x] Server-side player inventory; clicks validated so items cannot appear from nowhere
 - [x] Crafting in the 2x2 grid and crafting tables (shaped, mirrored, shapeless)
 - [x] Chests and barrels: shared contents, lid animation, contents drop when broken
-- [x] Furnaces: fuel, smelting recipes, progress bars, lit block state
-- [x] Click validation: items cannot appear except a crafting result whose ingredients are used up
-- [ ] Server-side click simulation (shift-click crafting several at once, drag splitting)
-- [ ] Special recipes (dyeing, fireworks, map cloning), stonecutter, smithing, blast furnace, smoker
-- [ ] Double chests and block orientation when placing
-- [ ] Day/night cycle, weather
+- [x] Furnaces: fuel, smelting, progress bars, lit block state
+- [x] Commands: /gamemode, /give, /kill
 
-## Milestone 4: Entities and mobs
+## Phase 1: Persistence
 
-- [ ] ECS, entity tracking, physics and collisions
-- [ ] Mob spawning, basic AI, combat, drops
+- [ ] NBT reader and writer (file and network forms, modified UTF-8)
+- [ ] Anvil region files: read and write chunks, including oversized external chunks
+- [ ] Chunk sections, block palettes, biomes and block entities saved in vanilla format
+- [ ] level.dat: spawn point, world time, game rules
+- [ ] Player data: position, rotation, inventory, health, hunger, game mode
+- [ ] Autosave every 5 minutes, save on shutdown (Ctrl-C), unload unused chunks
+- [ ] Dropped items and other entities saved (with Phase 4)
 
-## Milestone 5: Plugin API
+## Phase 2: Blocks behave correctly
 
-- [ ] Events, commands, permissions, scheduler, storage, GUIs
-- [ ] Economy service
-- [ ] First plugins: permissions, economy, homes/warps/tpa, shops, claims
+- [ ] Placement orientation: facing, axis, slab halves, stairs shape, doors, beds,
+      double chests, signs, torches on walls, buttons, ladders
+- [ ] Placement rules: blocks that need support (torches, flowers, rails), breaking
+      unsupported blocks when their support goes
+- [ ] Interactive blocks: doors, trapdoors, fence gates, buttons, levers
+- [ ] Mining speed from block hardness and tool speed, with server validation
+- [ ] Tool durability and breaking
+- [ ] Server-side click simulation: shift-click (including crafting many at once),
+      drag splitting, double-click collect, number keys, offhand swap
+- [ ] Blast furnace, smoker, campfire, stonecutter, smithing table
+- [ ] Special crafting recipes: dyeing, fireworks, map and book cloning, banners,
+      shields, repairing, decorated pots, transmute recipes
+- [ ] Signs (editing text), item frames, armor stands, flower pots, jukebox, note blocks
 
-## Milestone 6: The rest of vanilla
+## Phase 3: Fluids, gravity and light
 
-- [ ] Redstone, fluids, lighting updates
-- [ ] World generation (overworld, nether, end)
-- [ ] Villagers, enchanting, brewing, structures
+- [ ] Water and lava flowing, sources, waterlogging, buckets
+- [ ] Lava and water interaction (cobblestone, stone, obsidian, basalt)
+- [ ] Swimming, drowning, fire and lava damage, burning, fire spread
+- [ ] Falling blocks: sand, gravel, concrete powder, anvils, pointed dripstone
+- [ ] Real lighting: sky light and block light, propagated and updated on change
+- [ ] Ice melting, snow layers, frosted ice
+
+## Phase 4: Combat and basic entities
+
+- [ ] Attacking players: damage, attack cooldown, critical hits, knockback, sweeping
+- [ ] Armor and armor toughness, shields, damage types and immunities
+- [ ] Bows, crossbows, tridents, arrows, snowballs, eggs, ender pearls
+- [ ] Status effects (needed by food, potions and mobs)
+- [ ] Entity framework: tracking, physics, collisions, saving entities to disk
+- [ ] Minecarts, boats, item frames, paintings, armor stands, experience orbs
+- [ ] TNT and explosions
+
+## Phase 5: Mobs
+
+- [ ] Natural spawning by light level, biome and time; despawning rules
+- [ ] Pathfinding and AI goals
+- [ ] Passive mobs: cow, pig, sheep (shearing, dye), chicken, rabbit, horse family,
+      wolf, cat, fox, parrot, turtle, fish, squid, axolotl, frog, bee, goat, ...
+- [ ] Hostile mobs: zombie variants, skeleton variants, creeper, spider, enderman,
+      slime, witch, phantom, drowned, pillager, silverfish, ...
+- [ ] Mob drops, experience, equipment, babies, riding
+- [ ] Breeding, taming, leashes, name tags
+
+## Phase 6: Farming, nature and time
+
+- [ ] Day/night cycle, weather (rain, thunder, lightning), sleeping in beds
+- [ ] Random ticks: crops grow, saplings become trees, grass and mycelium spread
+- [ ] Bone meal, composters, farmland and trampling, sugar cane, cactus, bamboo,
+      kelp, vines, melons and pumpkins, cocoa, sweet berries, mushrooms
+- [ ] Leaf decay
+
+## Phase 7: Redstone
+
+- [ ] Redstone wire, torches, repeaters, comparators, blocks of redstone
+- [ ] Buttons, levers, pressure plates, tripwires, daylight sensors, observers,
+      target blocks, sculk sensors
+- [ ] Pistons and sticky pistons (moving blocks and entities)
+- [ ] Hoppers, droppers, dispensers (with their item behaviours), crafters
+- [ ] Rails: powered, detector, activator
+- [ ] Doors, trapdoors, lamps, TNT, note blocks and bells powered by redstone
+- [ ] Update order and timing faithful enough that common farms and machines work
+
+## Phase 8: Progression
+
+- [ ] Experience: orbs, levels, sources
+- [ ] Enchanting table and bookshelves, enchantment effects
+- [ ] Anvil (repair, rename, combine), grindstone
+- [ ] Brewing stand, potions, splash and lingering potions, tipped arrows
+- [ ] Beacons, conduits
+- [ ] Maps, compasses, recovery compasses, clocks, spyglass
+
+## Phase 9: Dimensions
+
+- [ ] Multiple worlds: Nether and End
+- [ ] Nether portals (lighting, linking, travelling)
+- [ ] End portals, strongholds' frames, the End and its exit portal
+- [ ] Ender dragon fight, end crystals, end gateways
+- [ ] Wither
+
+## Phase 10: Villagers and raids
+
+- [ ] Villagers: professions, workstations, trading, restocking, gossip
+- [ ] Wandering traders, iron golems, zombie villagers and curing
+- [ ] Raids and bad omen
+
+## Phase 11: Everything else
+
+- [ ] Advancements and statistics
+- [ ] Brigadier command tree with suggestions; console commands
+- [ ] Vanilla commands: /tp, /time, /weather, /gamerule, /give with components,
+      /effect, /enchant, /summon, /setblock, /fill, /kill, /clear, /spawnpoint, ...
+- [ ] Game rules and difficulty
+- [ ] Scoreboards, teams, boss bars, titles
+- [ ] Item components on the network (enchantments, names, damage, ...)
+- [ ] Online mode (encryption and Mojang session check), compression
+- [ ] Server configuration file, whitelist, bans, operators
+
+## Phase 12: World generation
+
+- [ ] Noise terrain, biomes and climate, carvers (caves, ravines), aquifers
+- [ ] Features: trees, ores, flowers, lakes, ...
+- [ ] Structures: villages, strongholds, mineshafts, temples, monuments, ...
+- [ ] Nether and End generation
+- [ ] Loading existing Leaf/vanilla worlds (pre-generated terrain)
+
+## Phase 13: Plugins and economy
+
+- [ ] Plugin API: events, commands, permissions, scheduler, storage, GUIs
+- [ ] Native Rust and WASM plugins
+- [ ] Economy service; first plugins: permissions, economy, homes/warps/tpa, shops, claims
+
+## Infrastructure
+
+- [ ] CI: fmt, clippy and tests on every push (needs the data generator in CI)
+- [ ] Region-based parallel ticking (see ARCHITECTURE.md)
+- [ ] Benchmarks against Leaf: memory per player, tick time, chunk throughput
