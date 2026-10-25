@@ -40,7 +40,12 @@ impl LootTables {
     /// Items dropped by breaking a block, as `(item ID, count)` pairs.
     pub fn block_drops(&self, ctx: &mut LootContext) -> Vec<(i32, i32)> {
         let name = BlockInfo::of(ctx.state).name;
-        let Some(table) = self.blocks.get(name) else {
+        // Wall-mounted variants (wall torches, wall signs, ...) have no table of their own
+        // and drop like the standing block.
+        let standing = name
+            .replacen("_wall_", "_", 1)
+            .replacen("minecraft:wall_", "minecraft:", 1);
+        let Some(table) = self.blocks.get(name).or_else(|| self.blocks.get(&standing)) else {
             return Vec::new();
         };
         let mut drops = Vec::new();
@@ -284,6 +289,24 @@ mod tests {
             drops(block::GRASS_BLOCK, "minecraft:air"),
             [(item("minecraft:dirt"), 1)]
         );
+    }
+
+    #[test]
+    fn wall_variants_drop_like_standing_blocks() {
+        let wall = |name: &str| BlockInfo::by_name(name).unwrap().default_state;
+        assert_eq!(
+            drops(wall("minecraft:wall_torch"), "minecraft:air"),
+            [(item("minecraft:torch"), 1)]
+        );
+        assert_eq!(
+            drops(wall("minecraft:oak_wall_sign"), "minecraft:air"),
+            [(item("minecraft:oak_sign"), 1)]
+        );
+        assert_eq!(
+            drops(wall("minecraft:spruce_wall_hanging_sign"), "minecraft:air"),
+            [(item("minecraft:spruce_hanging_sign"), 1)]
+        );
+        assert!(drops(wall("minecraft:piston_head"), "minecraft:air").is_empty());
     }
 
     #[test]

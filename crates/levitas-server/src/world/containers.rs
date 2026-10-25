@@ -11,6 +11,7 @@ use levitas_nbt::Compound;
 use levitas_registry::{block_entity_type, menu, BlockInfo, STATE_BLOCK};
 
 use super::*;
+use crate::blocks;
 use crate::inventory::{items_from_nbt, items_to_nbt};
 use crate::recipes::{fuel_remainder, fuel_ticks};
 
@@ -55,6 +56,9 @@ impl BlockEntity {
             BlockEntity::Chest(c) if c.kind == block_entity_type::BARREL => {
                 ("minecraft:barrel", &c.items[..])
             }
+            BlockEntity::Chest(c) if c.kind == block_entity_type::TRAPPED_CHEST => {
+                ("minecraft:trapped_chest", &c.items[..])
+            }
             BlockEntity::Chest(c) => ("minecraft:chest", &c.items[..]),
             BlockEntity::Furnace(f) => ("minecraft:furnace", &f.items[..]),
         };
@@ -84,6 +88,7 @@ impl BlockEntity {
         );
         let mut entity = match nbt.str("id")? {
             "minecraft:chest" => Self::for_block(block::CHEST)?,
+            "minecraft:trapped_chest" => Self::for_block(block::TRAPPED_CHEST)?,
             "minecraft:barrel" => Self::for_block(block::BARREL)?,
             "minecraft:furnace" => Self::for_block(block::FURNACE)?,
             _ => return None,
@@ -117,6 +122,7 @@ impl BlockEntity {
         };
         match BlockInfo::of(state).name {
             "minecraft:chest" => chest(block_entity_type::CHEST),
+            "minecraft:trapped_chest" => chest(block_entity_type::TRAPPED_CHEST),
             "minecraft:barrel" => chest(block_entity_type::BARREL),
             "minecraft:furnace" => Some(BlockEntity::Furnace(Furnace::default())),
             _ => None,
@@ -160,6 +166,8 @@ pub enum View {
     Crafting,
     Furnace(BlockPos),
     Chest(BlockPos),
+    /// Both halves of a double chest: the right half's 27 slots, then the left half's.
+    DoubleChest(BlockPos, BlockPos),
 }
 
 impl View {
@@ -170,6 +178,16 @@ impl View {
             View::Crafting => 10,
             View::Furnace(_) => 3,
             View::Chest(_) => CHEST_SLOTS,
+            View::DoubleChest(..) => 2 * CHEST_SLOTS,
+        }
+    }
+
+    /// The block entities shown in the window, each with its first window slot.
+    fn parts(self) -> Vec<(BlockPos, usize)> {
+        match self {
+            View::Chest(pos) | View::Furnace(pos) => vec![(pos, 0)],
+            View::DoubleChest(first, second) => vec![(first, 0), (second, CHEST_SLOTS)],
+            View::Inventory | View::Crafting => Vec::new(),
         }
     }
 
@@ -205,22 +223,32 @@ impl World {
     pub(super) fn open_container(&mut self, id: i32, pos: BlockPos, state: u16) -> bool {
         let (view, menu, title) = match BlockInfo::of(state).name {
             "minecraft:crafting_table" => (View::Crafting, menu::CRAFTING, "Crafting"),
-            "minecraft:chest" => (View::Chest(pos), menu::GENERIC_9X3, "Chest"),
+            "minecraft:chest" | "minecraft:trapped_chest" => {
+                let partner = blocks::chest_partner(state, pos)
+                    .filter(|&q| blocks::same_block(self.block(q), state));
+                match partner {
+                    // The right half comes first in a double chest's window.
+                    Some(q) if blocks::prop(state, "type") == Some("right") => {
+                        (View::DoubleChest(pos, q), menu::GENERIC_9X6, "Large Chest")
+                    }
+                    Some(q) => (View::DoubleChest(q, pos), menu::GENERIC_9X6, "Large Chest"),
+                    None => (View::Chest(pos), menu::GENERIC_9X3, "Chest"),
+                }
+            }
             "minecraft:barrel" => (View::Chest(pos), menu::GENERIC_9X3, "Barrel"),
             "minecraft:furnace" => (View::Furnace(pos), menu::FURNACE, "Furnace"),
             _ => return false,
         };
-        if let View::Chest(pos) | View::Furnace(pos) = view {
-            if let Some(entity) = BlockEntity::for_block(state) {
-                self.block_entities.entry(pos).or_insert(entity);
-            }
-            self.block_entities
-                .get_mut(&pos)
-                .expect("block entity exists")
-                .viewers_mut()
-                .insert(id);
-        }
         self.close_container(id);
+        for (part, _) in view.parts() {
+            let part_state = self.block(part);
+            if let Some(entity) = BlockEntity::for_block(part_state) {
+                self.block_entities.entry(part).or_insert(entity);
+            }
+            if let Some(entity) = self.block_entities.get_mut(&part) {
+                entity.viewers_mut().insert(id);
+            }
+        }
 
         let p = self.players.get_mut(&id).expect("player exists");
         p.next_window = p.next_window % MAX_WINDOW_ID + 1;
@@ -241,6 +269,10 @@ impl World {
         self.resync_window(id, window, view);
         match view {
             View::Chest(pos) => self.chest_viewers_changed(pos),
+            View::DoubleChest(first, second) => {
+                self.chest_viewers_changed(first);
+                self.chest_viewers_changed(second);
+            }
             View::Furnace(pos) => {
                 if let Some(BlockEntity::Furnace(f)) = self.block_entities.get(&pos) {
                     let data = furnace_data(window, f);
@@ -265,10 +297,16 @@ impl World {
                 slots.extend_from_slice(&open.grid);
                 slots
             }
-            View::Chest(pos) | View::Furnace(pos) => self.block_entities.get(&pos).map_or_else(
-                || vec![Stack::EMPTY; view.container_len()],
-                |e| e.items().to_vec(),
-            ),
+            View::Chest(_) | View::Furnace(_) | View::DoubleChest(..) => {
+                let mut slots = vec![Stack::EMPTY; view.container_len()];
+                for (part, first) in view.parts() {
+                    if let Some(entity) = self.block_entities.get(&part) {
+                        let items = entity.items();
+                        slots[first..first + items.len()].copy_from_slice(items);
+                    }
+                }
+                slots
+            }
         };
         slots.extend_from_slice(&p.inventory.slots[PLAYER_PART]);
         slots
@@ -292,10 +330,14 @@ impl World {
                 let open = p.open.as_mut().expect("crafting window is open");
                 open.grid.copy_from_slice(&slots[1..10]);
             }
-            View::Chest(pos) | View::Furnace(pos) => {
-                if let Some(entity) = self.block_entities.get_mut(&pos) {
-                    entity.items_mut().copy_from_slice(&slots[..n]);
-                    self.dirty.insert(pos.chunk());
+            View::Chest(_) | View::Furnace(_) | View::DoubleChest(..) => {
+                for (part, first) in view.parts() {
+                    if let Some(entity) = self.block_entities.get_mut(&part) {
+                        let items = entity.items_mut();
+                        let len = items.len();
+                        items.copy_from_slice(&slots[first..first + len]);
+                        self.dirty.insert(part.chunk());
+                    }
                 }
             }
         }
@@ -379,10 +421,16 @@ impl World {
         if view.grid_size().is_some() {
             self.update_crafting_result(id, window, view, next[0]);
         }
-        if let View::Chest(pos) | View::Furnace(pos) = view {
-            let n = view.container_len();
-            let slots: Vec<usize> = (0..n).filter(|&i| current[i] != next[i]).collect();
-            self.notify_viewers(pos, &slots, Some(id));
+        let parts = view.parts();
+        for (i, &(part, first)) in parts.iter().enumerate() {
+            let end = parts
+                .get(i + 1)
+                .map_or(view.container_len(), |&(_, next)| next);
+            let slots: Vec<usize> = (first..end)
+                .filter(|&s| current[s] != next[s])
+                .map(|s| s - first)
+                .collect();
+            self.notify_viewers(part, &slots, Some(id));
         }
     }
 
@@ -414,12 +462,15 @@ impl World {
             let Some(p) = self.players.get_mut(&viewer) else {
                 continue;
             };
-            let Some(window) = p.open.as_ref().map(|o| o.window) else {
+            let Some((window, first)) = p.open.as_ref().and_then(|o| {
+                let first = o.view.parts().into_iter().find(|&(q, _)| q == pos)?.1;
+                Some((o.window, first))
+            }) else {
                 continue;
             };
             let updates: Vec<Writer> = slots
                 .iter()
-                .map(|&s| p.inventory.window_slot_packet(window, s, items[s]))
+                .map(|&s| p.inventory.window_slot_packet(window, first + s, items[s]))
                 .collect();
             for update in updates {
                 self.send(viewer, update);
@@ -474,11 +525,13 @@ impl World {
         let mut returned = Vec::new();
         match open.view {
             View::Crafting => returned.extend(open.grid),
-            View::Chest(pos) | View::Furnace(pos) => {
-                if let Some(entity) = self.block_entities.get_mut(&pos) {
-                    entity.viewers_mut().remove(&id);
+            View::Chest(_) | View::Furnace(_) | View::DoubleChest(..) => {
+                for (part, _) in open.view.parts() {
+                    if let Some(entity) = self.block_entities.get_mut(&part) {
+                        entity.viewers_mut().remove(&id);
+                    }
+                    self.chest_viewers_changed(part);
                 }
-                self.chest_viewers_changed(pos);
             }
             View::Inventory => {}
         }
@@ -509,24 +562,25 @@ impl World {
     /// Removes the block entity at `pos` (its block was broken): its items drop and
     /// anyone viewing it has the window closed.
     pub(super) fn remove_block_entity(&mut self, pos: BlockPos) {
-        let Some(mut entity) = self.block_entities.remove(&pos) else {
-            return;
+        let viewers: Vec<i32> = match self.block_entities.get_mut(&pos) {
+            Some(entity) => entity.viewers_mut().iter().copied().collect(),
+            None => return,
         };
-        for viewer in entity.viewers_mut().drain() {
-            let Some(window) = self
+        for viewer in viewers {
+            let window = self
                 .players
-                .get_mut(&viewer)
-                .and_then(|p| p.open.take())
-                .map(|o| o.window)
-            else {
-                continue;
-            };
-            self.send(
-                viewer,
-                Writer::packet(clientbound::CONTAINER_CLOSE).varint(window),
-            );
-            self.return_to_inventory(viewer, Vec::new());
+                .get(&viewer)
+                .and_then(|p| p.open.as_ref())
+                .map(|o| o.window);
+            if let Some(window) = window {
+                self.close_container(viewer);
+                self.send(
+                    viewer,
+                    Writer::packet(clientbound::CONTAINER_CLOSE).varint(window),
+                );
+            }
         }
+        let entity = self.block_entities.remove(&pos).expect("checked above");
         for &stack in entity.items() {
             self.drop_at_block(pos, stack);
         }

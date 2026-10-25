@@ -2,6 +2,7 @@
 //! loop. Connection tasks talk to it only through [`Event`]s and receive ready-to-write
 //! packet frames, so world state needs no locks.
 
+mod building;
 mod commands;
 mod containers;
 mod items;
@@ -27,6 +28,7 @@ use crate::inventory::{Inventory, Stack, CRAFTING_GRID, HOTBAR, OFFHAND, SLOTS};
 use crate::loot::{LootContext, LootTables};
 use crate::recipes::Recipes;
 use crate::rng::Rng;
+use building::ScheduledTick;
 use containers::{BlockEntity, Open};
 use items::ItemEntity;
 #[cfg(test)]
@@ -92,6 +94,8 @@ pub enum Event {
         hand: i32,
         pos: BlockPos,
         face: i32,
+        /// Where on the face the player clicked, each coordinate in 0..=1.
+        cursor: [f32; 3],
         sequence: i32,
     },
     UseItem {
@@ -261,6 +265,7 @@ struct World {
     players: HashMap<i32, Player>,
     items: HashMap<i32, ItemEntity>,
     block_entities: HashMap<BlockPos, BlockEntity>,
+    scheduled: Vec<ScheduledTick>,
     generator: FlatGenerator,
     /// Light data shared by every chunk packet: full sky light, no block light.
     light: Vec<u8>,
@@ -291,6 +296,7 @@ impl World {
             players: HashMap::new(),
             items: HashMap::new(),
             block_entities: HashMap::new(),
+            scheduled: Vec::new(),
             generator: FlatGenerator::new(),
             light: full_sky_light(),
             loot: LootTables::load(),
@@ -344,8 +350,9 @@ impl World {
                 hand,
                 pos,
                 face,
+                cursor,
                 sequence,
-            } => self.use_item_on(id, hand, pos, face, sequence),
+            } => self.use_item_on(id, hand, pos, face, cursor, sequence),
             Event::UseItem { id, hand, sequence } => self.use_item(id, hand, sequence),
             Event::CreativeSlot { id, slot, stack } => self.creative_slot(id, slot, stack),
             Event::ContainerClick {
@@ -598,64 +605,28 @@ impl World {
         self.broadcast(effect, Some(id));
 
         let p = self.players.get_mut(&id).expect("player exists");
-        if !p.survival() {
-            return;
-        }
-        p.exhaustion += 0.005;
-        let tool = p.inventory.held(p.held).item;
-        if !survival::drops_with_tool(state, tool) {
-            return;
-        }
-        let drops = self.loot.block_drops(&mut LootContext {
-            state,
-            tool,
-            rng: &mut self.rng,
-        });
-        for (item, count) in drops {
-            self.drop_at_block(pos, Stack::new(item, count));
-        }
-    }
-
-    fn use_item_on(&mut self, id: i32, hand: i32, pos: BlockPos, face: i32, sequence: i32) {
-        let Some(p) = self.players.get(&id) else {
-            return;
-        };
-        let slot = p.hand_slot(hand);
-        let stack = p.inventory.slots[slot];
-        let (alive, survival) = (p.alive, p.survival());
-        let state = ItemInfo::get(stack.item).map_or(block::AIR, |i| i.block);
-        // Using a container opens it, unless sneaking with something in hand.
-        let sneak_place = p.sneaking && !stack.is_empty();
-        let clicked = self.block(pos);
-        if alive && hand == 0 && !sneak_place && self.open_container(id, pos, clicked) {
-            return self.ack(id, sequence);
-        }
-        if alive && !stack.is_empty() && state != block::AIR {
-            // Placing on grass or similar replaces it; otherwise place against the face.
-            let target = if block_has_tag(self.block(pos), "minecraft:replaceable") {
-                pos
-            } else {
-                pos.offset(face)
-            };
-            let current = self.block(target);
-            let in_world = (MIN_Y..=MAX_Y).contains(&target.y);
-            if in_world && block_has_tag(current, "minecraft:replaceable") {
-                self.set_block(target, state);
-                if let Some(entity) = BlockEntity::for_block(state) {
-                    self.block_entities.insert(target, entity);
+        let survival = p.survival();
+        if survival {
+            p.exhaustion += 0.005;
+            let tool = p.inventory.held(p.held).item;
+            if survival::drops_with_tool(state, tool) {
+                let drops = self.loot.block_drops(&mut LootContext {
+                    state,
+                    tool,
+                    rng: &mut self.rng,
+                });
+                for (item, count) in drops {
+                    self.drop_at_block(pos, Stack::new(item, count));
                 }
-                if survival {
-                    let p = self.players.get_mut(&id).expect("player exists");
-                    p.inventory.take(slot, 1);
-                    let update = p.inventory.set_slot_packet(slot);
-                    self.send(id, update);
-                }
-            } else {
-                // Undo the client's predicted placement.
-                self.send(id, block_update(target, current));
+            }
+        } else if let Some(other) = crate::blocks::other_part(state, pos) {
+            // In creative the other half goes too, without dropping anything.
+            if crate::blocks::same_block(self.block(other), state) {
+                self.set_block(other, block::AIR);
+                self.update_neighbors(other);
             }
         }
-        self.ack(id, sequence);
+        self.update_neighbors(pos);
     }
 
     fn creative_slot(&mut self, id: i32, slot: i16, stack: Stack) {
@@ -716,6 +687,7 @@ impl World {
         for (id, packet) in packets {
             self.broadcast(packet, Some(id));
         }
+        self.tick_scheduled();
         self.tick_survival();
         self.tick_items();
         self.tick_furnaces();

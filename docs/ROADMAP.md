@@ -53,11 +53,18 @@ Known gaps are listed under each phase instead of being hidden.
 
 ## Phase 2: Blocks behave correctly
 
-- [ ] Placement orientation: facing, axis, slab halves, stairs shape, doors, beds,
-      double chests, signs, torches on walls, buttons, ladders
-- [ ] Placement rules: blocks that need support (torches, flowers, rails), breaking
-      unsupported blocks when their support goes
-- [ ] Interactive blocks: doors, trapdoors, fence gates, buttons, levers
+- [x] Placement orientation: facing, axis, slab halves and double slabs, stairs, doors
+      (with hinges and double doors), beds, double chests, wall torches/signs/banners/heads,
+      buttons, levers, ladders, pistons, observers, hoppers, rods, rails, sign rotation
+- [x] Placement rules: blocks that need support (torches, flowers, crops, rails, carpets,
+      doors, wall-mounted blocks), popping off with drops when their support goes; no
+      placing blocks inside players
+- [x] Neighbour shapes: fences, panes, iron bars and walls connect; stairs form corners
+- [x] Interactive blocks: doors, trapdoors, fence gates, buttons (springing back), levers,
+      with sounds for other players
+- [x] Double chests (54 slots), trapped chests
+- [ ] Block placement sounds for other players (sound types are not in the data yet)
+- [ ] Bells, cocoa, hanging signs, crafters and walls' tall sides: check against vanilla
 - [ ] Mining speed from block hardness and tool speed, with server validation
 - [ ] Tool durability and breaking
 - [ ] Server-side click simulation: shift-click (including crafting many at once),

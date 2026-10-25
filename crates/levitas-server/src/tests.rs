@@ -622,3 +622,191 @@ async fn world_and_players_survive_a_restart() {
     );
     let _ = std::fs::remove_dir_all(dir);
 }
+
+fn use_at(pos: BlockPos, face: i32, cursor: [f32; 3], sequence: i32) -> Writer {
+    Writer::packet(play::serverbound::USE_ITEM_ON)
+        .varint(0)
+        .position(pos)
+        .varint(face)
+        .f32(cursor[0])
+        .f32(cursor[1])
+        .f32(cursor[2])
+        .bool(false)
+        .bool(false)
+        .varint(sequence)
+}
+
+/// Reads block updates until one for `pos` arrives; returns the new state.
+async fn block_at(client: &mut TcpStream, pos: BlockPos) -> u16 {
+    loop {
+        let body = read_until(client, play::clientbound::BLOCK_UPDATE).await;
+        let mut r = Reader::new(&body);
+        if r.position().unwrap() == pos {
+            return r.varint().unwrap() as u16;
+        }
+    }
+}
+
+fn prop(state: u16, name: &str) -> Option<&'static str> {
+    levitas_registry::BlockInfo::of(state).property(state, name)
+}
+
+async fn look(client: &mut TcpStream, yaw: f32) {
+    send(
+        client,
+        Writer::packet(play::serverbound::MOVE_PLAYER_ROT)
+            .f32(yaw)
+            .f32(0.0)
+            .u8(1),
+    )
+    .await;
+}
+
+async fn dig(client: &mut TcpStream, pos: BlockPos) {
+    for (status, sequence) in [(0, 90), (2, 91)] {
+        send(
+            client,
+            Writer::packet(play::serverbound::PLAYER_ACTION)
+                .varint(status)
+                .position(pos)
+                .u8(1)
+                .varint(sequence),
+        )
+        .await;
+    }
+}
+
+#[tokio::test]
+async fn stairs_and_doors_follow_the_player() {
+    let mut alice = join(server().await, "Alice", 1).await;
+    read_until(&mut alice, play::clientbound::PLAYER_POSITION).await;
+    look(&mut alice, 180.0).await; // facing north
+    give(&mut alice, "oak_stairs", 1).await;
+    send(&mut alice, use_on(BlockPos::new(3, -61, 0), 1, 1)).await;
+    let stairs = block_at(&mut alice, BlockPos::new(3, -60, 0)).await;
+    assert_eq!(prop(stairs, "facing"), Some("north"));
+    assert_eq!(prop(stairs, "half"), Some("bottom"));
+
+    // A door fills two blocks and opens both halves when used.
+    give(&mut alice, "oak_door", 1).await;
+    send(&mut alice, use_on(BlockPos::new(5, -61, 0), 1, 2)).await;
+    let lower = block_at(&mut alice, BlockPos::new(5, -60, 0)).await;
+    let upper = block_at(&mut alice, BlockPos::new(5, -59, 0)).await;
+    assert_eq!(
+        (prop(lower, "half"), prop(upper, "half")),
+        (Some("lower"), Some("upper"))
+    );
+    send(
+        &mut alice,
+        use_at(BlockPos::new(5, -59, 0), 3, [0.5, 0.5, 1.0], 3),
+    )
+    .await;
+    assert_eq!(
+        prop(block_at(&mut alice, BlockPos::new(5, -60, 0)).await, "open"),
+        Some("true")
+    );
+    assert_eq!(
+        prop(block_at(&mut alice, BlockPos::new(5, -59, 0)).await, "open"),
+        Some("true")
+    );
+}
+
+#[tokio::test]
+async fn torches_pop_off_when_their_wall_goes() {
+    let mut alice = join(server().await, "Alice", 1).await;
+    read_until(&mut alice, play::clientbound::PLAYER_POSITION).await;
+    give(&mut alice, "stone", 1).await;
+    let wall = BlockPos::new(7, -60, 0);
+    send(&mut alice, use_on(BlockPos::new(7, -61, 0), 1, 1)).await;
+    block_at(&mut alice, wall).await;
+    give(&mut alice, "torch", 1).await;
+    send(&mut alice, use_at(wall, 5, [1.0, 0.5, 0.5], 2)).await;
+    let torch_pos = BlockPos::new(8, -60, 0);
+    let torch = block_at(&mut alice, torch_pos).await;
+    assert_eq!(
+        levitas_registry::BlockInfo::of(torch).name,
+        "minecraft:wall_torch"
+    );
+    assert_eq!(prop(torch, "facing"), Some("east"));
+
+    dig(&mut alice, wall).await;
+    assert_eq!(block_at(&mut alice, torch_pos).await, block::AIR);
+    // The torch drops as an item.
+    let body = read_until(&mut alice, play::clientbound::SET_ENTITY_DATA).await;
+    let mut r = Reader::new(&body);
+    r.varint().unwrap();
+    let (_index, _serializer, count, item) = (
+        r.u8().unwrap(),
+        r.varint().unwrap(),
+        r.varint().unwrap(),
+        r.varint().unwrap(),
+    );
+    assert_eq!(
+        (item, count),
+        (ItemInfo::id_of("minecraft:torch").unwrap(), 1)
+    );
+}
+
+#[tokio::test]
+async fn double_chests_have_54_slots() {
+    let mut alice = join(server().await, "Alice", 1).await;
+    read_until(&mut alice, play::clientbound::PLAYER_POSITION).await;
+    look(&mut alice, 180.0).await;
+    give(&mut alice, "chest", 2).await;
+    send(&mut alice, use_on(BlockPos::new(10, -61, 0), 1, 1)).await;
+    block_at(&mut alice, BlockPos::new(10, -60, 0)).await;
+    send(&mut alice, use_on(BlockPos::new(11, -61, 0), 1, 2)).await;
+    let second = block_at(&mut alice, BlockPos::new(11, -60, 0)).await;
+    assert_ne!(prop(second, "type"), Some("single"));
+
+    send(&mut alice, use_on(BlockPos::new(10, -60, 0), 1, 3)).await;
+    let (window, menu) = opened(&mut alice).await;
+    assert_eq!(menu, levitas_registry::menu::GENERIC_9X6);
+    let body = read_until(&mut alice, play::clientbound::CONTAINER_SET_CONTENT).await;
+    let mut r = Reader::new(&body);
+    assert_eq!(r.varint().unwrap(), window);
+    r.varint().unwrap();
+    assert_eq!(r.varint().unwrap(), 54 + 36);
+}
+
+#[tokio::test]
+async fn buttons_spring_back() {
+    let mut alice = join(server().await, "Alice", 1).await;
+    read_until(&mut alice, play::clientbound::PLAYER_POSITION).await;
+    give(&mut alice, "stone", 1).await;
+    let wall = BlockPos::new(13, -60, 0);
+    send(&mut alice, use_on(BlockPos::new(13, -61, 0), 1, 1)).await;
+    block_at(&mut alice, wall).await;
+    give(&mut alice, "stone_button", 1).await;
+    send(&mut alice, use_at(wall, 2, [0.5, 0.5, 0.0], 2)).await;
+    let button_pos = BlockPos::new(13, -60, -1);
+    let button = block_at(&mut alice, button_pos).await;
+    assert_eq!(
+        (prop(button, "face"), prop(button, "facing")),
+        (Some("wall"), Some("north"))
+    );
+
+    send(&mut alice, use_at(button_pos, 2, [0.5, 0.5, 0.0], 3)).await;
+    assert_eq!(
+        prop(block_at(&mut alice, button_pos).await, "powered"),
+        Some("true")
+    );
+    // A stone button pops back out after 20 ticks.
+    assert_eq!(
+        prop(block_at(&mut alice, button_pos).await, "powered"),
+        Some("false")
+    );
+}
+
+#[tokio::test]
+async fn blocks_cannot_be_placed_inside_players() {
+    let mut alice = join(server().await, "Alice", 1).await;
+    read_until(&mut alice, play::clientbound::PLAYER_POSITION).await;
+    give(&mut alice, "dirt", 1).await;
+    // Alice stands at (0.5, -60, 0.5): the block above the grass under her.
+    send(&mut alice, use_on(BlockPos::new(0, -61, 0), 1, 1)).await;
+    assert_eq!(
+        block_at(&mut alice, BlockPos::new(0, -60, 0)).await,
+        block::AIR
+    );
+}

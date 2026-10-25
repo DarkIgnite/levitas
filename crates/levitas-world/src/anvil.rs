@@ -12,6 +12,8 @@ pub struct LoadedChunk {
     pub chunk: Chunk,
     /// Block entity NBT as stored (`id`, `x`, `y`, `z` and type-specific fields).
     pub block_entities: Vec<Compound>,
+    /// Pending block ticks (`i` block name, `x`, `y`, `z`, `t` ticks left, `p` priority).
+    pub block_ticks: Vec<Tag>,
 }
 
 fn biomes() -> &'static SyncedRegistry {
@@ -28,6 +30,7 @@ pub fn to_nbt(
     cx: i32,
     cz: i32,
     block_entities: Vec<Compound>,
+    block_ticks: Vec<Compound>,
     game_time: i64,
 ) -> Compound {
     let mut sections = Vec::new();
@@ -74,7 +77,13 @@ pub fn to_nbt(
                 .map(Tag::Compound)
                 .collect::<Vec<_>>(),
         )
-        .with("block_ticks", Vec::<Tag>::new())
+        .with(
+            "block_ticks",
+            block_ticks
+                .into_iter()
+                .map(Tag::Compound)
+                .collect::<Vec<_>>(),
+        )
         .with("fluid_ticks", Vec::<Tag>::new())
         .with(
             "structures",
@@ -213,6 +222,7 @@ pub fn from_nbt(nbt: &Compound) -> Result<Option<LoadedChunk>, ChunkError> {
     Ok(Some(LoadedChunk {
         chunk: Chunk::from_sections(sections),
         block_entities,
+        block_ticks: nbt.list("block_ticks").unwrap_or_default().to_vec(),
     }))
 }
 
@@ -263,7 +273,7 @@ mod tests {
             .with("x", 1)
             .with("y", 2)
             .with("z", 3);
-        let nbt = to_nbt(&chunk, 4, -7, vec![entity.clone()], 123);
+        let nbt = to_nbt(&chunk, 4, -7, vec![entity.clone()], Vec::new(), 123);
         // Through the binary form too, as it would go to disk.
         let nbt = levitas_nbt::from_bytes(&levitas_nbt::to_bytes("", &nbt))
             .unwrap()
@@ -279,7 +289,7 @@ mod tests {
 
     #[test]
     fn vanilla_style_palette_entries() {
-        let nbt = to_nbt(&sample_chunk(), 0, 0, Vec::new(), 0);
+        let nbt = to_nbt(&sample_chunk(), 0, 0, Vec::new(), Vec::new(), 0);
         let sections = nbt.list("sections").unwrap();
         // y = 70 is section 4 (y 64..80) counting from section -4.
         let section = sections[8].as_compound().unwrap();

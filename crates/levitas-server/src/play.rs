@@ -142,7 +142,7 @@ fn decode(id: i32, packet: &[u8]) -> io::Result<Option<Event>> {
             let hand = r.varint()?;
             let pos = r.position()?;
             let face = r.varint()?;
-            let _cursor = (r.f32()?, r.f32()?, r.f32()?);
+            let cursor = [r.f32()?, r.f32()?, r.f32()?].map(|c| c.clamp(0.0, 1.0));
             let _inside_block = r.bool()?;
             let _world_border_hit = r.bool()?;
             Event::UseItemOn {
@@ -150,6 +150,7 @@ fn decode(id: i32, packet: &[u8]) -> io::Result<Option<Event>> {
                 hand,
                 pos,
                 face,
+                cursor,
                 sequence: r.varint()?,
             }
         }
