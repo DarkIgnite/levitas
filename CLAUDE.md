@@ -7,6 +7,7 @@ reply in casual Indonesian. Code, comments, commits and docs are in English.
 
 ## Before writing code
 
+- docs/HANDOFF.md has the full current state, next steps and pitfalls.
 - Read docs/ROADMAP.md to see the current milestone, and docs/ARCHITECTURE.md for design rules.
 - Follow docs/CLEAN_ROOM.md strictly. Never copy or translate decompiled Mojang code or
   Paper/Leaf patched sources. Generated data never goes into git.
