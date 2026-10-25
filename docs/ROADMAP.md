@@ -13,10 +13,13 @@ Each milestone ends with something that can be tested in a real 1.21.8 client.
 ## Milestone 1: Join the server
 
 - [x] Handshake, Status (server list ping with MOTD and player count)
-- [ ] Login (offline mode first, then online mode with encryption)
-- [ ] Configuration phase: registries, tags, known packs
-- [ ] Load an existing Anvil world and send chunks around the player
-- [ ] Movement, keep-alive, player list, chat
+- [x] Login, offline mode
+- [ ] Online mode (encryption, Mojang session check) and compression
+- [x] Configuration phase: registries, tags, known packs
+- [x] Flat test world, chunks streamed around the player as they move
+- [ ] Load an existing Anvil world
+- [x] Movement, keep-alive, own tab-list entry, chat echo
+- [ ] Shared world: players see each other, chat broadcast
 
 ## Milestone 2: Interaction
 

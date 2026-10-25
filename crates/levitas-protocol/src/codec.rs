@@ -68,12 +68,28 @@ impl<'a> Reader<'a> {
         Ok(value)
     }
 
+    pub fn u8(&mut self) -> Result<u8, DecodeError> {
+        self.array().map(u8::from_be_bytes)
+    }
+
+    pub fn bool(&mut self) -> Result<bool, DecodeError> {
+        self.u8().map(|b| b != 0)
+    }
+
     pub fn u16(&mut self) -> Result<u16, DecodeError> {
         self.array().map(u16::from_be_bytes)
     }
 
     pub fn i64(&mut self) -> Result<i64, DecodeError> {
         self.array().map(i64::from_be_bytes)
+    }
+
+    pub fn f32(&mut self) -> Result<f32, DecodeError> {
+        self.array().map(f32::from_be_bytes)
+    }
+
+    pub fn f64(&mut self) -> Result<f64, DecodeError> {
+        self.array().map(f64::from_be_bytes)
     }
 
     pub fn uuid(&mut self) -> Result<u128, DecodeError> {
@@ -115,13 +131,73 @@ impl Writer {
         self
     }
 
+    pub fn bool(mut self, value: bool) -> Self {
+        self.buf.push(u8::from(value));
+        self
+    }
+
+    pub fn u8(mut self, value: u8) -> Self {
+        self.buf.push(value);
+        self
+    }
+
+    pub fn i8(self, value: i8) -> Self {
+        self.u8(value as u8)
+    }
+
     pub fn u16(mut self, value: u16) -> Self {
+        self.buf.extend_from_slice(&value.to_be_bytes());
+        self
+    }
+
+    pub fn i32(mut self, value: i32) -> Self {
         self.buf.extend_from_slice(&value.to_be_bytes());
         self
     }
 
     pub fn i64(mut self, value: i64) -> Self {
         self.buf.extend_from_slice(&value.to_be_bytes());
+        self
+    }
+
+    pub fn f32(mut self, value: f32) -> Self {
+        self.buf.extend_from_slice(&value.to_be_bytes());
+        self
+    }
+
+    pub fn f64(mut self, value: f64) -> Self {
+        self.buf.extend_from_slice(&value.to_be_bytes());
+        self
+    }
+
+    /// Raw bytes with no length prefix.
+    pub fn bytes(mut self, value: &[u8]) -> Self {
+        self.buf.extend_from_slice(value);
+        self
+    }
+
+    /// A plain-text chat component, encoded as network NBT (a nameless string tag).
+    pub fn text(mut self, value: &str) -> Self {
+        const TAG_STRING: u8 = 8;
+        self.buf.push(TAG_STRING);
+        // NBT uses Java's modified UTF-8, which matches UTF-8 except for NUL and
+        // characters outside the BMP. Those are replaced rather than re-encoded.
+        let clean: String = value
+            .chars()
+            .map(|c| {
+                if c == '\0' || c > '\u{FFFF}' {
+                    '\u{FFFD}'
+                } else {
+                    c
+                }
+            })
+            .collect();
+        let mut end = clean.len().min(usize::from(u16::MAX));
+        while !clean.is_char_boundary(end) {
+            end -= 1;
+        }
+        self.buf.extend_from_slice(&(end as u16).to_be_bytes());
+        self.buf.extend_from_slice(&clean.as_bytes()[..end]);
         self
     }
 

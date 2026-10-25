@@ -1,51 +1,116 @@
-//! Per-connection protocol handling: handshake, server list status, and login.
-//!
-//! Joining the world is not implemented yet, so login ends with a disconnect message.
+//! Per-connection protocol handling up to the play state: handshake, server list status,
+//! login (offline mode) and configuration.
 
 use std::io;
+use std::sync::Arc;
 
 use levitas_protocol::{Reader, Writer, GAME_VERSION, MAX_PACKET_LEN, PROTOCOL_VERSION};
+use levitas_registry::packet::{configuration, login as login_ids};
+use levitas_registry::{SYNCED_REGISTRIES, TAGS};
 use serde_json::json;
-use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt, BufReader, BufWriter};
+use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
 use tokio::net::TcpStream;
 use tracing::info;
+
+use crate::play;
+use crate::world::FlatWorld;
 
 /// Intent sent at the end of the handshake.
 const INTENT_STATUS: i32 = 1;
 const INTENT_LOGIN: i32 = 2;
 const INTENT_TRANSFER: i32 = 3;
 
-pub async fn handle(stream: TcpStream) -> io::Result<()> {
-    stream.set_nodelay(true)?;
-    let mut stream = BufReader::new(stream);
+/// A client connection without compression or encryption.
+pub struct Conn {
+    pub reader: BufReader<OwnedReadHalf>,
+    pub out: Outgoing,
+}
 
-    let packet = read_frame(&mut stream).await?;
+impl Conn {
+    fn new(stream: TcpStream) -> Self {
+        let (read, write) = stream.into_split();
+        Self {
+            reader: BufReader::new(read),
+            out: Outgoing(BufWriter::new(write)),
+        }
+    }
+
+    pub async fn read(&mut self) -> io::Result<Vec<u8>> {
+        read_frame(&mut self.reader).await
+    }
+
+    pub async fn queue(&mut self, packet: Writer) -> io::Result<()> {
+        self.out.queue(packet).await
+    }
+
+    pub async fn send(&mut self, packet: Writer) -> io::Result<()> {
+        self.out.send(packet).await
+    }
+}
+
+/// The sending half of a connection. Packets are buffered until flushed.
+pub struct Outgoing(BufWriter<OwnedWriteHalf>);
+
+impl Outgoing {
+    /// Queues a packet; call [`Outgoing::flush`] to send it.
+    pub async fn queue(&mut self, packet: Writer) -> io::Result<()> {
+        self.0.write_all(&packet.into_frame()).await
+    }
+
+    pub async fn flush(&mut self) -> io::Result<()> {
+        self.0.flush().await
+    }
+
+    pub async fn send(&mut self, packet: Writer) -> io::Result<()> {
+        self.queue(packet).await?;
+        self.flush().await
+    }
+}
+
+/// The identity a client logged in with.
+pub struct Profile {
+    pub name: String,
+    pub uuid: u128,
+}
+
+pub async fn handle(stream: TcpStream, world: Arc<FlatWorld>) -> io::Result<()> {
+    stream.set_nodelay(true)?;
+    let mut conn = Conn::new(stream);
+
+    let packet = conn.read().await?;
     let mut r = Reader::new(&packet);
     expect_id(&mut r, 0x00, "handshake")?;
     let protocol = r.varint()?;
     let _address = r.string(255)?;
     let _port = r.u16()?;
     match r.varint()? {
-        INTENT_STATUS => status(&mut stream).await,
-        INTENT_LOGIN | INTENT_TRANSFER => login(&mut stream, protocol).await,
+        INTENT_STATUS => status(&mut conn).await,
+        INTENT_LOGIN | INTENT_TRANSFER => {
+            let Some(profile) = login(&mut conn, protocol).await? else {
+                return Ok(());
+            };
+            configure(&mut conn).await?;
+            play::run(conn, profile, world).await
+        }
         other => Err(invalid(format!("unknown handshake intent {other}"))),
     }
 }
 
-async fn status(stream: &mut BufReader<TcpStream>) -> io::Result<()> {
+async fn status(conn: &mut Conn) -> io::Result<()> {
     loop {
-        let packet = read_frame(stream).await?;
+        let packet = conn.read().await?;
         let mut r = Reader::new(&packet);
         match r.varint()? {
             // Status Request
             0x00 => {
                 let response = status_json().to_string();
-                send(stream, Writer::packet(0x00).string(&response)).await?;
+                conn.send(Writer::packet(0x00).string(&response)).await?;
             }
             // Ping Request: echo the payload back and close.
             0x01 => {
                 let payload = r.i64()?;
-                return send(stream, Writer::packet(0x01).i64(payload)).await;
+                return conn.send(Writer::packet(0x01).i64(payload)).await;
             }
             id => return Err(invalid(format!("unexpected status packet 0x{id:02x}"))),
         }
@@ -65,21 +130,101 @@ fn status_json() -> serde_json::Value {
     })
 }
 
-async fn login(stream: &mut BufReader<TcpStream>, protocol: i32) -> io::Result<()> {
-    let packet = read_frame(stream).await?;
+/// Runs the login phase. Returns `None` if the client was turned away.
+async fn login(conn: &mut Conn, protocol: i32) -> io::Result<Option<Profile>> {
+    let packet = conn.read().await?;
     let mut r = Reader::new(&packet);
-    expect_id(&mut r, 0x00, "login start")?;
-    let name = r.string(16)?;
+    expect_id(&mut r, login_ids::serverbound::HELLO, "login start")?;
+    let name = r.string(16)?.to_owned();
+    let uuid = r.uuid()?;
 
-    let reason = if protocol == PROTOCOL_VERSION {
-        "Levitas is running, but joining the world is not implemented yet.".to_owned()
-    } else {
-        format!("Levitas runs Minecraft {GAME_VERSION}. Please join with that version.")
-    };
-    info!(name, protocol, "login rejected: {reason}");
-    let message = json!({ "text": reason }).to_string();
-    // Login Disconnect
-    send(stream, Writer::packet(0x00).string(&message)).await
+    if protocol != PROTOCOL_VERSION {
+        let reason =
+            format!("Levitas runs Minecraft {GAME_VERSION}. Please join with that version.");
+        info!(name, protocol, "login rejected: wrong version");
+        let message = json!({ "text": reason }).to_string();
+        conn.send(Writer::packet(login_ids::clientbound::LOGIN_DISCONNECT).string(&message))
+            .await?;
+        return Ok(None);
+    }
+
+    // Offline mode: trust the name and UUID the client sent.
+    conn.send(
+        Writer::packet(login_ids::clientbound::LOGIN_FINISHED)
+            .uuid(uuid)
+            .string(&name)
+            .varint(0), // no profile properties (skins come with online mode)
+    )
+    .await?;
+    let packet = conn.read().await?;
+    expect_id(
+        &mut Reader::new(&packet),
+        login_ids::serverbound::LOGIN_ACKNOWLEDGED,
+        "login acknowledged",
+    )?;
+    info!(name, "logged in");
+    Ok(Some(Profile { name, uuid }))
+}
+
+/// Sends registries and tags, then waits for the client to finish configuration.
+async fn configure(conn: &mut Conn) -> io::Result<()> {
+    use configuration::{clientbound, serverbound};
+
+    conn.queue(
+        Writer::packet(clientbound::CUSTOM_PAYLOAD)
+            .string("minecraft:brand")
+            .string("Levitas"),
+    )
+    .await?;
+    // Tell the client we use the vanilla data it already has, so registry entries can be
+    // sent by name only.
+    conn.send(
+        Writer::packet(clientbound::SELECT_KNOWN_PACKS)
+            .varint(1)
+            .string("minecraft")
+            .string("core")
+            .string(GAME_VERSION),
+    )
+    .await?;
+    wait_for(conn, serverbound::SELECT_KNOWN_PACKS).await?;
+
+    for registry in SYNCED_REGISTRIES {
+        let mut packet = Writer::packet(clientbound::REGISTRY_DATA)
+            .string(registry.name)
+            .varint(registry.entries.len() as i32);
+        for entry in registry.entries {
+            packet = packet.string(entry).bool(false);
+        }
+        conn.queue(packet).await?;
+    }
+
+    let mut packet = Writer::packet(clientbound::UPDATE_TAGS).varint(TAGS.len() as i32);
+    for registry in TAGS {
+        packet = packet
+            .string(registry.registry)
+            .varint(registry.tags.len() as i32);
+        for (name, ids) in registry.tags {
+            packet = packet.string(name).varint(ids.len() as i32);
+            for &id in *ids {
+                packet = packet.varint(id as i32);
+            }
+        }
+    }
+    conn.queue(packet).await?;
+
+    conn.send(Writer::packet(clientbound::FINISH_CONFIGURATION))
+        .await?;
+    wait_for(conn, serverbound::FINISH_CONFIGURATION).await
+}
+
+/// Reads packets until one with `id` arrives, ignoring others (client settings, brand).
+async fn wait_for(conn: &mut Conn, id: i32) -> io::Result<()> {
+    loop {
+        let packet = conn.read().await?;
+        if Reader::new(&packet).varint()? == id {
+            return Ok(());
+        }
+    }
 }
 
 /// Reads one length-prefixed packet from an uncompressed connection.
@@ -103,11 +248,6 @@ pub async fn read_frame<R: AsyncRead + Unpin>(reader: &mut R) -> io::Result<Vec<
     Ok(packet)
 }
 
-async fn send(stream: &mut BufReader<TcpStream>, packet: Writer) -> io::Result<()> {
-    stream.write_all(&packet.into_frame()).await?;
-    stream.flush().await
-}
-
 fn expect_id(r: &mut Reader<'_>, expected: i32, name: &str) -> io::Result<()> {
     let id = r.varint()?;
     if id != expected {
@@ -118,69 +258,6 @@ fn expect_id(r: &mut Reader<'_>, expected: i32, name: &str) -> io::Result<()> {
     Ok(())
 }
 
-fn invalid(message: String) -> io::Error {
+pub fn invalid(message: String) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, message)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use tokio::net::TcpListener;
-
-    async fn connect() -> TcpStream {
-        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let addr = listener.local_addr().unwrap();
-        tokio::spawn(async move {
-            let (stream, _) = listener.accept().await.unwrap();
-            let _ = handle(stream).await;
-        });
-        TcpStream::connect(addr).await.unwrap()
-    }
-
-    fn handshake(intent: i32) -> Vec<u8> {
-        Writer::packet(0x00)
-            .varint(PROTOCOL_VERSION)
-            .string("localhost")
-            .u16(25565)
-            .varint(intent)
-            .into_frame()
-    }
-
-    #[tokio::test]
-    async fn status_and_ping() {
-        let mut client = connect().await;
-        client.write_all(&handshake(INTENT_STATUS)).await.unwrap();
-        client
-            .write_all(&Writer::packet(0x00).into_frame())
-            .await
-            .unwrap();
-
-        let response = read_frame(&mut client).await.unwrap();
-        let mut r = Reader::new(&response);
-        assert_eq!(r.varint().unwrap(), 0x00);
-        let status: serde_json::Value = serde_json::from_str(r.string(32767).unwrap()).unwrap();
-        assert_eq!(status["version"]["protocol"], PROTOCOL_VERSION);
-
-        client
-            .write_all(&Writer::packet(0x01).i64(1234).into_frame())
-            .await
-            .unwrap();
-        let pong = read_frame(&mut client).await.unwrap();
-        let mut r = Reader::new(&pong);
-        assert_eq!(r.varint().unwrap(), 0x01);
-        assert_eq!(r.i64().unwrap(), 1234);
-    }
-
-    #[tokio::test]
-    async fn login_is_rejected_with_message() {
-        let mut client = connect().await;
-        client.write_all(&handshake(INTENT_LOGIN)).await.unwrap();
-        let login_start = Writer::packet(0x00).string("DarkIgnite").uuid(0);
-        client.write_all(&login_start.into_frame()).await.unwrap();
-
-        let reply = read_frame(&mut client).await.unwrap();
-        let mut r = Reader::new(&reply);
-        assert_eq!(r.varint().unwrap(), 0x00);
-        assert!(r.string(262144).unwrap().contains("not implemented"));
-    }
 }

@@ -46,6 +46,7 @@ name = "levitas-server"
 version = "0.1.0"
 dependencies = [
  "levitas-protocol",
+ "levitas-registry",
  "serde_json",
  "tokio",
  "tracing",
