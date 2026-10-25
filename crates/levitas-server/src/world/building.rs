@@ -72,8 +72,9 @@ impl World {
                             self.block_entities.insert(q, entity);
                         }
                     }
-                    for &(q, _) in &blocks {
+                    for &(q, state) in &blocks {
                         self.update_neighbors(q);
+                        self.check_falling(q, state);
                     }
                     if survival {
                         let p = self.players.get_mut(&id).expect("player exists");
@@ -178,6 +179,7 @@ impl World {
     pub(super) fn set_block_updating(&mut self, pos: BlockPos, state: u16) {
         self.set_block(pos, state);
         self.update_neighbors(pos);
+        self.check_falling(pos, state);
     }
 
     /// Re-evaluates the blocks around `origin` after it changed, and so on outwards for as
@@ -197,6 +199,7 @@ impl World {
             let old = self.block(pos);
             let new = blocks::updated(old, pos, &mut |q| self.block(q));
             if new == old {
+                self.check_falling(pos, old);
                 continue;
             }
             if is_air(new) {
@@ -204,7 +207,31 @@ impl World {
             } else {
                 self.set_block(pos, new);
             }
+            self.check_falling(pos, new);
             queue.extend(Dir::ALL.map(|d| offset(pos, d)));
+        }
+    }
+
+    pub(super) fn check_falling(&mut self, pos: BlockPos, state: u16) {
+        if !self.chunks.contains_key(&pos.chunk()) {
+            return;
+        }
+        let can_fall = if blocks::is_gravity_block(state) {
+            pos.y > MIN_Y && blocks::can_fall_through(self.block(offset(pos, Dir::Down)))
+        } else if blocks::is_stalactite(state) {
+            pos.y > MIN_Y && !blocks::stalactite_supported(pos, &mut |q| self.block(q))
+        } else {
+            false
+        };
+        if can_fall {
+            let first = BlockInfo::of(state).first_state;
+            if !self
+                .scheduled
+                .iter()
+                .any(|t| t.pos == pos && t.block == first)
+            {
+                self.schedule(pos, state, 2);
+            }
         }
     }
 
@@ -255,6 +282,18 @@ impl World {
             if block_has_tag(state, "minecraft:buttons") && prop(state, "powered") == Some("true") {
                 self.set_block_updating(tick.pos, with_bool(state, "powered", false));
                 self.play_sound(&button_sound(blocks::name(state), false), tick.pos, None);
+            }
+            let can_fall = if blocks::is_gravity_block(state) {
+                tick.pos.y > MIN_Y
+                    && blocks::can_fall_through(self.block(offset(tick.pos, Dir::Down)))
+            } else if blocks::is_stalactite(state) {
+                tick.pos.y > MIN_Y
+                    && !blocks::stalactite_supported(tick.pos, &mut |q| self.block(q))
+            } else {
+                false
+            };
+            if can_fall {
+                self.spawn_falling_block(tick.pos, state);
             }
         }
     }

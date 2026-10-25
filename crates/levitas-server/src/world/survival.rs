@@ -45,6 +45,10 @@ pub enum Damage {
     Void,
     Starve,
     Kill,
+    FallingAnvil,
+    #[allow(dead_code)]
+    FallingBlock,
+    FallingStalactite,
 }
 
 impl Damage {
@@ -54,6 +58,9 @@ impl Damage {
             Damage::Void => "minecraft:out_of_world",
             Damage::Starve => "minecraft:starve",
             Damage::Kill => "minecraft:generic_kill",
+            Damage::FallingAnvil => "minecraft:falling_anvil",
+            Damage::FallingBlock => "minecraft:falling_block",
+            Damage::FallingStalactite => "minecraft:falling_stalactite",
         }
     }
 
@@ -63,6 +70,9 @@ impl Damage {
             Damage::Void => format!("{name} fell out of the world"),
             Damage::Starve => format!("{name} starved to death"),
             Damage::Kill => format!("{name} was killed"),
+            Damage::FallingAnvil => format!("{name} was squashed by a falling anvil"),
+            Damage::FallingBlock => format!("{name} was squashed by a falling block"),
+            Damage::FallingStalactite => format!("{name} was skewered by a falling stalactite"),
         }
     }
 

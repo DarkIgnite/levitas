@@ -53,7 +53,7 @@ fn item_data(id: i32, stack: Stack) -> Writer {
     crate::inventory::write_stack(packet, stack).u8(0xFF) // end of entity data
 }
 
-fn remove_entity(id: i32) -> Writer {
+pub(super) fn remove_entity(id: i32) -> Writer {
     Writer::packet(clientbound::REMOVE_ENTITIES)
         .varint(1)
         .varint(id)

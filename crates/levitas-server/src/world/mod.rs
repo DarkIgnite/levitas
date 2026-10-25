@@ -5,6 +5,7 @@
 mod building;
 mod commands;
 mod containers;
+mod falling;
 mod fluids;
 mod items;
 mod storage;
@@ -315,6 +316,7 @@ struct World {
     spawn: [f64; 3],
     players: HashMap<i32, Player>,
     items: HashMap<i32, ItemEntity>,
+    falling_blocks: HashMap<i32, falling::FallingBlock>,
     block_entities: HashMap<BlockPos, BlockEntity>,
     scheduled: Vec<ScheduledTick>,
     terrain: Arc<dyn Terrain>,
@@ -376,6 +378,7 @@ impl World {
             ],
             players: HashMap::new(),
             items: HashMap::new(),
+            falling_blocks: HashMap::new(),
             block_entities: HashMap::new(),
             scheduled: Vec::new(),
             terrain,
@@ -586,6 +589,9 @@ impl World {
         for (&item_id, item) in &self.items {
             packets.extend(items::spawn_packets(item_id, item));
         }
+        for (&falling_id, falling) in &self.falling_blocks {
+            packets.push(falling::spawn_packet(falling_id, falling));
+        }
         for packet in packets {
             self.send(id, packet);
         }
@@ -675,7 +681,24 @@ impl World {
             p.center = chunk;
             self.update_view(id);
         }
-        if fallen > 3.0 {
+        let ground_pos = BlockPos::new(feet.x, feet.y - 1, feet.z);
+        let at_ground = self
+            .chunks
+            .get(&ground_pos.chunk())
+            .filter(|_| (MIN_Y..=MAX_Y).contains(&ground_pos.y))
+            .map_or(block::AIR, |c| {
+                c.get(
+                    (ground_pos.x & 15) as usize,
+                    ground_pos.y,
+                    (ground_pos.z & 15) as usize,
+                )
+            });
+        if (crate::blocks::is_stalagmite(at_feet) || crate::blocks::is_stalagmite(at_ground))
+            && fallen > 0.0
+        {
+            let dmg = (fallen * 2.0 - 1.0).floor().max(1.0) as f32;
+            self.damage(id, dmg, survival::Damage::FallingStalactite);
+        } else if fallen > 3.0 {
             self.damage(id, (fallen - 3.0).ceil() as f32, survival::Damage::Fall);
         }
     }
@@ -866,6 +889,7 @@ impl World {
         }
         self.tick_scheduled();
         self.tick_fluids();
+        self.tick_falling_blocks();
         self.tick_survival();
         self.tick_items();
         self.tick_furnaces();

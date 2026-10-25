@@ -345,3 +345,84 @@ fn buttons_and_pistons() {
     let piston = w.place(state("minecraft:piston"), look_down).unwrap()[0].1;
     assert_eq!(prop(piston, "facing"), Some("up"));
 }
+
+#[test]
+fn gravity_blocks_recognized() {
+    assert!(is_gravity_block(state("minecraft:sand")));
+    assert!(is_gravity_block(state("minecraft:red_sand")));
+    assert!(is_gravity_block(state("minecraft:gravel")));
+    assert!(is_gravity_block(state("minecraft:suspicious_sand")));
+    assert!(is_gravity_block(state("minecraft:suspicious_gravel")));
+    assert!(is_gravity_block(state("minecraft:white_concrete_powder")));
+    assert!(is_gravity_block(state("minecraft:black_concrete_powder")));
+    assert!(is_gravity_block(state("minecraft:anvil")));
+    assert!(is_gravity_block(state("minecraft:chipped_anvil")));
+    assert!(is_gravity_block(state("minecraft:damaged_anvil")));
+    assert!(is_gravity_block(state("minecraft:dragon_egg")));
+
+    assert!(!is_gravity_block(block::STONE));
+    assert!(!is_gravity_block(block::DIRT));
+    assert!(!is_gravity_block(block::AIR));
+}
+
+#[test]
+fn concrete_powder_hardens_on_water_contact() {
+    let mut w = World::new();
+    let powder = state("minecraft:red_concrete_powder");
+    let concrete = state("minecraft:red_concrete");
+    let water = state("minecraft:water");
+
+    // Without water, powder stays powder.
+    let p1 = pos(1, 1, 1);
+    w.set(p1, powder);
+    assert_eq!(w.update(p1), powder);
+
+    // With water on the side, powder hardens.
+    w.set(pos(2, 1, 1), water);
+    assert_eq!(w.update(p1), concrete);
+
+    // With water on top, powder hardens.
+    let p2 = pos(5, 1, 5);
+    w.set(p2, powder);
+    w.set(pos(5, 2, 5), water);
+    assert_eq!(w.update(p2), concrete);
+}
+
+#[test]
+fn pointed_dripstone_orientation_and_support() {
+    let mut w = World::new();
+    let stone = block::STONE;
+    let stalactite = with(
+        state("minecraft:pointed_dripstone"),
+        "vertical_direction",
+        "down",
+    );
+    let stalagmite = with(
+        state("minecraft:pointed_dripstone"),
+        "vertical_direction",
+        "up",
+    );
+
+    assert!(is_stalactite(stalactite));
+    assert!(!is_stalactite(stalagmite));
+    assert!(is_stalagmite(stalagmite));
+    assert!(!is_stalagmite(stalactite));
+
+    // Stalagmite on stone floor survives, pops when floor removed.
+    let floor = pos(0, 0, 0);
+    let drip_pos = pos(0, 1, 0);
+    w.set(floor, stone);
+    w.set(drip_pos, stalagmite);
+    assert_eq!(w.update(drip_pos), stalagmite);
+    w.set(floor, block::AIR);
+    assert_eq!(w.update(drip_pos), block::AIR);
+
+    // Stalactite hanging from stone ceiling is supported.
+    let ceiling = pos(3, 3, 3);
+    let hang_pos = pos(3, 2, 3);
+    w.set(ceiling, stone);
+    w.set(hang_pos, stalactite);
+    assert!(stalactite_supported(hang_pos, &mut |q| w.get(q)));
+    w.set(ceiling, block::AIR);
+    assert!(!stalactite_supported(hang_pos, &mut |q| w.get(q)));
+}

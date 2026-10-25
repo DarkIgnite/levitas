@@ -110,6 +110,12 @@ pub fn place(
     {
         state = with_bool(state, "waterlogged", true);
     }
+    if fluid::fluid_at(existing).is_some_and(|f| f.fluid == fluid::Fluid::Water) {
+        if let Some(concrete) = concrete_from_powder(state) {
+            state = concrete;
+        }
+    }
+    state = concrete_hardens(state, target, get);
 
     // Two-part blocks claim their second position too.
     let mut blocks = vec![(target, state)];

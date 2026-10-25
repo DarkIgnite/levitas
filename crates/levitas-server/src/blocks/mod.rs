@@ -151,7 +151,7 @@ pub fn same_block(a: u16, b: u16) -> bool {
     BlockInfo::of(a).first_state == BlockInfo::of(b).first_state
 }
 
-fn facing(state: u16) -> Option<Dir> {
+pub fn facing(state: u16) -> Option<Dir> {
     prop(state, "facing").and_then(Dir::from_name)
 }
 
@@ -333,6 +333,16 @@ pub fn can_survive(state: u16, pos: BlockPos, get: &mut impl FnMut(BlockPos) -> 
         || n.ends_with("lantern");
     if needs_center {
         return supports_center_top(ground);
+    }
+    if is_stalagmite(state) {
+        return sturdy(ground, Dir::Up) || is_stalagmite(ground);
+    }
+    if n == "minecraft:scaffolding" {
+        let supported_below = sturdy(ground, Dir::Up) || name(ground) == "minecraft:scaffolding";
+        let supported_side = Dir::HORIZONTAL
+            .into_iter()
+            .any(|d| name(get(offset(pos, d))) == "minecraft:scaffolding");
+        return supported_below || supported_side;
     }
     let needs_floor = n == "minecraft:redstone_wire"
         || n == "minecraft:repeater"
@@ -546,6 +556,69 @@ pub fn chest_partner(state: u16, pos: BlockPos) -> Option<BlockPos> {
     chest_partner_side(state).map(|side| offset(pos, side))
 }
 
+/// Whether this block falls with gravity when unsupported from below.
+pub fn is_gravity_block(state: u16) -> bool {
+    block_has_tag(state, "minecraft:sand")
+        || block_has_tag(state, "minecraft:concrete_powder")
+        || block_has_tag(state, "minecraft:anvil")
+        || matches!(
+            name(state),
+            "minecraft:gravel" | "minecraft:suspicious_gravel" | "minecraft:dragon_egg"
+        )
+}
+
+/// A pointed dripstone pointing down (stalactite, hangs from ceiling).
+pub fn is_stalactite(state: u16) -> bool {
+    name(state) == "minecraft:pointed_dripstone"
+        && prop(state, "vertical_direction") == Some("down")
+}
+
+/// A pointed dripstone pointing up (stalagmite, grows from ground).
+pub fn is_stalagmite(state: u16) -> bool {
+    name(state) == "minecraft:pointed_dripstone" && prop(state, "vertical_direction") == Some("up")
+}
+
+/// Whether a falling block can fall through (or into) this block.
+pub fn can_fall_through(state: u16) -> bool {
+    is_air(state)
+        || block_has_tag(state, "minecraft:replaceable")
+        || block_has_tag(state, "minecraft:fire")
+}
+
+/// Whether a stalactite has a sturdy block or another stalactite above it to hold it up.
+pub fn stalactite_supported(pos: BlockPos, get: &mut impl FnMut(BlockPos) -> u16) -> bool {
+    let above = get(offset(pos, Dir::Up));
+    sturdy(above, Dir::Down) || is_stalactite(above)
+}
+
+/// Turns concrete powder into its solid concrete counterpart.
+pub fn concrete_from_powder(state: u16) -> Option<u16> {
+    let concrete_name = name(state).strip_suffix("_powder")?;
+    BlockInfo::by_name(concrete_name).map(|info| info.default_state)
+}
+
+/// Hardens concrete powder into concrete if it touches water on any horizontal side,
+/// from above, or inside itself.
+pub fn concrete_hardens(state: u16, pos: BlockPos, get: &mut impl FnMut(BlockPos) -> u16) -> u16 {
+    if !block_has_tag(state, "minecraft:concrete_powder") {
+        return state;
+    }
+    if fluid::fluid_at(state).is_some_and(|f| f.fluid == fluid::Fluid::Water) {
+        return concrete_from_powder(state).unwrap_or(state);
+    }
+    let up = get(offset(pos, Dir::Up));
+    if fluid::fluid_at(up).is_some_and(|f| f.fluid == fluid::Fluid::Water) {
+        return concrete_from_powder(state).unwrap_or(state);
+    }
+    for dir in Dir::HORIZONTAL {
+        let neighbor = get(offset(pos, dir));
+        if fluid::fluid_at(neighbor).is_some_and(|f| f.fluid == fluid::Fluid::Water) {
+            return concrete_from_powder(state).unwrap_or(state);
+        }
+    }
+    state
+}
+
 /// What a block looks like after a neighbour changed: popped (air) if it can no longer
 /// stay, otherwise with its connections refreshed.
 pub fn updated(state: u16, pos: BlockPos, get: &mut impl FnMut(BlockPos) -> u16) -> u16 {
@@ -555,6 +628,7 @@ pub fn updated(state: u16, pos: BlockPos, get: &mut impl FnMut(BlockPos) -> u16)
     if !can_survive(state, pos, get) {
         return block::AIR;
     }
+    let state = concrete_hardens(state, pos, get);
     connect(state, pos, get)
 }
 

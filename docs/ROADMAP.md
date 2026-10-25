@@ -85,7 +85,14 @@ Known gaps are listed under each phase instead of being hidden.
       not waterlog it, and flowing water does not push dropped items.
 - [x] Lava and water interaction (cobblestone, stone, obsidian, basalt)
 - [ ] Swimming, drowning, fire and lava damage, burning, fire spread
-- [ ] Falling blocks: sand, gravel, concrete powder, anvils, pointed dripstone
+- [x] Falling blocks: sand, gravel, concrete powder, anvils, pointed dripstone.
+      Gravity blocks schedule a 2-tick block tick on update, spawn a falling block entity
+      (type 49, with state ID), simulate gravity and drag, and land or shatter into items
+      (e.g. on torches). Concrete powder hardens into concrete touching water (vertically,
+      horizontally, or falling through water). Anvils squash entities, deal falling anvil
+      damage, crush fragile non-solid blocks, and degrade or break. Pointed dripstone
+      stalactites fall when ungrounded from ceiling, deal stalactite damage, and drop items;
+      stalagmites pop off without floor and double player fall damage.
 - [x] Real lighting: sky light and block light, propagated and updated on change
       (`levitas_world::lighting`), sent to players as light updates and saved.
       Known gaps: slabs and stairs let light through like air, and light is not

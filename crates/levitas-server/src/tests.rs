@@ -1106,3 +1106,303 @@ async fn water_turns_a_lava_source_into_obsidian() {
         }
     }
 }
+
+#[tokio::test]
+async fn sand_falls_when_unsupported_below() {
+    let mut alice = join(server().await, "Alice", 1).await;
+    read_until(&mut alice, play::clientbound::PLAYER_POSITION).await;
+    command(&mut alice, "gamemode creative").await;
+
+    // Place dirt at (5, -60, 5).
+    give(&mut alice, "dirt", 1).await;
+    send(&mut alice, use_on(BlockPos::new(5, -61, 5), 1, 1)).await;
+    assert_eq!(
+        block_at(&mut alice, BlockPos::new(5, -60, 5)).await,
+        block::DIRT
+    );
+
+    // Switch to hotbar 1 and place sand on top of dirt at (5, -59, 5).
+    give(&mut alice, "sand", 1).await;
+    send(
+        &mut alice,
+        Writer::packet(play::serverbound::SET_CARRIED_ITEM).i16(1),
+    )
+    .await;
+    send(&mut alice, use_on(BlockPos::new(5, -60, 5), 1, 2)).await;
+    let sand_state = block_at(&mut alice, BlockPos::new(5, -59, 5)).await;
+    assert_eq!(
+        levitas_registry::BlockInfo::of(sand_state).name,
+        "minecraft:sand"
+    );
+
+    // Break the dirt block at (5, -60, 5).
+    send(
+        &mut alice,
+        Writer::packet(play::serverbound::PLAYER_ACTION)
+            .varint(0)
+            .position(BlockPos::new(5, -60, 5))
+            .u8(1)
+            .varint(3),
+    )
+    .await;
+    assert_eq!(
+        block_at(&mut alice, BlockPos::new(5, -60, 5)).await,
+        block::AIR
+    );
+
+    // The sand block should fall:
+    // First (5, -59, 5) becomes AIR when it spawns as an entity.
+    assert_eq!(
+        block_at(&mut alice, BlockPos::new(5, -59, 5)).await,
+        block::AIR
+    );
+    // Then it lands at (5, -60, 5).
+    let landed = block_at(&mut alice, BlockPos::new(5, -60, 5)).await;
+    assert_eq!(
+        levitas_registry::BlockInfo::of(landed).name,
+        "minecraft:sand"
+    );
+}
+
+#[tokio::test]
+async fn sand_breaks_into_item_on_torch() {
+    let mut alice = join(server().await, "Alice", 1).await;
+    read_until(&mut alice, play::clientbound::PLAYER_POSITION).await;
+    command(&mut alice, "gamemode creative").await;
+
+    // Place a torch on top of grass at (2, -60, 2).
+    give(&mut alice, "torch", 1).await;
+    send(&mut alice, use_on(BlockPos::new(2, -61, 2), 1, 1)).await;
+    let torch_pos = BlockPos::new(2, -60, 2);
+    assert_eq!(
+        levitas_registry::BlockInfo::of(block_at(&mut alice, torch_pos).await).name,
+        "minecraft:torch"
+    );
+
+    // Place support dirt at (3, -60, 2) and (3, -59, 2), then (2, -59, 2).
+    give(&mut alice, "dirt", 1).await;
+    send(
+        &mut alice,
+        Writer::packet(play::serverbound::SET_CARRIED_ITEM).i16(1),
+    )
+    .await;
+    send(&mut alice, use_on(BlockPos::new(3, -61, 2), 1, 2)).await;
+    block_at(&mut alice, BlockPos::new(3, -60, 2)).await;
+    send(&mut alice, use_on(BlockPos::new(3, -60, 2), 1, 3)).await;
+    block_at(&mut alice, BlockPos::new(3, -59, 2)).await;
+    send(&mut alice, use_on(BlockPos::new(3, -59, 2), 4, 4)).await; // west face -> (2, -59, 2)
+    block_at(&mut alice, BlockPos::new(2, -59, 2)).await;
+
+    // Place sand above torch at (2, -58, 2).
+    give(&mut alice, "sand", 1).await;
+    send(
+        &mut alice,
+        Writer::packet(play::serverbound::SET_CARRIED_ITEM).i16(2),
+    )
+    .await;
+    send(&mut alice, use_on(BlockPos::new(2, -59, 2), 1, 5)).await;
+    block_at(&mut alice, BlockPos::new(2, -58, 2)).await;
+
+    // Break support dirt at (2, -59, 2).
+    send(
+        &mut alice,
+        Writer::packet(play::serverbound::PLAYER_ACTION)
+            .varint(0)
+            .position(BlockPos::new(2, -59, 2))
+            .u8(1)
+            .varint(6),
+    )
+    .await;
+    assert_eq!(
+        block_at(&mut alice, BlockPos::new(2, -59, 2)).await,
+        block::AIR
+    );
+
+    // The sand turns into an entity: (2, -58, 2) becomes AIR.
+    assert_eq!(
+        block_at(&mut alice, BlockPos::new(2, -58, 2)).await,
+        block::AIR
+    );
+
+    // It lands on the torch and shatters into a dropped item (entity type ITEM).
+    let body = read_until(&mut alice, play::clientbound::ADD_ENTITY).await;
+    let mut r = Reader::new(&body);
+    r.varint().unwrap();
+    r.uuid().unwrap();
+    assert_eq!(r.varint().unwrap(), levitas_registry::entity_type::ITEM);
+}
+
+#[tokio::test]
+async fn concrete_powder_solidifies_in_water() {
+    let mut alice = join(server().await, "Alice", 1).await;
+    read_until(&mut alice, play::clientbound::PLAYER_POSITION).await;
+    command(&mut alice, "gamemode creative").await;
+
+    // Alice stands looking down at (2, 2) to place water.
+    give(&mut alice, "water_bucket", 1).await;
+    stand_looking_down(&mut alice, 2, 2).await;
+    sync(&mut alice, "Alice").await;
+    send(&mut alice, use_item(1)).await;
+    let water_pos = BlockPos::new(2, -60, 2);
+    loop {
+        if fluid_level(block_at(&mut alice, water_pos).await, "minecraft:water") == Some(0) {
+            break;
+        }
+    }
+
+    // Step aside so Alice does not obstruct placing the pillar.
+    send(
+        &mut alice,
+        Writer::packet(play::serverbound::MOVE_PLAYER_POS_ROT)
+            .f64(0.5)
+            .f64(-60.0)
+            .f64(0.5)
+            .f32(0.0)
+            .f32(0.0)
+            .u8(1),
+    )
+    .await;
+    sync(&mut alice, "Alice").await;
+
+    // Place support dirt: (3, -60, 2) and (3, -59, 2), then (2, -59, 2).
+    give(&mut alice, "dirt", 1).await;
+    send(
+        &mut alice,
+        Writer::packet(play::serverbound::SET_CARRIED_ITEM).i16(1),
+    )
+    .await;
+    send(&mut alice, use_on(BlockPos::new(3, -61, 2), 1, 2)).await;
+    block_at(&mut alice, BlockPos::new(3, -60, 2)).await;
+    send(&mut alice, use_on(BlockPos::new(3, -60, 2), 1, 3)).await;
+    block_at(&mut alice, BlockPos::new(3, -59, 2)).await;
+    send(&mut alice, use_on(BlockPos::new(3, -59, 2), 4, 4)).await;
+    block_at(&mut alice, BlockPos::new(2, -59, 2)).await;
+
+    // Place yellow concrete powder at (2, -58, 2).
+    give(&mut alice, "yellow_concrete_powder", 1).await;
+    send(
+        &mut alice,
+        Writer::packet(play::serverbound::SET_CARRIED_ITEM).i16(2),
+    )
+    .await;
+    send(&mut alice, use_on(BlockPos::new(2, -59, 2), 1, 5)).await;
+    block_at(&mut alice, BlockPos::new(2, -58, 2)).await;
+
+    // Break support dirt at (2, -59, 2).
+    send(
+        &mut alice,
+        Writer::packet(play::serverbound::PLAYER_ACTION)
+            .varint(0)
+            .position(BlockPos::new(2, -59, 2))
+            .u8(1)
+            .varint(6),
+    )
+    .await;
+
+    // When the falling yellow concrete powder enters the water at (2, -60, 2),
+    // it solidifies into yellow concrete!
+    let solid = loop {
+        let s = block_at(&mut alice, water_pos).await;
+        if levitas_registry::BlockInfo::of(s).name == "minecraft:yellow_concrete" {
+            break s;
+        }
+    };
+    assert_eq!(
+        levitas_registry::BlockInfo::of(solid).name,
+        "minecraft:yellow_concrete"
+    );
+}
+
+#[tokio::test]
+async fn falling_anvil_damages_player_and_crushes_torch() {
+    let addr = server().await;
+    let mut alice = join(addr, "Alice", 1).await;
+    read_until(&mut alice, play::clientbound::PLAYER_POSITION).await;
+    command(&mut alice, "gamemode creative").await;
+
+    let mut bob = join(addr, "Bob", 2).await;
+    read_until(&mut bob, play::clientbound::PLAYER_POSITION).await;
+
+    // Alice places a torch on top of grass at (2, -60, 2).
+    give(&mut alice, "torch", 1).await;
+    send(&mut alice, use_on(BlockPos::new(2, -61, 2), 1, 1)).await;
+    let torch_pos = BlockPos::new(2, -60, 2);
+    assert_eq!(
+        levitas_registry::BlockInfo::of(block_at(&mut alice, torch_pos).await).name,
+        "minecraft:torch"
+    );
+
+    // Alice builds a support dirt pillar to y = -57, then places dirt at (2, -57, 2).
+    give(&mut alice, "dirt", 64).await;
+    send(
+        &mut alice,
+        Writer::packet(play::serverbound::SET_CARRIED_ITEM).i16(1),
+    )
+    .await;
+    send(&mut alice, use_on(BlockPos::new(3, -61, 2), 1, 2)).await;
+    block_at(&mut alice, BlockPos::new(3, -60, 2)).await;
+    send(&mut alice, use_on(BlockPos::new(3, -60, 2), 1, 3)).await;
+    block_at(&mut alice, BlockPos::new(3, -59, 2)).await;
+    send(&mut alice, use_on(BlockPos::new(3, -59, 2), 1, 4)).await;
+    block_at(&mut alice, BlockPos::new(3, -58, 2)).await;
+    send(&mut alice, use_on(BlockPos::new(3, -58, 2), 1, 5)).await;
+    block_at(&mut alice, BlockPos::new(3, -57, 2)).await;
+    send(&mut alice, use_on(BlockPos::new(3, -57, 2), 4, 6)).await; // West face -> (2, -57, 2)
+    block_at(&mut alice, BlockPos::new(2, -57, 2)).await;
+
+    // Alice places an anvil at (2, -56, 2).
+    give(&mut alice, "anvil", 1).await;
+    send(
+        &mut alice,
+        Writer::packet(play::serverbound::SET_CARRIED_ITEM).i16(2),
+    )
+    .await;
+    send(&mut alice, use_on(BlockPos::new(2, -57, 2), 1, 7)).await;
+    block_at(&mut alice, BlockPos::new(2, -56, 2)).await;
+
+    // Bob steps into (2.5, -60.0, 2.5) right where the anvil will land.
+    send(
+        &mut bob,
+        Writer::packet(play::serverbound::MOVE_PLAYER_POS_ROT)
+            .f64(2.5)
+            .f64(-60.0)
+            .f64(2.5)
+            .f32(0.0)
+            .f32(0.0)
+            .u8(1),
+    )
+    .await;
+    sync(&mut bob, "Bob").await;
+
+    // Alice breaks the support dirt at (2, -57, 2).
+    send(
+        &mut alice,
+        Writer::packet(play::serverbound::PLAYER_ACTION)
+            .varint(0)
+            .position(BlockPos::new(2, -57, 2))
+            .u8(1)
+            .varint(8),
+    )
+    .await;
+
+    // Anvil falls: Bob takes damage.
+    read_until(&mut bob, play::clientbound::DAMAGE_EVENT).await;
+    let health_body = read_until(&mut bob, play::clientbound::SET_HEALTH).await;
+    let mut r = Reader::new(&health_body);
+    let health = r.f32().unwrap();
+    assert!(
+        health < 20.0,
+        "Bob should take damage from the falling anvil (got {health})"
+    );
+
+    // Anvil lands at (2, -60, 2), crushing the torch.
+    let landing = loop {
+        let s = block_at(&mut alice, torch_pos).await;
+        if levitas_registry::BlockInfo::of(s).name.contains("anvil") {
+            break s;
+        }
+    };
+    assert!(levitas_registry::BlockInfo::of(landing)
+        .name
+        .contains("anvil"));
+}

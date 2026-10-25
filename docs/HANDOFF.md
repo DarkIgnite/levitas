@@ -141,27 +141,21 @@ Phase 0–1 and most of Phase 2, plus parts of 3 and 12 (details in ROADMAP.md):
   blocks), generated on worker threads in 8x8-chunk areas.
 - **Lighting** updated on every block change and sent as light update packets.
 - **Water and lava** flow, infinite water, buckets, obsidian/cobblestone/stone/basalt.
+- **Falling blocks** (sand, gravel, concrete powder, anvils, pointed dripstone) with 2-tick
+  scheduled ticks, entity gravity/drag, concrete hardening, anvil damage/crushing/degradation,
+  and stalactite damage/drops.
 
 ## 7. What to do next (in this order)
 
 The owner's last request was: keep going until the world is playable like vanilla. The
-agreed next steps were **falling blocks, day/night, then mobs**.
+agreed next steps were **falling blocks (done), day/night, then mobs**.
 
-1. **Falling blocks** (Phase 3): sand, red sand, gravel, concrete powder, anvils,
-   suspicious sand/gravel, pointed dripstone, scaffolding edge cases. On neighbour
-   update, a gravity block with air/fluid/replaceable below schedules a 2-tick block
-   tick, then becomes a falling block entity (spawn entity packet, entity type
-   `falling_block`, data = state ID), falls with gravity each tick (vanilla-like
-   0.04/tick, drag 0.98), and lands as a block (or drops as an item if it lands on
-   something it cannot replace). Concrete powder hardens touching water. This needs a
-   small entity system first (items in `world/items.rs` are the only entities now);
-   consider building the Phase 4 entity framework here so mobs can reuse it.
-2. **Day/night cycle and weather** (Phase 6): advance world time every tick, send
+1. **Day/night cycle and weather** (Phase 6): advance world time every tick, send
    `SET_TIME` (game time + day time) every 20 ticks, save `DayTime`/`Time` in level.dat
    (already has `time`). `/time` and `/weather` commands; rain/thunder game events;
    sleeping in beds to skip the night. Sky light levels on the client follow time
    automatically.
-3. **Mobs** (Phase 4–5), the biggest gap for "normal survival": entity framework
+2. **Mobs** (Phase 4–5), the biggest gap for "normal survival": entity framework
    (IDs, tracking per player view, movement packets, physics, collisions, saving
    entities to `entities/` region files), then passive mobs (cow, pig, sheep, chicken
    for food), natural spawning by light/biome/time, simple AI (wander, panic, follow
