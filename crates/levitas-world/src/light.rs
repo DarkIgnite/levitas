@@ -97,10 +97,19 @@ impl ChunkLight {
     /// The light part of a chunk packet: which sections have light, which are dark, then
     /// the nibble arrays of the lit ones, for sky light and block light.
     pub fn encode(&self, out: &mut Vec<u8>) {
-        let masks = |layers: &[LightLayer]| {
+        self.encode_sections(out, u64::MAX, u64::MAX);
+    }
+
+    /// Like [`ChunkLight::encode`], but only for the sections set in `sky` and `block`
+    /// (bit `i` for light section `i`), as a light update packet sends them.
+    pub fn encode_sections(&self, out: &mut Vec<u8>, sky: u64, block: u64) {
+        let masks = |layers: &[LightLayer], wanted: u64| {
             let mut lit = 0u64;
             let mut dark = 0u64;
             for (i, layer) in layers.iter().enumerate() {
+                if wanted & (1 << i) == 0 {
+                    continue;
+                }
                 if *layer == LightLayer::Uniform(0) {
                     dark |= 1 << i;
                 } else {
@@ -117,21 +126,19 @@ impl ChunkLight {
                 out.extend_from_slice(&bits.to_be_bytes());
             }
         };
-        let (sky_lit, sky_dark) = masks(&self.sky);
-        let (block_lit, block_dark) = masks(&self.block);
+        let (sky_lit, sky_dark) = masks(&self.sky, sky);
+        let (block_lit, block_dark) = masks(&self.block, block);
         bitset(out, sky_lit);
         bitset(out, block_lit);
         bitset(out, sky_dark);
         bitset(out, block_dark);
-        for layers in [&self.sky, &self.block] {
-            let lit: Vec<&LightLayer> = layers
-                .iter()
-                .filter(|l| **l != LightLayer::Uniform(0))
-                .collect();
-            varint::write(out, lit.len() as i32);
-            for layer in lit {
-                varint::write(out, NIBBLE_BYTES as i32);
-                layer.write_nibbles(out);
+        for (layers, lit) in [(&self.sky, sky_lit), (&self.block, block_lit)] {
+            varint::write(out, lit.count_ones() as i32);
+            for (i, layer) in layers.iter().enumerate() {
+                if lit & (1 << i) != 0 {
+                    varint::write(out, NIBBLE_BYTES as i32);
+                    layer.write_nibbles(out);
+                }
             }
         }
     }

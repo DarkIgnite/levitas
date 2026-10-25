@@ -980,3 +980,40 @@ async fn mining_takes_time_and_wears_tools() {
     assert_eq!(slots[36], (0, 0, 0));
     assert_eq!(slots[9], (pickaxe, 1, 1));
 }
+
+#[tokio::test]
+async fn torches_light_up_their_surroundings() {
+    let mut alice = join(server().await, "Alice", 1).await;
+    read_until(&mut alice, play::clientbound::PLAYER_POSITION).await;
+    give(&mut alice, "torch", 1).await;
+    send(&mut alice, use_on(BlockPos::new(3, -61, 5), 1, 1)).await;
+    // The light reaches into neighboring chunks too; find the torch's own chunk.
+    let body = loop {
+        let body = read_until(&mut alice, play::clientbound::LIGHT_UPDATE).await;
+        let mut r = Reader::new(&body);
+        if (r.varint().unwrap(), r.varint().unwrap()) == (0, 0) {
+            break body;
+        }
+    };
+    let mut r = Reader::new(&body);
+    r.varint().unwrap();
+    r.varint().unwrap();
+    let mut bitset = || {
+        let longs = r.varint().unwrap();
+        (0..longs).fold(0u64, |acc, _| acc | r.i64().unwrap() as u64)
+    };
+    let (_sky, block_lit) = (bitset(), bitset());
+    let (_sky_dark, _block_dark) = (bitset(), bitset());
+    // The torch at y = -60 sits in section 0 of the world, light section 1.
+    assert_ne!(block_lit & 0b10, 0, "block light of the torch's section");
+    for _ in 0..r.varint().unwrap() {
+        let len = r.varint().unwrap();
+        r.bytes(len as usize).unwrap();
+    }
+    assert!(r.varint().unwrap() >= 1);
+    r.varint().unwrap();
+    let nibbles = r.bytes(2048).unwrap();
+    // Light section 1 is the lowest one with block light, so it comes first.
+    let i = (((-60i32 & 15) as usize) * 16 + 5) * 16 + 3;
+    assert_eq!((nibbles[i >> 1] >> ((i & 1) * 4)) & 15, 14);
+}

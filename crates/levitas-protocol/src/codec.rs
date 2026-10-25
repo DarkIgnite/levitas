@@ -60,6 +60,11 @@ impl<'a> Reader<'a> {
         Ok(self.take(N)?.try_into().expect("take returned N bytes"))
     }
 
+    /// The next `n` raw bytes.
+    pub fn bytes(&mut self, n: usize) -> Result<&'a [u8], DecodeError> {
+        self.take(n)
+    }
+
     pub fn varint(&mut self) -> Result<i32, DecodeError> {
         let (value, len) = varint::read(self.buf).map_err(|e| match e {
             VarIntError::Incomplete => DecodeError::UnexpectedEof,

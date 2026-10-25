@@ -18,7 +18,7 @@ use std::time::Duration;
 use levitas_protocol::{angle, varint, BlockPos, Writer};
 use levitas_registry::packet::play::clientbound;
 use levitas_registry::{block, block_has_tag, entity_type, BlockInfo, ItemInfo, SyncedRegistry};
-use levitas_world::{is_air, Chunk, RegionStorage, MAX_Y, MIN_Y};
+use levitas_world::{is_air, Chunk, LightEngine, RegionStorage, MAX_Y, MIN_Y};
 use tokio::sync::{mpsc, oneshot};
 use tracing::info;
 
@@ -304,6 +304,8 @@ struct World {
     generation: Option<GenerationPool>,
     /// Chunks requested from the workers and not back yet.
     generating: HashSet<(i32, i32)>,
+    /// Keeps light right as blocks change.
+    light: LightEngine,
     seed: i64,
     kind: WorldKind,
     loot: LootTables,
@@ -360,6 +362,7 @@ impl World {
             terrain,
             generation,
             generating: HashSet::new(),
+            light: LightEngine::new(),
             seed: level.seed,
             kind: level.kind,
             loot: LootTables::load(),
@@ -781,6 +784,7 @@ impl World {
     /// Broadcasts entity movement and runs survival and item updates.
     fn tick(&mut self) {
         self.tick += 1;
+        self.send_light_changes();
         let mut packets = Vec::new();
         for (&id, p) in self.players.iter_mut().filter(|(_, p)| p.moved && p.alive) {
             p.moved = false;
@@ -1017,13 +1021,40 @@ impl World {
     /// Changes a block and tells every player who has its chunk loaded.
     fn set_block(&mut self, pos: BlockPos, state: u16) {
         let (cx, cz) = pos.chunk();
-        self.chunk(cx, cz)
-            .set((pos.x & 15) as usize, pos.y, (pos.z & 15) as usize, state);
+        let old =
+            self.chunk(cx, cz)
+                .set((pos.x & 15) as usize, pos.y, (pos.z & 15) as usize, state);
         self.dirty.insert((cx, cz));
+        self.light
+            .block_changed(&mut self.chunks, [pos.x, pos.y, pos.z], old, state);
         let update = frame(block_update(pos, state));
         for p in self.players.values_mut() {
             if p.loaded.contains(&(cx, cz)) {
                 p.deliver(&update);
+            }
+        }
+    }
+
+    /// Sends the light that changed since the last tick to players who see it, and
+    /// remembers to save it.
+    fn send_light_changes(&mut self) {
+        for ((x, z), sky, block) in self.light.take_changes() {
+            let Some(chunk) = self.chunks.get(&(x, z)) else {
+                continue;
+            };
+            self.dirty.insert((x, z));
+            let mut body = Vec::new();
+            chunk.light.encode_sections(&mut body, sky, block);
+            let update = frame(
+                Writer::packet(clientbound::LIGHT_UPDATE)
+                    .varint(x)
+                    .varint(z)
+                    .bytes(&body),
+            );
+            for p in self.players.values_mut() {
+                if p.loaded.contains(&(x, z)) {
+                    p.deliver(&update);
+                }
             }
         }
     }

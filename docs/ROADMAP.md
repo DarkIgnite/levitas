@@ -82,9 +82,10 @@ Known gaps are listed under each phase instead of being hidden.
 - [ ] Lava and water interaction (cobblestone, stone, obsidian, basalt)
 - [ ] Swimming, drowning, fire and lava damage, burning, fire spread
 - [ ] Falling blocks: sand, gravel, concrete powder, anvils, pointed dripstone
-- [ ] Real lighting: sky light and block light, propagated and updated on change.
-      Generated chunks get correct light from the generator and keep it on disk, but
-      placing or breaking blocks does not update light yet.
+- [x] Real lighting: sky light and block light, propagated and updated on change
+      (`levitas_world::lighting`), sent to players as light updates and saved.
+      Known gaps: slabs and stairs let light through like air, and light is not
+      re-spread across the border when a neighboring chunk loads.
 - [ ] Ice melting, snow layers, frosted ice
 
 ## Phase 4: Combat and basic entities
