@@ -1,4 +1,5 @@
 mod connection;
+mod flat;
 mod play;
 #[cfg(test)]
 mod tests;
@@ -6,13 +7,10 @@ mod world;
 
 use std::io;
 use std::net::SocketAddr;
-use std::sync::Arc;
 
 use levitas_protocol::{GAME_VERSION, PROTOCOL_VERSION};
 use tokio::net::TcpListener;
 use tracing::{debug, info, warn};
-
-use world::FlatWorld;
 
 /// Localhost only for now, so testing does not open the machine to the network.
 const DEFAULT_ADDR: &str = "127.0.0.1:25565";
@@ -32,7 +30,7 @@ async fn main() -> io::Result<()> {
                 format!("invalid listen address: {e}"),
             )
         })?;
-    let world = Arc::new(FlatWorld::new());
+    let world = world::spawn();
     let listener = TcpListener::bind(addr).await?;
     info!(
         "Levitas {} for Minecraft {GAME_VERSION} (protocol {PROTOCOL_VERSION}) listening on {addr}",

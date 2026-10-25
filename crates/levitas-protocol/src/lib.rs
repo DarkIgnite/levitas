@@ -1,9 +1,11 @@
 //! Network protocol for Java Edition 1.21.8.
 
 mod codec;
+mod types;
 pub mod varint;
 
 pub use codec::{DecodeError, Reader, Writer};
+pub use types::{angle, BlockPos};
 
 /// Protocol version number sent by 1.21.7 and 1.21.8 clients in the handshake.
 pub const PROTOCOL_VERSION: i32 = 772;

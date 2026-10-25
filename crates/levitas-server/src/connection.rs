@@ -2,7 +2,6 @@
 //! login (offline mode) and configuration.
 
 use std::io;
-use std::sync::Arc;
 
 use levitas_protocol::{Reader, Writer, GAME_VERSION, MAX_PACKET_LEN, PROTOCOL_VERSION};
 use levitas_registry::packet::{configuration, login as login_ids};
@@ -11,10 +10,11 @@ use serde_json::json;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt, BufReader, BufWriter};
 use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
 use tokio::net::TcpStream;
+use tokio::sync::mpsc;
 use tracing::info;
 
 use crate::play;
-use crate::world::FlatWorld;
+use crate::world::Event;
 
 /// Intent sent at the end of the handshake.
 const INTENT_STATUS: i32 = 1;
@@ -55,7 +55,12 @@ pub struct Outgoing(BufWriter<OwnedWriteHalf>);
 impl Outgoing {
     /// Queues a packet; call [`Outgoing::flush`] to send it.
     pub async fn queue(&mut self, packet: Writer) -> io::Result<()> {
-        self.0.write_all(&packet.into_frame()).await
+        self.write_frame(&packet.into_frame()).await
+    }
+
+    /// Queues an already length-prefixed packet.
+    pub async fn write_frame(&mut self, frame: &[u8]) -> io::Result<()> {
+        self.0.write_all(frame).await
     }
 
     pub async fn flush(&mut self) -> io::Result<()> {
@@ -74,7 +79,7 @@ pub struct Profile {
     pub uuid: u128,
 }
 
-pub async fn handle(stream: TcpStream, world: Arc<FlatWorld>) -> io::Result<()> {
+pub async fn handle(stream: TcpStream, world: mpsc::Sender<Event>) -> io::Result<()> {
     stream.set_nodelay(true)?;
     let mut conn = Conn::new(stream);
 

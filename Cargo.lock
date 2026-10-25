@@ -47,6 +47,7 @@ version = "0.1.0"
 dependencies = [
  "levitas-protocol",
  "levitas-registry",
+ "levitas-world",
  "serde_json",
  "tokio",
  "tracing",
@@ -56,6 +57,10 @@ dependencies = [
 [[package]]
 name = "levitas-world"
 version = "0.1.0"
+dependencies = [
+ "levitas-protocol",
+ "levitas-registry",
+]
 
 [[package]]
 name = "libc"

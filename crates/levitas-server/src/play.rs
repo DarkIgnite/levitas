@@ -1,256 +1,170 @@
-//! The play state for one player: joining the world, chunk streaming as the player moves,
-//! keep-alives and chat.
-//!
-//! Each player currently lives in their own copy of the flat world; shared world state
-//! and seeing other players come with region ticking (see docs/ARCHITECTURE.md).
+//! The connection side of the play state: decodes the player's packets into world
+//! [`Event`]s and writes the frames the world sends back.
 
-use std::collections::HashSet;
 use std::io;
-use std::sync::Arc;
 use std::time::Duration;
 
 use levitas_protocol::{Reader, Writer};
 use levitas_registry::packet::play::{clientbound, serverbound};
-use levitas_registry::SyncedRegistry;
+use tokio::io::BufReader;
+use tokio::net::tcp::OwnedReadHalf;
 use tokio::sync::mpsc;
-use tracing::info;
 
 use crate::connection::{read_frame, Conn, Outgoing, Profile};
-use crate::world::{FlatWorld, SURFACE_Y};
+use crate::world::{self, Event, Frame, OUTGOING_CAPACITY};
 
-/// Chunk radius sent around the player.
-pub const VIEW_DISTANCE: i32 = 8;
 const KEEP_ALIVE_INTERVAL: Duration = Duration::from_secs(10);
 
-const GAME_EVENT_START_WAITING_FOR_CHUNKS: u8 = 13;
-const GAME_MODE_CREATIVE: u8 = 1;
-/// Player info actions: add player, update game mode, update listed, update latency.
-const PLAYER_INFO_ACTIONS: u8 = 0x01 | 0x04 | 0x08 | 0x10;
-
-pub async fn run(conn: Conn, profile: Profile, world: Arc<FlatWorld>) -> io::Result<()> {
+pub async fn run(conn: Conn, profile: Profile, world: mpsc::Sender<Event>) -> io::Result<()> {
     let Conn { mut reader, out } = conn;
-    // Packets are read on their own task so a half-read packet is never dropped when the
-    // main loop wakes up for something else.
-    let (tx, mut incoming) = mpsc::channel(128);
-    let reader_task = tokio::spawn(async move {
-        while let Ok(packet) = read_frame(&mut reader).await {
-            if tx.send(packet).await.is_err() {
-                break;
-            }
-        }
-    });
-
-    let mut player = Player {
-        out,
-        profile,
-        world,
-        center: (0, 0),
-        loaded: HashSet::new(),
-    };
-    let result = player.play(&mut incoming).await;
-    reader_task.abort();
-    info!(name = player.profile.name, "left the game");
+    let id = world::next_entity_id();
+    let (tx, rx) = mpsc::channel(OUTGOING_CAPACITY);
+    let writer = tokio::spawn(write_loop(out, rx));
+    if world
+        .send(Event::Join {
+            id,
+            profile,
+            out: tx,
+        })
+        .await
+        .is_err()
+    {
+        writer.abort();
+        return Ok(());
+    }
+    let result = read_loop(&mut reader, id, &world).await;
+    let _ = world.send(Event::Leave { id }).await;
+    writer.abort();
     result
 }
 
-struct Player {
-    out: Outgoing,
-    profile: Profile,
-    world: Arc<FlatWorld>,
-    center: (i32, i32),
-    loaded: HashSet<(i32, i32)>,
+/// Writes frames from the world as they come, flushing whenever the queue runs dry.
+async fn write_loop(mut out: Outgoing, mut frames: mpsc::Receiver<Frame>) -> io::Result<()> {
+    let mut keep_alive = tokio::time::interval(KEEP_ALIVE_INTERVAL);
+    loop {
+        tokio::select! {
+            frame = frames.recv() => {
+                // The world dropped this player (left, or too slow to keep up).
+                let Some(frame) = frame else { return Ok(()) };
+                out.write_frame(&frame).await?;
+                while let Ok(frame) = frames.try_recv() {
+                    out.write_frame(&frame).await?;
+                }
+                out.flush().await?;
+            }
+            _ = keep_alive.tick() => {
+                let id = std::time::UNIX_EPOCH.elapsed().unwrap_or_default().as_millis() as i64;
+                out.send(Writer::packet(clientbound::KEEP_ALIVE).i64(id)).await?;
+            }
+        }
+    }
 }
 
-impl Player {
-    async fn play(&mut self, incoming: &mut mpsc::Receiver<Vec<u8>>) -> io::Result<()> {
-        self.join().await?;
-        let mut keep_alive = tokio::time::interval(KEEP_ALIVE_INTERVAL);
-        loop {
-            tokio::select! {
-                packet = incoming.recv() => match packet {
-                    Some(packet) => self.handle(&packet).await?,
-                    None => return Ok(()),
-                },
-                _ = keep_alive.tick() => {
-                    let id = std::time::UNIX_EPOCH.elapsed().unwrap_or_default().as_millis() as i64;
-                    self.out.send(Writer::packet(clientbound::KEEP_ALIVE).i64(id)).await?;
-                }
-            }
-        }
-    }
-
-    async fn join(&mut self) -> io::Result<()> {
-        let overworld = SyncedRegistry::get("minecraft:dimension_type")
-            .and_then(|r| r.id_of("minecraft:overworld"))
-            .expect("overworld dimension type is registered");
-        self.out
-            .queue(
-                Writer::packet(clientbound::LOGIN)
-                    .i32(1) // entity ID
-                    .bool(false) // hardcore
-                    .varint(1)
-                    .string("minecraft:overworld") // dimension names
-                    .varint(100) // max players (unused by the client)
-                    .varint(VIEW_DISTANCE)
-                    .varint(VIEW_DISTANCE) // simulation distance
-                    .bool(false) // reduced debug info
-                    .bool(true) // enable respawn screen
-                    .bool(false) // limited crafting
-                    .varint(overworld)
-                    .string("minecraft:overworld")
-                    .i64(0) // hashed seed
-                    .u8(GAME_MODE_CREATIVE)
-                    .i8(-1) // previous game mode: none
-                    .bool(false) // debug world
-                    .bool(true) // flat world
-                    .bool(false) // no death location
-                    .varint(0) // portal cooldown
-                    .varint(63) // sea level
-                    .bool(false), // enforces secure chat
-            )
-            .await?;
-        self.out
-            .queue(
-                Writer::packet(clientbound::GAME_EVENT)
-                    .u8(GAME_EVENT_START_WAITING_FOR_CHUNKS)
-                    .f32(0.0),
-            )
-            .await?;
-        // Add the player to their own tab list.
-        self.out
-            .queue(
-                Writer::packet(clientbound::PLAYER_INFO_UPDATE)
-                    .u8(PLAYER_INFO_ACTIONS)
-                    .varint(1)
-                    .uuid(self.profile.uuid)
-                    .string(&self.profile.name)
-                    .varint(0) // add player: no profile properties
-                    .varint(i32::from(GAME_MODE_CREATIVE)) // update game mode
-                    .bool(true) // update listed
-                    .varint(0), // update latency
-            )
-            .await?;
-        self.send_chunks().await?;
-        self.out
-            .queue(
-                Writer::packet(clientbound::PLAYER_POSITION)
-                    .varint(1) // teleport ID
-                    .f64(0.5)
-                    .f64(SURFACE_Y)
-                    .f64(0.5)
-                    .f64(0.0)
-                    .f64(0.0)
-                    .f64(0.0) // velocity
-                    .f32(0.0)
-                    .f32(0.0) // yaw, pitch
-                    .i32(0), // all values absolute
-            )
-            .await?;
-        self.system_message(&format!(
-            "Welcome to Levitas, {}! This is a flat test world.",
-            self.profile.name
-        ))
-        .await?;
-        info!(name = self.profile.name, "joined the world");
-        Ok(())
-    }
-
-    async fn handle(&mut self, packet: &[u8]) -> io::Result<()> {
-        let mut r = Reader::new(packet);
-        match r.varint()? {
-            serverbound::MOVE_PLAYER_POS | serverbound::MOVE_PLAYER_POS_ROT => {
-                let x = r.f64()?;
-                let _y = r.f64()?;
-                let z = r.f64()?;
-                let chunk = ((x / 16.0).floor() as i32, (z / 16.0).floor() as i32);
-                if chunk != self.center {
-                    self.center = chunk;
-                    self.send_chunks().await?;
-                }
-            }
-            serverbound::CHAT => {
-                let message = r.string(256)?.to_owned();
-                info!(
-                    name = self.profile.name,
-                    "<{}> {message}", self.profile.name
-                );
-                let line = format!("<{}> {message}", self.profile.name);
-                self.system_message(&line).await?;
-            }
-            serverbound::CHAT_COMMAND => {
-                let command = r.string(32767)?.to_owned();
-                self.system_message(&format!("Unknown command: /{command}"))
-                    .await?;
-            }
-            // Teleport confirmations, keep-alive replies, settings, rotation-only moves
-            // and everything else need no response yet.
-            _ => {}
-        }
-        Ok(())
-    }
-
-    /// Recenters the client's chunk view on `self.center`, unloading chunks that left the
-    /// view distance and sending the ones that entered it.
-    async fn send_chunks(&mut self) -> io::Result<()> {
-        let (cx, cz) = self.center;
-        self.out
-            .queue(
-                Writer::packet(clientbound::SET_CHUNK_CACHE_CENTER)
-                    .varint(cx)
-                    .varint(cz),
-            )
-            .await?;
-
-        let in_view = |&(x, z): &(i32, i32)| {
-            (x - cx).abs() <= VIEW_DISTANCE && (z - cz).abs() <= VIEW_DISTANCE
+async fn read_loop(
+    reader: &mut BufReader<OwnedReadHalf>,
+    id: i32,
+    world: &mpsc::Sender<Event>,
+) -> io::Result<()> {
+    loop {
+        let packet = match read_frame(reader).await {
+            Ok(packet) => packet,
+            Err(e) if e.kind() == io::ErrorKind::UnexpectedEof => return Ok(()),
+            Err(e) => return Err(e),
         };
-        let gone: Vec<_> = self
-            .loaded
-            .iter()
-            .copied()
-            .filter(|c| !in_view(c))
-            .collect();
-        for (x, z) in gone {
-            self.loaded.remove(&(x, z));
-            self.out
-                .queue(
-                    Writer::packet(clientbound::FORGET_LEVEL_CHUNK)
-                        .i32(z)
-                        .i32(x),
-                )
-                .await?;
-        }
-
-        let mut new = Vec::new();
-        for x in cx - VIEW_DISTANCE..=cx + VIEW_DISTANCE {
-            for z in cz - VIEW_DISTANCE..=cz + VIEW_DISTANCE {
-                if !self.loaded.contains(&(x, z)) {
-                    new.push((x, z));
-                }
+        if let Some(event) = decode(id, &packet)? {
+            if world.send(event).await.is_err() {
+                return Ok(());
             }
         }
-        // Nearest first, so the area around the player appears first.
-        new.sort_by_key(|&(x, z)| (x - cx).pow(2) + (z - cz).pow(2));
-        self.out
-            .queue(Writer::packet(clientbound::CHUNK_BATCH_START))
-            .await?;
-        for &(x, z) in &new {
-            self.out.queue(self.world.chunk_packet(x, z)).await?;
-            self.loaded.insert((x, z));
-        }
-        self.out
-            .queue(Writer::packet(clientbound::CHUNK_BATCH_FINISHED).varint(new.len() as i32))
-            .await?;
-        self.out.flush().await
     }
+}
 
-    async fn system_message(&mut self, text: &str) -> io::Result<()> {
-        self.out
-            .send(
-                Writer::packet(clientbound::SYSTEM_CHAT)
-                    .text(text)
-                    .bool(false), // chat, not the action bar
-            )
-            .await
-    }
+/// Turns a serverbound play packet into a world event. Packets the server does not act
+/// on yet (teleport confirmations, keep-alive replies, settings, ...) give `None`.
+fn decode(id: i32, packet: &[u8]) -> io::Result<Option<Event>> {
+    let mut r = Reader::new(packet);
+    let on_ground = |flags: u8| flags & 1 != 0;
+    let event = match r.varint()? {
+        serverbound::MOVE_PLAYER_POS => {
+            let pos = [r.f64()?, r.f64()?, r.f64()?];
+            Event::Move {
+                id,
+                pos: Some(pos),
+                rot: None,
+                on_ground: on_ground(r.u8()?),
+            }
+        }
+        serverbound::MOVE_PLAYER_POS_ROT => {
+            let pos = [r.f64()?, r.f64()?, r.f64()?];
+            let rot = (r.f32()?, r.f32()?);
+            Event::Move {
+                id,
+                pos: Some(pos),
+                rot: Some(rot),
+                on_ground: on_ground(r.u8()?),
+            }
+        }
+        serverbound::MOVE_PLAYER_ROT => {
+            let rot = (r.f32()?, r.f32()?);
+            Event::Move {
+                id,
+                pos: None,
+                rot: Some(rot),
+                on_ground: on_ground(r.u8()?),
+            }
+        }
+        serverbound::MOVE_PLAYER_STATUS_ONLY => Event::Move {
+            id,
+            pos: None,
+            rot: None,
+            on_ground: on_ground(r.u8()?),
+        },
+        serverbound::PLAYER_ACTION => {
+            let status = r.varint()?;
+            let pos = r.position()?;
+            let _face = r.u8()?;
+            Event::Dig {
+                id,
+                status,
+                pos,
+                sequence: r.varint()?,
+            }
+        }
+        serverbound::USE_ITEM_ON => {
+            let hand = r.varint()?;
+            let pos = r.position()?;
+            let face = r.varint()?;
+            let _cursor = (r.f32()?, r.f32()?, r.f32()?);
+            let _inside_block = r.bool()?;
+            let _world_border_hit = r.bool()?;
+            Event::UseItemOn {
+                id,
+                hand,
+                pos,
+                face,
+                sequence: r.varint()?,
+            }
+        }
+        serverbound::SET_CREATIVE_MODE_SLOT => {
+            let slot = r.i16()?;
+            let count = r.varint()?;
+            let item = if count > 0 { r.varint()? } else { 0 };
+            Event::CreativeSlot { id, slot, item }
+        }
+        serverbound::SET_CARRIED_ITEM => Event::HeldSlot { id, slot: r.i16()? },
+        serverbound::SWING => Event::Swing {
+            id,
+            hand: r.varint()?,
+        },
+        serverbound::CHAT => Event::Chat {
+            id,
+            message: r.string(256)?.to_owned(),
+        },
+        serverbound::CHAT_COMMAND => Event::Command {
+            id,
+            command: r.string(32767)?.to_owned(),
+        },
+        _ => return Ok(None),
+    };
+    Ok(Some(event))
 }

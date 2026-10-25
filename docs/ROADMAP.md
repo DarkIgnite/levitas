@@ -19,11 +19,12 @@ Each milestone ends with something that can be tested in a real 1.21.8 client.
 - [x] Flat test world, chunks streamed around the player as they move
 - [ ] Load an existing Anvil world
 - [x] Movement, keep-alive, own tab-list entry, chat echo
-- [ ] Shared world: players see each other, chat broadcast
+- [x] Shared world: players see each other move and swing, chat broadcast
 
 ## Milestone 2: Interaction
 
-- [ ] Break and place blocks, block updates to other players
+- [x] Break and place blocks (creative), block updates to other players
+- [ ] Placement orientation (stairs, logs, slabs, doors, ...) instead of default states
 - [ ] Inventory, creative and survival item handling, item drops
 - [ ] Commands (Brigadier command tree), console
 - [ ] Saving chunks and player data back to Anvil

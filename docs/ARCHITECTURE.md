@@ -32,6 +32,10 @@ Planned later: `levitas-entity` (ECS components and systems), `levitas-plugin-ap
 
 - **Network:** `tokio` runtime. One task per connection for reading/decoding; outgoing
   packets are queued per player and flushed once per tick in batches.
+- **World task (today):** one task owns all chunks and players. Connection tasks send it
+  events over a channel and receive ready-to-write packet frames (`Arc<[u8]>`, shared
+  between recipients), so world state needs no locks. Splitting it into regions is the
+  next step below.
 - **Game ticks:** 20 TPS. The world is split into regions (groups of chunks). Each tick,
   independent regions are ticked in parallel on a worker pool (`rayon`). Regions that are
   close to each other are merged so that interactions inside one tick stay single-threaded.

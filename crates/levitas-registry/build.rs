@@ -48,7 +48,8 @@ fn main() {
 
     let mut out = String::new();
     packets(&data, &mut out);
-    blocks(&data, &mut out);
+    let block_defaults = blocks(&data, &mut out);
+    items_and_entities(&data, &block_defaults, &mut out);
     let synced = synced_registries(&data, &mut out);
     tags(&data, &synced, &mut out);
 
@@ -90,20 +91,81 @@ fn packets(data: &Path, out: &mut String) {
     out.push_str("}\n\n");
 }
 
-fn blocks(data: &Path, out: &mut String) {
+/// Writes default block state IDs and returns them by block name.
+fn blocks(data: &Path, out: &mut String) -> HashMap<String, u64> {
     let blocks = read_json(&data.join("reports/blocks.json"));
+    let block_ids = &read_json(&data.join("reports/registries.json"))["minecraft:block"]["entries"];
+    let mut defaults = HashMap::new();
+    let mut state_count = 0;
+    let mut state_block = Vec::new();
     out.push_str("/// Default block state ID of every block.\npub mod block {\n");
     for (name, block) in blocks.as_object().unwrap() {
-        let default = block["states"]
-            .as_array()
-            .unwrap()
+        let states = block["states"].as_array().unwrap();
+        state_count += states.len();
+        let block_id = block_ids[name]["protocol_id"].as_u64().unwrap();
+        for state in states {
+            let id = state["id"].as_u64().unwrap() as usize;
+            if state_block.len() <= id {
+                state_block.resize(id + 1, 0);
+            }
+            state_block[id] = block_id;
+        }
+        let default = states
             .iter()
             .find(|s| s["default"].as_bool() == Some(true))
             .unwrap();
         let id = default["id"].as_u64().unwrap();
         writeln!(out, "pub const {}: u16 = {id};", const_name(name)).unwrap();
+        defaults.insert(name.clone(), id);
     }
     out.push_str("}\n\n");
+    writeln!(
+        out,
+        "/// Number of block states; state IDs are `0..BLOCK_STATE_COUNT`.\n\
+         pub const BLOCK_STATE_COUNT: usize = {state_count};\n"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "/// Block registry ID of each block state, indexed by state ID.\n\
+         pub static STATE_BLOCK: &[u16] = &{state_block:?};\n"
+    )
+    .unwrap();
+    defaults
+}
+
+/// Entity type IDs, and for every item the default state of the block it places.
+fn items_and_entities(data: &Path, block_defaults: &HashMap<String, u64>, out: &mut String) {
+    let registries = read_json(&data.join("reports/registries.json"));
+    let entries = |name: &str| -> Vec<(String, u64)> {
+        let mut list: Vec<_> = registries[name]["entries"]
+            .as_object()
+            .unwrap()
+            .iter()
+            .map(|(entry, info)| (entry.clone(), info["protocol_id"].as_u64().unwrap()))
+            .collect();
+        list.sort_by_key(|(_, id)| *id);
+        list
+    };
+
+    out.push_str("/// Entity type IDs.\npub mod entity_type {\n");
+    for (name, id) in entries("minecraft:entity_type") {
+        writeln!(out, "pub const {}: i32 = {id};", const_name(&name)).unwrap();
+    }
+    out.push_str("}\n\n");
+
+    // Block items share their block's name; for other items the block is air (0).
+    let items = entries("minecraft:item");
+    let item_blocks: Vec<u64> = items
+        .iter()
+        .map(|(name, _)| block_defaults.get(name).copied().unwrap_or(0))
+        .collect();
+    writeln!(
+        out,
+        "/// Default block state placed by each item, indexed by item ID; 0 (air) if the \
+         item is not a block.\npub static ITEM_BLOCK: &[u16] = &{item_blocks:?};\n"
+    )
+    .unwrap();
 }
 
 /// Collects entry names of each synced registry, sorted so their IDs are stable.

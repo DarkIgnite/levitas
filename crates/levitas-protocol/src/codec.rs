@@ -3,6 +3,7 @@
 use std::fmt;
 use std::io;
 
+use crate::types::BlockPos;
 use crate::varint::{self, VarIntError};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -80,6 +81,14 @@ impl<'a> Reader<'a> {
         self.array().map(u16::from_be_bytes)
     }
 
+    pub fn i16(&mut self) -> Result<i16, DecodeError> {
+        self.array().map(i16::from_be_bytes)
+    }
+
+    pub fn position(&mut self) -> Result<BlockPos, DecodeError> {
+        self.i64().map(BlockPos::from_packed)
+    }
+
     pub fn i64(&mut self) -> Result<i64, DecodeError> {
         self.array().map(i64::from_be_bytes)
     }
@@ -148,6 +157,15 @@ impl Writer {
     pub fn u16(mut self, value: u16) -> Self {
         self.buf.extend_from_slice(&value.to_be_bytes());
         self
+    }
+
+    pub fn i16(mut self, value: i16) -> Self {
+        self.buf.extend_from_slice(&value.to_be_bytes());
+        self
+    }
+
+    pub fn position(self, pos: BlockPos) -> Self {
+        self.i64(pos.packed())
     }
 
     pub fn i32(mut self, value: i32) -> Self {
