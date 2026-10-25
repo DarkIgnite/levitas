@@ -19,6 +19,8 @@ reply in casual Indonesian. Code, comments, commits and docs are in English.
   without asking.
 - Game data comes from `python tools/datagen.py` (downloads the official server.jar,
   runs its data generator into `generated/`). `levitas-registry`'s build script needs it.
+- The world lives in `./world` (Anvil format, gitignored). Stop the server with Ctrl-C
+  (in the terminal tab) so it saves; killing the process loses up to 5 minutes.
 - Avast on the owner's PC kills and quarantines freshly built `levitas.exe`. If the
   server disappears with no log, that is the likely cause; they need an Avast exception
   for C:\dev\levitas.
