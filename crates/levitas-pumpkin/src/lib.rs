@@ -259,18 +259,91 @@ fn older_biome(name: &str) -> &str {
     }
 }
 
-/// What Pumpkin's feature placement asks of the world. Levitas places every block a
-/// feature wants and spawns no mobs during generation yet.
+/// What Pumpkin's feature placement asks of the world: whether a plant may grow where a
+/// feature wants it. Levitas spawns no mobs during generation yet.
 struct Portals;
 
 impl WorldPortalExt for Portals {
+    // Adapted from Pumpkin's `TestBlockRegistry` (pumpkin-world,
+    // generation/proto_chunk_test/stage_parity.rs), Copyright the Pumpkin contributors,
+    // GPL-3.0. Levitas adds the upper halves of tall plants, the water next to sugar cane
+    // and the free sides of cacti.
     fn can_place_at(
         &self,
-        _block: &pumpkin_data::Block,
-        _state: &pumpkin_data::BlockState,
-        _world: &dyn BlockAccessor,
-        _pos: &pumpkin_util::math::position::BlockPos,
+        block: &pumpkin_data::Block,
+        state: &pumpkin_data::BlockState,
+        world: &dyn BlockAccessor,
+        pos: &pumpkin_util::math::position::BlockPos,
     ) -> bool {
+        use pumpkin_data::tag::{Block as Tag, Taggable};
+        use pumpkin_data::Block;
+
+        let below = world.get_block(&pos.down());
+        let upper_half = block
+            .properties(state.id)
+            .map(|p| p.to_props())
+            .unwrap_or_default()
+            .iter()
+            .any(|p| p.key_str() == "half" && p.value_str() == "upper");
+        if upper_half && !block.has_tag(&Tag::MINECRAFT_DOORS) {
+            return below == block;
+        }
+        let vegetation = [
+            &Block::SHORT_GRASS,
+            &Block::FERN,
+            &Block::SWEET_BERRY_BUSH,
+            &Block::TALL_GRASS,
+            &Block::LARGE_FERN,
+            &Block::SUNFLOWER,
+            &Block::LILAC,
+            &Block::ROSE_BUSH,
+            &Block::PEONY,
+            &Block::WILDFLOWERS,
+            &Block::PINK_PETALS,
+            &Block::BUSH,
+            &Block::FIREFLY_BUSH,
+        ];
+        if vegetation.contains(&block)
+            || block.has_tag(&Tag::MINECRAFT_SMALL_FLOWERS)
+            || block.has_tag(&Tag::MINECRAFT_SAPLINGS)
+        {
+            return below.has_tag(&Tag::MINECRAFT_SUPPORTS_VEGETATION);
+        }
+        if block == &Block::DEAD_BUSH
+            || block == &Block::SHORT_DRY_GRASS
+            || block == &Block::TALL_DRY_GRASS
+        {
+            return below.has_tag(&Tag::MINECRAFT_SUPPORTS_DRY_VEGETATION);
+        }
+        if block == &Block::CACTUS {
+            let sides = [pos.north(), pos.south(), pos.east(), pos.west()];
+            return below.has_tag(&Tag::MINECRAFT_SUPPORTS_CACTUS)
+                && sides
+                    .iter()
+                    .all(|side| world.get_block_state(side).collision_shapes.is_empty());
+        }
+        if block == &Block::SUGAR_CANE {
+            if below == &Block::SUGAR_CANE {
+                return true;
+            }
+            let ground = pos.down();
+            let sides = [ground.north(), ground.south(), ground.east(), ground.west()];
+            return below.has_tag(&Tag::MINECRAFT_SUPPORTS_SUGAR_CANE)
+                && sides.iter().any(|side| {
+                    let b = world.get_block(side);
+                    b == &Block::WATER || b == &Block::FROSTED_ICE
+                });
+        }
+        if block == &Block::BAMBOO || block == &Block::BAMBOO_SAPLING {
+            return below.has_tag(&Tag::MINECRAFT_SUPPORTS_BAMBOO);
+        }
+        if block == &Block::BROWN_MUSHROOM || block == &Block::RED_MUSHROOM {
+            return below.has_tag(&Tag::MINECRAFT_OVERRIDES_MUSHROOM_LIGHT_REQUIREMENT)
+                || world.get_block_state(&pos.down()).is_solid_render();
+        }
+        if block == &Block::LILY_PAD {
+            return below == &Block::WATER || below.has_tag(&Tag::MINECRAFT_SUPPORTS_LILY_PAD);
+        }
         true
     }
 
@@ -331,6 +404,43 @@ mod tests {
                 assert_eq!(info.property(ours, p.key_str()), Some(p.value_str()));
             }
         }
+    }
+
+    #[test]
+    fn plants_grow_only_on_ground() {
+        let terrain = PumpkinTerrain::new(-4254893504593453935);
+        let plants = [
+            "minecraft:short_grass",
+            "minecraft:fern",
+            "minecraft:dandelion",
+            "minecraft:poppy",
+            "minecraft:red_mushroom",
+            "minecraft:brown_mushroom",
+        ];
+        let mut checked = 0;
+        for cx in -3..3 {
+            for cz in -3..3 {
+                let chunk = terrain.generate(cx, cz);
+                for x in 0..16 {
+                    for z in 0..16 {
+                        for y in MIN_Y + 1..=MAX_Y {
+                            let name = BlockInfo::of(chunk.get(x, y, z)).name;
+                            if !plants.contains(&name) {
+                                continue;
+                            }
+                            checked += 1;
+                            let below = chunk.get(x, y - 1, z);
+                            assert!(
+                                !is_air(below) && below != block::WATER,
+                                "{name} on {} at chunk ({cx}, {cz}) {x} {y} {z}",
+                                BlockInfo::of(below).name
+                            );
+                        }
+                    }
+                }
+            }
+        }
+        assert!(checked > 0, "no plants generated");
     }
 
     #[test]
