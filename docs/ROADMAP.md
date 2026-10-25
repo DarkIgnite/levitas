@@ -65,10 +65,11 @@ Known gaps are listed under each phase instead of being hidden.
 - [x] Double chests (54 slots), trapped chests
 - [ ] Block placement sounds for other players (sound types are not in the data yet)
 - [ ] Bells, cocoa, hanging signs, crafters and walls' tall sides: check against vanilla
-- [ ] Mining speed from block hardness and tool speed, with server validation
-- [ ] Tool durability and breaking
-- [ ] Server-side click simulation: shift-click (including crafting many at once),
-      drag splitting, double-click collect, number keys, offhand swap
+- [x] Mining speed from block hardness and tool speed, with server validation
+- [x] Tool durability and breaking (damage component on the network and on disk)
+- [x] Server-side click simulation: shift-click (including crafting many at once),
+      drag splitting, double-click collect, number keys, offhand swap, throwing, creative
+      cloning; the client is corrected when it predicted something else
 - [ ] Blast furnace, smoker, campfire, stonecutter, smithing table
 - [ ] Special crafting recipes: dyeing, fireworks, map and book cloning, banners,
       shields, repairing, decorated pots, transmute recipes

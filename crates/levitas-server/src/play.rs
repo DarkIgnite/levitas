@@ -157,19 +157,24 @@ fn decode(id: i32, packet: &[u8]) -> io::Result<Option<Event>> {
         serverbound::SET_CREATIVE_MODE_SLOT => {
             let slot = r.i16()?;
             let count = r.varint()?;
-            let item = if count > 0 { r.varint()? } else { 0 };
-            Event::CreativeSlot {
-                id,
-                slot,
-                stack: Stack::new(item, count),
+            let mut stack = Stack::EMPTY;
+            if count > 0 {
+                stack = Stack::new(r.varint()?, count);
+                // Components the server tracks come first if present; the rest are
+                // skipped, since their encodings vary by type.
+                let added = r.varint()?;
+                if added > 0 && r.varint()? == levitas_registry::component::DAMAGE {
+                    stack.damage = r.varint()?.max(0);
+                }
             }
+            Event::CreativeSlot { id, slot, stack }
         }
         serverbound::CONTAINER_CLICK => {
             let window = r.varint()?;
             let _state_id = r.varint()?;
             let slot = r.i16()?;
-            let _button = r.u8()?;
-            let _mode = r.varint()?;
+            let button = r.u8()?;
+            let mode = r.varint()?;
             let count = r.varint()?;
             if !(0..=MAX_CHANGED_SLOTS).contains(&count) {
                 return Err(invalid(format!("container click changes {count} slots")));
@@ -183,6 +188,8 @@ fn decode(id: i32, packet: &[u8]) -> io::Result<Option<Event>> {
                 id,
                 window,
                 slot,
+                button,
+                mode,
                 changed,
                 carried: hashed_stack(&mut r)?,
             }

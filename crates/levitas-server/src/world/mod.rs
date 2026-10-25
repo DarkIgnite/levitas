@@ -119,6 +119,8 @@ pub enum Event {
         id: i32,
         window: i32,
         slot: i16,
+        button: u8,
+        mode: i32,
         changed: Vec<(i16, Stack)>,
         carried: Stack,
     },
@@ -196,6 +198,8 @@ struct Player {
     eating: Option<(i32, u64)>,
     /// The block being dug in survival and the tick digging started.
     digging: Option<(BlockPos, u64)>,
+    /// A drag across inventory slots in progress.
+    drag: crate::click::Drag,
     /// Health, food or saturation changed and the client has not been told.
     health_dirty: bool,
     /// A container window open besides the inventory.
@@ -235,6 +239,7 @@ impl Player {
             alive: true,
             eating: None,
             digging: None,
+            drag: Default::default(),
             health_dirty: false,
             open: None,
             next_window: 0,
@@ -367,9 +372,11 @@ impl World {
                 id,
                 window,
                 slot,
+                button,
+                mode,
                 changed,
                 carried,
-            } => self.container_click(id, window, slot, changed, carried),
+            } => self.container_click(id, window, slot, button, mode, changed, carried),
             Event::ContainerClose { id, window } => self.container_closed(id, window),
             Event::HeldSlot { id, slot } => {
                 if let (Some(p), Ok(slot)) = (self.players.get_mut(&id), usize::try_from(slot)) {

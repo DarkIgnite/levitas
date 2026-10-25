@@ -400,7 +400,7 @@ async fn crafting_in_the_inventory_grid() {
 
     // Taking the result uses up the log and puts the planks on the cursor. Items cannot
     // appear out of nowhere: a click claiming diamonds makes the server resend the real
-    // inventory, which shows an empty grid and the planks on the cursor.
+    // inventory.
     send(
         &mut alice,
         click(0, 0, &[(0, 0, 0), (1, 0, 0)], (planks, 4)),
@@ -429,9 +429,12 @@ async fn crafting_in_the_inventory_grid() {
         }
         stacks.push((item, count));
     }
+    // The click itself (putting the planks down in slot 10) happens; the claimed
+    // diamonds do not.
     assert_eq!(stacks[1], (0, 0), "grid is empty");
     assert!(!stacks.contains(&(item("minecraft:diamond"), 64)));
-    assert_eq!(stacks[46], (planks, 4), "planks on the cursor");
+    assert_eq!(stacks[10], (planks, 4), "planks put down");
+    assert_eq!(stacks[46], (0, 0), "nothing left on the cursor");
 }
 
 #[tokio::test]
@@ -894,4 +897,44 @@ async fn mining_takes_time_and_wears_tools() {
     assert_eq!(block_at(&mut alice, stone).await, block::AIR);
     let pickaxe = ItemInfo::id_of("minecraft:wooden_pickaxe").unwrap();
     assert_eq!(slot_with_damage(&mut alice, 36).await, (pickaxe, 1, 1));
+
+    // Shift-clicking the pickaxe into the main inventory keeps its damage. The client
+    // reports nothing here, so the server answers with the whole inventory.
+    send(
+        &mut alice,
+        Writer::packet(play::serverbound::CONTAINER_CLICK)
+            .varint(0)
+            .varint(0)
+            .i16(36)
+            .u8(0)
+            .varint(1) // quick move
+            .varint(0)
+            .bool(false),
+    )
+    .await;
+    let body = read_until(&mut alice, play::clientbound::CONTAINER_SET_CONTENT).await;
+    let mut r = Reader::new(&body);
+    let (_window, _state, len) = (
+        r.varint().unwrap(),
+        r.varint().unwrap(),
+        r.varint().unwrap(),
+    );
+    let mut slots = Vec::new();
+    for _ in 0..len {
+        let count = r.varint().unwrap();
+        if count == 0 {
+            slots.push((0, 0, 0));
+            continue;
+        }
+        let item = r.varint().unwrap();
+        let mut damage = 0;
+        for _ in 0..r.varint().unwrap() {
+            r.varint().unwrap(); // component type: only damage is ever sent
+            damage = r.varint().unwrap();
+        }
+        r.varint().unwrap(); // components removed
+        slots.push((item, count, damage));
+    }
+    assert_eq!(slots[36], (0, 0, 0));
+    assert_eq!(slots[9], (pickaxe, 1, 1));
 }

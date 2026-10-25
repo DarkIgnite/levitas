@@ -1,4 +1,5 @@
 mod blocks;
+mod click;
 mod connection;
 mod flat;
 mod inventory;

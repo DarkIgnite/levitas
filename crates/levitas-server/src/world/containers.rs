@@ -5,13 +5,12 @@
 //! changed; the server applies them only if no items appeared out of nowhere. The one
 //! exception is taking a crafting result, which must also use up the ingredients.
 
-use std::collections::HashMap;
-
 use levitas_nbt::Compound;
 use levitas_registry::{block_entity_type, menu, BlockInfo, STATE_BLOCK};
 
 use super::*;
 use crate::blocks;
+use crate::click;
 use crate::inventory::{items_from_nbt, items_to_nbt};
 use crate::recipes::{fuel_remainder, fuel_ticks};
 
@@ -191,12 +190,13 @@ impl View {
         }
     }
 
-    /// Crafting views have the result in slot 0, followed by the grid.
-    fn grid_size(self) -> Option<usize> {
+    /// The slot arrangement of the window.
+    fn layout(self) -> click::Layout {
         match self {
-            View::Inventory => Some(2),
-            View::Crafting => Some(3),
-            _ => None,
+            View::Inventory => click::Layout::Inventory,
+            View::Crafting => click::Layout::Crafting,
+            View::Furnace(_) => click::Layout::Furnace,
+            View::Chest(_) | View::DoubleChest(..) => click::Layout::Chest(self.container_len()),
         }
     }
 }
@@ -208,14 +208,6 @@ pub struct Open {
     /// The crafting table grid; it lives in the window, not in the world.
     grid: [Stack; 9],
     result: Stack,
-}
-
-fn totals<'a>(stacks: impl Iterator<Item = &'a Stack>) -> HashMap<i32, i32> {
-    let mut totals = HashMap::new();
-    for s in stacks.filter(|s| !s.is_empty()) {
-        *totals.entry(s.item).or_insert(0) += s.count;
-    }
-    totals
 }
 
 impl World {
@@ -330,11 +322,12 @@ impl World {
         match view {
             View::Inventory => {
                 let p = self.players.get_mut(&id).expect("player exists");
-                p.inventory.slots[1..].copy_from_slice(&slots[1..]);
+                p.inventory.slots.copy_from_slice(slots);
             }
             View::Crafting => {
                 let p = self.players.get_mut(&id).expect("player exists");
                 let open = p.open.as_mut().expect("crafting window is open");
+                open.result = slots[0];
                 open.grid.copy_from_slice(&slots[1..10]);
             }
             View::Chest(_) | View::Furnace(_) | View::DoubleChest(..) => {
@@ -357,11 +350,16 @@ impl World {
         self.send(id, content);
     }
 
+    /// Runs a click on the server and checks the client predicted the same; if not, the
+    /// client gets the real window contents.
+    #[allow(clippy::too_many_arguments)]
     pub(super) fn container_click(
         &mut self,
         id: i32,
         window: i32,
         slot: i16,
+        button: u8,
+        mode: i32,
         changed: Vec<(i16, Stack)>,
         carried: Stack,
     ) {
@@ -373,88 +371,66 @@ impl World {
             Some(open) if open.window == window => open.view,
             _ => return,
         };
-        let carried_before = p.inventory.carried;
-        let current = self.window_slots(id, view);
-        let mut next = current.clone();
+        let layout = view.layout();
+        let before = self.window_slots(id, view);
+        let mut slots = before.clone();
+        let p = self.players.get_mut(&id).expect("player exists");
+        let mut cursor = p.inventory.carried;
+        let mut offhand = p.inventory.slots[OFFHAND];
+        let mut drag = std::mem::take(&mut p.drag);
+        let thrown = click::click(
+            &mut click::Window {
+                layout,
+                slots: &mut slots,
+                carried: &mut cursor,
+                offhand: &mut offhand,
+                drag: &mut drag,
+                creative: p.mode == GAME_MODE_CREATIVE,
+                recipes: &self.recipes,
+            },
+            click::Click { slot, button, mode },
+        );
+        p.drag = drag;
+        p.inventory.carried = cursor;
+        if view != View::Inventory {
+            p.inventory.slots[OFFHAND] = offhand;
+        }
+        self.store_window(id, view, &slots);
+        for stack in thrown {
+            self.throw_from_player(id, stack);
+        }
+
+        // Compare with what the client says happened. Only the server computes crafting
+        // results, so those are sent rather than counted as a disagreement.
+        let mut client = before.clone();
         for (s, stack) in changed {
-            match usize::try_from(s).ok().filter(|&s| s < next.len()) {
-                Some(s) => next[s] = stack,
-                None => return self.resync_window(id, window, view),
+            if let Some(s) = usize::try_from(s).ok().filter(|&s| s < client.len()) {
+                client[s] = stack;
             }
         }
-
-        // The crafting result slot is virtual: it only becomes real items once taken.
-        let real = |slots: &[Stack], carried: &Stack| {
-            let skip = usize::from(view.grid_size().is_some());
-            totals(slots[skip..].iter().chain([carried]))
+        let same = |a: &Stack, b: &Stack| {
+            (a.is_empty() && b.is_empty()) || (a.item == b.item && a.count == b.count)
         };
-        let before = real(&current, &carried_before);
-        let after = real(&next, &carried);
-        let crafted = view.grid_size().is_some() && slot == 0 && !current[0].is_empty();
-        if crafted {
-            // Taking a result must use up one of every ingredient.
-            let grid = 1..1 + view.grid_size().unwrap().pow(2);
-            let consumed = grid.clone().all(|i| {
-                let (was, now) = (current[i], next[i]);
-                was.is_empty()
-                    || (now.count == was.count - 1 && (now.is_empty() || now.item == was.item))
-            });
-            if !consumed {
-                return self.resync_window(id, window, view);
-            }
-        }
-        let appeared = after.iter().any(|(&item, &count)| {
-            count > before.get(&item).copied().unwrap_or(0) && !(crafted && item == current[0].item)
-        });
-        if appeared {
-            return self.resync_window(id, window, view);
-        }
-
-        self.store_window(id, view, &next);
-        self.players
-            .get_mut(&id)
-            .expect("player exists")
-            .inventory
-            .carried = carried;
-        if !crafted {
-            // Whatever left the window was thrown out (Q, or a click outside it).
-            for (item, count) in before {
-                let lost = count - after.get(&item).copied().unwrap_or(0);
-                if lost > 0 {
-                    self.throw_from_player(id, Stack::new(item, lost));
-                }
-            }
-        }
-        if view.grid_size().is_some() {
-            self.update_crafting_result(id, window, view, next[0]);
+        let result = layout.result_slot();
+        let agrees = same(&carried, &cursor)
+            && (0..slots.len()).all(|i| Some(i) == result || same(&client[i], &slots[i]));
+        if !agrees {
+            self.resync_window(id, window, view);
+        } else if let Some(r) = result.filter(|&r| !same(&client[r], &slots[r])) {
+            let p = self.players.get_mut(&id).expect("player exists");
+            let update = p.inventory.window_slot_packet(window, r, slots[r]);
+            self.send(id, update);
         }
         let parts = view.parts();
         for (i, &(part, first)) in parts.iter().enumerate() {
             let end = parts
                 .get(i + 1)
                 .map_or(view.container_len(), |&(_, next)| next);
-            let slots: Vec<usize> = (first..end)
-                .filter(|&s| current[s] != next[s])
+            let changed: Vec<usize> = (first..end)
+                .filter(|&s| before[s] != slots[s])
                 .map(|s| s - first)
                 .collect();
-            self.notify_viewers(part, &slots, Some(id));
-        }
-    }
-
-    /// Recomputes a crafting result and sends it if the client shows something else
-    /// (`shown`: what the client's result slot holds after its click).
-    fn update_crafting_result(&mut self, id: i32, window: i32, view: View, shown: Stack) {
-        let slots = self.window_slots(id, view);
-        let size = view.grid_size().expect("crafting view");
-        let result = self.recipes.craft(&slots[1..1 + size * size], size);
-        let p = self.players.get_mut(&id).expect("player exists");
-        match view {
-            View::Inventory => p.inventory.slots[0] = result,
-            _ => p.open.as_mut().expect("crafting window is open").result = result,
-        }
-        if result != shown {
-            let update = p.inventory.window_slot_packet(window, 0, result);
-            self.send(id, update);
+            self.notify_viewers(part, &changed, Some(id));
         }
     }
 
