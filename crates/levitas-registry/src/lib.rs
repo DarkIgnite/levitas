@@ -91,6 +91,9 @@ pub struct BlockInfo {
     pub light_emission: u8,
     /// How much light the block absorbs (0-15).
     pub light_filter: u8,
+    /// Whether the block drops nothing unless mined with a correct tool (stone without a
+    /// pickaxe, for example).
+    pub requires_tool: bool,
 }
 
 impl BlockInfo {
@@ -163,7 +166,11 @@ pub struct ItemInfo {
     /// Default state of the block this item places, or air (0).
     pub block: u16,
     pub food: Option<Food>,
-    pub tool_rules: &'static [ToolRule],
+    pub tool: Option<Tool>,
+    /// Durability; 0 for items that do not wear out.
+    pub max_damage: i32,
+    /// The equipment slot the item is worn in (`head`, `chest`, `legs`, `feet`, ...).
+    pub equip_slot: Option<&'static str>,
 }
 
 impl ItemInfo {
@@ -176,13 +183,28 @@ impl ItemInfo {
     }
 
     /// Whether this item, used as a tool, makes `state` drop its loot. `None` if no rule
-    /// of the tool mentions the block.
+    /// of the tool decides it.
     pub fn correct_for_drops(&self, state: u16) -> Option<bool> {
         let block = i64::from(STATE_BLOCK[usize::from(state)]);
-        self.tool_rules
+        self.tool?
+            .rules
             .iter()
+            .filter(|r| r.correct_for_drops.is_some())
             .find(|r| r.blocks.binary_search(&block).is_ok())
             .and_then(|r| r.correct_for_drops)
+    }
+
+    /// How fast this item mines `state` (1 for a bare hand or a non-tool).
+    pub fn mining_speed(&self, state: u16) -> f32 {
+        let Some(tool) = self.tool else {
+            return 1.0;
+        };
+        let block = i64::from(STATE_BLOCK[usize::from(state)]);
+        tool.rules
+            .iter()
+            .filter_map(|r| Some((r, r.speed?)))
+            .find(|(r, _)| r.blocks.binary_search(&block).is_ok())
+            .map_or(tool.default_speed, |(_, speed)| speed)
     }
 }
 
@@ -192,10 +214,20 @@ pub struct Food {
     pub can_always_eat: bool,
 }
 
+#[derive(Clone, Copy)]
+pub struct Tool {
+    pub rules: &'static [ToolRule],
+    /// Speed on blocks no rule mentions.
+    pub default_speed: f32,
+    /// Durability used up per block mined.
+    pub damage_per_block: i32,
+}
+
 pub struct ToolRule {
     /// Block registry IDs, sorted.
     pub blocks: &'static [i64],
     pub correct_for_drops: Option<bool>,
+    pub speed: Option<f32>,
 }
 
 include!(concat!(env!("OUT_DIR"), "/generated.rs"));
@@ -269,6 +301,17 @@ mod tests {
         assert_eq!(pickaxe.max_stack, 1);
         assert_eq!(pickaxe.correct_for_drops(block::STONE), Some(true));
         assert_eq!(pickaxe.correct_for_drops(block::IRON_ORE), Some(false));
+        assert_eq!(pickaxe.mining_speed(block::STONE), 2.0);
+        assert_eq!(pickaxe.mining_speed(block::DIRT), 1.0);
+        assert_eq!(pickaxe.max_damage, 59);
+        let sword = ItemInfo::get(ItemInfo::id_of("minecraft:diamond_sword").unwrap()).unwrap();
+        assert_eq!(sword.tool.unwrap().damage_per_block, 2);
+        assert_eq!(sword.correct_for_drops(block::COBWEB), Some(true));
+        let helmet = ItemInfo::get(ItemInfo::id_of("minecraft:iron_helmet").unwrap()).unwrap();
+        assert_eq!(helmet.equip_slot, Some("head"));
+        assert!(BlockInfo::of(block::STONE).requires_tool);
+        assert!(!BlockInfo::of(block::DIRT).requires_tool);
+        assert_eq!(component::DAMAGE, 3);
         let bread = ItemInfo::get(ItemInfo::id_of("minecraft:bread").unwrap()).unwrap();
         assert_eq!(bread.food.as_ref().unwrap().nutrition, 5);
         assert!(BLOCK_LOOT_JSON.contains("minecraft:cobblestone"));

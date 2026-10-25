@@ -72,7 +72,7 @@ impl World {
             return String::new();
         };
         let count = count.clamp(1, 64 * 36);
-        let (changed, left) = p.inventory.add(item_id, count);
+        let (changed, left) = p.inventory.add(Stack::new(item_id, count));
         let updates: Vec<Writer> = changed
             .into_iter()
             .map(|slot| p.inventory.set_slot_packet(slot))

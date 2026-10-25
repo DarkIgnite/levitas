@@ -3,7 +3,7 @@
 
 use levitas_nbt::{Compound, Tag};
 use levitas_protocol::Writer;
-use levitas_registry::ItemInfo;
+use levitas_registry::{component, ItemInfo};
 
 pub const SLOTS: usize = 46;
 pub const CRAFTING_GRID: std::ops::RangeInclusive<usize> = 1..=4;
@@ -15,13 +15,37 @@ pub const OFFHAND: usize = 45;
 pub struct Stack {
     pub item: i32,
     pub count: i32,
+    /// Durability used up (the `minecraft:damage` component); 0 when undamaged.
+    pub damage: i32,
 }
 
 impl Stack {
-    pub const EMPTY: Stack = Stack { item: 0, count: 0 };
+    pub const EMPTY: Stack = Stack {
+        item: 0,
+        count: 0,
+        damage: 0,
+    };
 
     pub fn new(item: i32, count: i32) -> Self {
-        Self { item, count }
+        Self {
+            item,
+            count,
+            damage: 0,
+        }
+    }
+
+    /// The same item with the same components, in another amount.
+    pub fn with_count(self, count: i32) -> Self {
+        if count <= 0 {
+            Stack::EMPTY
+        } else {
+            Self { count, ..self }
+        }
+    }
+
+    /// Whether two stacks can merge: the same item with the same components.
+    pub fn same_kind(&self, other: &Stack) -> bool {
+        self.item == other.item && self.damage == other.damage
     }
 
     pub fn is_empty(&self) -> bool {
@@ -32,10 +56,18 @@ impl Stack {
         ItemInfo::get(self.item).map_or(64, |i| i32::from(i.max_stack))
     }
 
-    /// The vanilla saved form: `{id, count}`. Item components are not tracked yet.
+    /// The vanilla saved form: `{id, count, components}`. Of the components only damage
+    /// is tracked so far.
     pub fn to_nbt(self) -> Compound {
         let name = ItemInfo::get(self.item).map_or("minecraft:air", |i| i.name);
-        Compound::new().with("id", name).with("count", self.count)
+        let mut nbt = Compound::new().with("id", name).with("count", self.count);
+        if self.damage > 0 {
+            nbt.insert(
+                "components",
+                Compound::new().with("minecraft:damage", self.damage),
+            );
+        }
+        nbt
     }
 
     /// Reads a saved stack; unknown items come back empty.
@@ -44,7 +76,15 @@ impl Stack {
             return Stack::EMPTY;
         };
         let count = nbt.int("count").unwrap_or(1) as i32;
-        Stack::new(item, count)
+        let damage = nbt
+            .compound("components")
+            .and_then(|c| c.int("minecraft:damage"))
+            .unwrap_or(0) as i32;
+        Stack {
+            item,
+            count,
+            damage: damage.max(0),
+        }
     }
 }
 
@@ -69,17 +109,22 @@ pub fn items_from_nbt(list: &[Tag]) -> Vec<(usize, Stack)> {
         .collect()
 }
 
-/// Appends a stack in the protocol's slot format (without components).
+/// Appends a stack in the protocol's slot format: count, item, then the components that
+/// differ from the item's defaults.
 pub fn write_stack(packet: Writer, stack: Stack) -> Writer {
     if stack.is_empty() {
-        packet.varint(0)
-    } else {
-        packet
-            .varint(stack.count)
-            .varint(stack.item)
-            .varint(0) // components to add
-            .varint(0) // components to remove
+        return packet.varint(0);
     }
+    let packet = packet.varint(stack.count).varint(stack.item);
+    let packet = if stack.damage > 0 {
+        packet
+            .varint(1) // components to add
+            .varint(component::DAMAGE)
+            .varint(stack.damage)
+    } else {
+        packet.varint(0)
+    };
+    packet.varint(0) // components to remove
 }
 
 pub struct Inventory {
@@ -106,13 +151,14 @@ impl Inventory {
     /// Adds items the way vanilla does: onto matching stacks first, then into empty
     /// slots, hotbar before main inventory. Returns the slots changed and how many items
     /// did not fit.
-    pub fn add(&mut self, item: i32, mut count: i32) -> (Vec<usize>, i32) {
-        let max = Stack::new(item, 1).max_stack();
+    pub fn add(&mut self, stack: Stack) -> (Vec<usize>, i32) {
+        let max = stack.max_stack();
+        let mut count = stack.count;
         let order: Vec<usize> = (HOTBAR..HOTBAR + 9).chain(9..HOTBAR).collect();
         let mut changed = Vec::new();
         for &slot in &order {
             let s = &mut self.slots[slot];
-            if count > 0 && !s.is_empty() && s.item == item && s.count < max {
+            if count > 0 && !s.is_empty() && s.same_kind(&stack) && s.count < max {
                 let moved = count.min(max - s.count);
                 s.count += moved;
                 count -= moved;
@@ -122,7 +168,7 @@ impl Inventory {
         for &slot in &order {
             if count > 0 && self.slots[slot].is_empty() {
                 let moved = count.min(max);
-                self.slots[slot] = Stack::new(item, moved);
+                self.slots[slot] = stack.with_count(moved);
                 count -= moved;
                 changed.push(slot);
             }
@@ -137,12 +183,9 @@ impl Inventory {
             return Stack::EMPTY;
         }
         let taken = amount.min(s.count);
-        s.count -= taken;
-        let item = s.item;
-        if s.count <= 0 {
-            *s = Stack::EMPTY;
-        }
-        Stack::new(item, taken)
+        let removed = s.with_count(taken);
+        *s = s.with_count(s.count - taken);
+        removed
     }
 
     /// Empties the inventory, returning everything that was in it.
@@ -214,10 +257,10 @@ mod tests {
     fn add_fills_stacks_then_hotbar_then_main() {
         let mut inv = Inventory::new();
         let dirt = item("minecraft:dirt");
-        assert_eq!(inv.add(dirt, 70), (vec![HOTBAR, HOTBAR + 1], 0));
+        assert_eq!(inv.add(Stack::new(dirt, 70)), (vec![HOTBAR, HOTBAR + 1], 0));
         assert_eq!(inv.slots[HOTBAR], Stack::new(dirt, 64));
         assert_eq!(inv.slots[HOTBAR + 1], Stack::new(dirt, 6));
-        assert_eq!(inv.add(dirt, 10), (vec![HOTBAR + 1], 0));
+        assert_eq!(inv.add(Stack::new(dirt, 10)), (vec![HOTBAR + 1], 0));
         assert_eq!(inv.slots[HOTBAR + 1].count, 16);
     }
 
@@ -225,7 +268,7 @@ mod tests {
     fn unstackable_items_take_one_slot_each() {
         let mut inv = Inventory::new();
         let pickaxe = item("minecraft:iron_pickaxe");
-        let (changed, left) = inv.add(pickaxe, 2);
+        let (changed, left) = inv.add(Stack::new(pickaxe, 2));
         assert_eq!(changed.len(), 2);
         assert_eq!(left, 0);
     }
@@ -234,7 +277,7 @@ mod tests {
     fn full_inventory_reports_leftover() {
         let mut inv = Inventory::new();
         let stone = item("minecraft:stone");
-        let (_, left) = inv.add(stone, 64 * 37);
+        let (_, left) = inv.add(Stack::new(stone, 64 * 37));
         assert_eq!(left, 64);
     }
 
@@ -242,10 +285,27 @@ mod tests {
     fn take() {
         let mut inv = Inventory::new();
         let dirt = item("minecraft:dirt");
-        inv.add(dirt, 5);
+        inv.add(Stack::new(dirt, 5));
         assert_eq!(inv.take(HOTBAR, 2), Stack::new(dirt, 2));
         assert_eq!(inv.slots[HOTBAR], Stack::new(dirt, 3));
         assert_eq!(inv.take(HOTBAR, 9), Stack::new(dirt, 3));
         assert!(inv.slots[HOTBAR].is_empty());
+    }
+
+    #[test]
+    fn damaged_tools_keep_their_damage() {
+        let mut inv = Inventory::new();
+        let pickaxe = Stack {
+            damage: 12,
+            ..Stack::new(item("minecraft:iron_pickaxe"), 1)
+        };
+        inv.add(pickaxe);
+        assert_eq!(inv.slots[HOTBAR], pickaxe);
+        let nbt = pickaxe.to_nbt();
+        assert_eq!(Stack::from_nbt(&nbt), pickaxe);
+        // Damaged and undamaged copies do not merge.
+        let dirt = item("minecraft:dirt");
+        assert!(Stack::new(dirt, 1).same_kind(&Stack::new(dirt, 5)));
+        assert!(!pickaxe.same_kind(&Stack::new(pickaxe.item, 1)));
     }
 }

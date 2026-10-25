@@ -217,7 +217,7 @@ impl World {
         let Some((&player_id, p)) = collector else {
             return false;
         };
-        let (changed, left) = p.inventory.add(item.stack.item, item.stack.count);
+        let (changed, left) = p.inventory.add(item.stack);
         let picked = item.stack.count - left;
         if picked == 0 {
             return false;

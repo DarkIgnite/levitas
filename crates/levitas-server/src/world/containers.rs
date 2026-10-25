@@ -34,7 +34,7 @@ pub enum BlockEntity {
 pub struct Chest {
     /// Block entity type: chests and barrels share this storage.
     kind: i32,
-    items: [Stack; CHEST_SLOTS],
+    items: Box<[Stack; CHEST_SLOTS]>,
     viewers: HashSet<i32>,
 }
 
@@ -116,7 +116,7 @@ impl BlockEntity {
         let chest = |kind| {
             Some(BlockEntity::Chest(Chest {
                 kind,
-                items: [Stack::EMPTY; CHEST_SLOTS],
+                items: Box::new([Stack::EMPTY; CHEST_SLOTS]),
                 viewers: HashSet::new(),
             }))
         };
@@ -138,14 +138,14 @@ impl BlockEntity {
 
     fn items(&self) -> &[Stack] {
         match self {
-            BlockEntity::Chest(c) => &c.items,
+            BlockEntity::Chest(c) => &c.items[..],
             BlockEntity::Furnace(f) => &f.items,
         }
     }
 
     fn items_mut(&mut self) -> &mut [Stack] {
         match self {
-            BlockEntity::Chest(c) => &mut c.items,
+            BlockEntity::Chest(c) => &mut c.items[..],
             BlockEntity::Furnace(f) => &mut f.items,
         }
     }
@@ -600,9 +600,9 @@ impl World {
         stacks.push(std::mem::take(&mut p.inventory.carried));
         let mut overflow = Vec::new();
         for stack in stacks.into_iter().filter(|s| !s.is_empty()) {
-            let (_, left) = p.inventory.add(stack.item, stack.count);
+            let (_, left) = p.inventory.add(stack);
             if left > 0 {
-                overflow.push(Stack::new(stack.item, left));
+                overflow.push(stack.with_count(left));
             }
         }
         let content = p.inventory.content_packet();

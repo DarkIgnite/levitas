@@ -17,7 +17,7 @@ use std::time::Duration;
 
 use levitas_protocol::{angle, varint, BlockPos, Writer};
 use levitas_registry::packet::play::clientbound;
-use levitas_registry::{block, block_has_tag, entity_type, ItemInfo, SyncedRegistry};
+use levitas_registry::{block, block_has_tag, entity_type, BlockInfo, ItemInfo, SyncedRegistry};
 use levitas_world::{is_air, Chunk, RegionStorage, MAX_Y, MIN_Y};
 use tokio::sync::{mpsc, oneshot};
 use tracing::info;
@@ -51,7 +51,12 @@ const PLAYER_INFO_ACTIONS: u8 = 0x01 | 0x04 | 0x08 | 0x10;
 const PLAYER_INFO_UPDATE_GAME_MODE: u8 = 0x04;
 const LEVEL_EVENT_BLOCK_BREAK: i32 = 2001;
 const DIG_START: i32 = 0;
+const DIG_CANCEL: i32 = 1;
 const DIG_FINISH: i32 = 2;
+/// A dig is accepted once the client's time would have broken 70% of the block, which
+/// allows for network lag, as vanilla does.
+const DIG_TOLERANCE: f32 = 0.7;
+const ENTITY_EVENT_MAINHAND_BREAK: i8 = 47;
 const DROP_STACK: i32 = 3;
 const DROP_ITEM: i32 = 4;
 const RELEASE_USE_ITEM: i32 = 5;
@@ -189,6 +194,8 @@ struct Player {
     alive: bool,
     /// Hand and start tick of the food being eaten.
     eating: Option<(i32, u64)>,
+    /// The block being dug in survival and the tick digging started.
+    digging: Option<(BlockPos, u64)>,
     /// Health, food or saturation changed and the client has not been told.
     health_dirty: bool,
     /// A container window open besides the inventory.
@@ -227,6 +234,7 @@ impl Player {
             sneaking: false,
             alive: true,
             eating: None,
+            digging: None,
             health_dirty: false,
             open: None,
             next_window: 0,
@@ -571,14 +579,38 @@ impl World {
             return;
         };
         let (alive, survival) = (p.alive, p.survival());
+        let tool = p.inventory.held(p.held).item;
+        let started = p.digging;
         match status {
             DIG_START | DIG_FINISH if alive => {
                 let state = self.block(pos);
-                // Creative players and zero-hardness blocks break at once; otherwise
-                // the client digs and reports when it is done.
-                let breaks = !survival || status == DIG_FINISH || survival::breaks_instantly(state);
-                if breaks && !is_air(state) {
+                if is_air(state) {
+                    // Nothing to do.
+                } else if !survival {
                     self.break_block(id, pos, state);
+                } else {
+                    let progress = survival::break_progress(state, tool);
+                    let breaks = if status == DIG_START {
+                        progress >= 1.0
+                    } else {
+                        // The client says it finished: check it dug long enough.
+                        started.is_some_and(|(at, tick)| {
+                            at == pos && progress * (self.tick - tick + 1) as f32 >= DIG_TOLERANCE
+                        })
+                    };
+                    let p = self.players.get_mut(&id).expect("player exists");
+                    p.digging = (status == DIG_START && !breaks).then_some((pos, self.tick));
+                    if breaks {
+                        self.break_block(id, pos, state);
+                    } else if status == DIG_FINISH {
+                        // Too fast: put the block back on the client.
+                        self.send(id, block_update(pos, state));
+                    }
+                }
+            }
+            DIG_CANCEL => {
+                if let Some(p) = self.players.get_mut(&id) {
+                    p.digging = None;
                 }
             }
             DROP_STACK | DROP_ITEM if alive => self.drop_held(id, status == DROP_STACK),
@@ -609,7 +641,7 @@ impl World {
         if survival {
             p.exhaustion += 0.005;
             let tool = p.inventory.held(p.held).item;
-            if survival::drops_with_tool(state, tool) {
+            if survival::harvestable(state, tool) {
                 let drops = self.loot.block_drops(&mut LootContext {
                     state,
                     tool,
@@ -619,6 +651,7 @@ impl World {
                     self.drop_at_block(pos, Stack::new(item, count));
                 }
             }
+            self.wear_tool(id, state);
         } else if let Some(other) = crate::blocks::other_part(state, pos) {
             // In creative the other half goes too, without dropping anything.
             if crate::blocks::same_block(self.block(other), state) {
@@ -627,6 +660,43 @@ impl World {
             }
         }
         self.update_neighbors(pos);
+    }
+
+    /// A tool that broke a block loses durability (blocks that break instantly cost none).
+    fn wear_tool(&mut self, id: i32, state: u16) {
+        if BlockInfo::of(state).hardness == 0.0 {
+            return;
+        }
+        let Some(p) = self.players.get(&id) else {
+            return;
+        };
+        let slot = p.hand_slot(0);
+        let stack = p.inventory.slots[slot];
+        let Some(tool) = ItemInfo::get(stack.item).and_then(|i| i.tool) else {
+            return;
+        };
+        self.damage_item(id, slot, tool.damage_per_block, ENTITY_EVENT_MAINHAND_BREAK);
+    }
+
+    /// Uses up durability of the item in `slot`; when none is left the item breaks, with
+    /// the break sound and particles (`break_event`) for everyone nearby.
+    pub(super) fn damage_item(&mut self, id: i32, slot: usize, amount: i32, break_event: i8) {
+        let Some(p) = self.players.get_mut(&id) else {
+            return;
+        };
+        let mut stack = p.inventory.slots[slot];
+        let max = ItemInfo::get(stack.item).map_or(0, |i| i.max_damage);
+        if stack.is_empty() || max <= 0 || amount <= 0 {
+            return;
+        }
+        stack.damage += amount;
+        let broke = stack.damage >= max;
+        p.inventory.slots[slot] = if broke { Stack::EMPTY } else { stack };
+        let update = p.inventory.set_slot_packet(slot);
+        self.send(id, update);
+        if broke {
+            self.broadcast(entity_event(id, break_event), None);
+        }
     }
 
     fn creative_slot(&mut self, id: i32, slot: i16, stack: Stack) {

@@ -205,12 +205,16 @@ fn blocks(data: &Path, out: &mut String) -> HashMap<String, u64> {
         rows[block_id as usize] = format!(
             "BlockInfo {{ name: {name:?}, first_state: {first}, default_state: {default}, \
              properties: &[{}], hardness: {:?}, resistance: {:?}, light_emission: {}, \
-             light_filter: {} }},",
+             light_filter: {}, requires_tool: {} }},",
             props.join(", "),
             e["hardness"].as_f64().unwrap_or(-1.0) as f32,
             e["resistance"].as_f64().unwrap_or(0.0) as f32,
             e["emitLight"].as_u64().unwrap_or(0),
             e["filterLight"].as_u64().unwrap_or(0),
+            // Blocks listing harvest tools only drop with a correct tool.
+            e.get("harvestTools")
+                .and_then(Value::as_object)
+                .is_some_and(|t| !t.is_empty()),
         );
     }
     out.push_str("}\n\n");
@@ -363,6 +367,11 @@ fn items_and_entities(data: &Path, block_defaults: &HashMap<String, u64>, out: &
             "minecraft:block_entity_type",
             "Block entity type IDs.",
         ),
+        (
+            "component",
+            "minecraft:data_component_type",
+            "Item data component type IDs.",
+        ),
     ] {
         writeln!(out, "/// {doc}\npub mod {module} {{").unwrap();
         for (name, id) in entries(registry) {
@@ -412,28 +421,43 @@ fn items_and_entities(data: &Path, block_defaults: &HashMap<String, u64>, out: &
             ),
             None => "None".to_owned(),
         };
-        let mut rules = Vec::new();
-        if let Some(tool) = c.get("minecraft:tool") {
-            for rule in tool["rules"].as_array().unwrap() {
-                let blocks = resolve_blocks(&rule["blocks"]);
-                let correct = rule["correct_for_drops"].as_bool();
-                rules.push(format!(
-                    "ToolRule {{ blocks: &{blocks:?}, correct_for_drops: {correct:?} }}"
-                ));
+        let tool = match c.get("minecraft:tool") {
+            Some(tool) => {
+                let rules: Vec<String> = tool["rules"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|rule| {
+                        let blocks = resolve_blocks(&rule["blocks"]);
+                        let correct = rule["correct_for_drops"].as_bool();
+                        let speed = rule["speed"].as_f64().map(|v| v as f32);
+                        format!(
+                            "ToolRule {{ blocks: &{blocks:?}, correct_for_drops: {correct:?}, \
+                             speed: {speed:?} }}"
+                        )
+                    })
+                    .collect();
+                format!(
+                    "Some(Tool {{ rules: &[{}], default_speed: {:?}, damage_per_block: {} }})",
+                    rules.join(", "),
+                    tool["default_mining_speed"].as_f64().unwrap_or(1.0) as f32,
+                    tool["damage_per_block"].as_i64().unwrap_or(1),
+                )
             }
-        }
+            None => "None".to_owned(),
+        };
+        let max_damage = c["minecraft:max_damage"].as_i64().unwrap_or(0);
+        let equip_slot = c["minecraft:equippable"]["slot"].as_str();
         writeln!(
             out,
             "ItemInfo {{ name: {name:?}, max_stack: {max_stack}, block: {block}, food: {food}, \
-             tool_rules: &[{}] }},",
-            rules.join(", ")
+             tool: {tool}, max_damage: {max_damage}, equip_slot: {equip_slot:?} }},"
         )
         .unwrap();
     }
     out.push_str("];\n\n");
 }
 
-/// Collects every block loot table into one JSON object keyed by block name.
 /// Collects every JSON file under `data/minecraft/<dir>` into one JSON object keyed by
 /// entry name, and exposes it as the string constant `name`.
 fn embed_json_dir(data: &Path, out_dir: &Path, dir: &str, name: &str, doc: &str, out: &mut String) {

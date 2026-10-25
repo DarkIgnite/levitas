@@ -13,136 +13,30 @@ const ENTITY_EVENT_USE_ITEM_COMPLETE: i8 = 9;
 /// Below this height players take void damage.
 const VOID_Y: f64 = (MIN_Y - 64) as f64;
 
-/// Blocks with zero hardness, which break as soon as a survival player starts digging.
-/// Hardness is not part of the data generator output, so the list is kept by hand.
-const INSTANT_BREAK: &[&str] = &[
-    "minecraft:short_grass",
-    "minecraft:tall_grass",
-    "minecraft:fern",
-    "minecraft:large_fern",
-    "minecraft:dead_bush",
-    "minecraft:bush",
-    "minecraft:short_dry_grass",
-    "minecraft:tall_dry_grass",
-    "minecraft:firefly_bush",
-    "minecraft:seagrass",
-    "minecraft:tall_seagrass",
-    "minecraft:kelp",
-    "minecraft:kelp_plant",
-    "minecraft:sea_pickle",
-    "minecraft:dandelion",
-    "minecraft:poppy",
-    "minecraft:blue_orchid",
-    "minecraft:allium",
-    "minecraft:azure_bluet",
-    "minecraft:red_tulip",
-    "minecraft:orange_tulip",
-    "minecraft:white_tulip",
-    "minecraft:pink_tulip",
-    "minecraft:oxeye_daisy",
-    "minecraft:cornflower",
-    "minecraft:lily_of_the_valley",
-    "minecraft:wither_rose",
-    "minecraft:torchflower",
-    "minecraft:closed_eyeblossom",
-    "minecraft:open_eyeblossom",
-    "minecraft:sunflower",
-    "minecraft:lilac",
-    "minecraft:rose_bush",
-    "minecraft:peony",
-    "minecraft:pitcher_plant",
-    "minecraft:pink_petals",
-    "minecraft:wildflowers",
-    "minecraft:spore_blossom",
-    "minecraft:oak_sapling",
-    "minecraft:spruce_sapling",
-    "minecraft:birch_sapling",
-    "minecraft:jungle_sapling",
-    "minecraft:acacia_sapling",
-    "minecraft:dark_oak_sapling",
-    "minecraft:cherry_sapling",
-    "minecraft:pale_oak_sapling",
-    "minecraft:mangrove_propagule",
-    "minecraft:brown_mushroom",
-    "minecraft:red_mushroom",
-    "minecraft:crimson_fungus",
-    "minecraft:warped_fungus",
-    "minecraft:crimson_roots",
-    "minecraft:warped_roots",
-    "minecraft:nether_sprouts",
-    "minecraft:weeping_vines",
-    "minecraft:weeping_vines_plant",
-    "minecraft:twisting_vines",
-    "minecraft:twisting_vines_plant",
-    "minecraft:hanging_roots",
-    "minecraft:small_dripleaf",
-    "minecraft:sugar_cane",
-    "minecraft:lily_pad",
-    "minecraft:torch",
-    "minecraft:wall_torch",
-    "minecraft:soul_torch",
-    "minecraft:soul_wall_torch",
-    "minecraft:redstone_torch",
-    "minecraft:redstone_wall_torch",
-    "minecraft:redstone_wire",
-    "minecraft:repeater",
-    "minecraft:comparator",
-    "minecraft:tripwire",
-    "minecraft:tripwire_hook",
-    "minecraft:wheat",
-    "minecraft:carrots",
-    "minecraft:potatoes",
-    "minecraft:beetroots",
-    "minecraft:melon_stem",
-    "minecraft:attached_melon_stem",
-    "minecraft:pumpkin_stem",
-    "minecraft:attached_pumpkin_stem",
-    "minecraft:nether_wart",
-    "minecraft:sweet_berry_bush",
-    "minecraft:torchflower_crop",
-    "minecraft:pitcher_crop",
-    "minecraft:flower_pot",
-    "minecraft:tnt",
-    "minecraft:slime_block",
-    "minecraft:honey_block",
-    "minecraft:scaffolding",
-    "minecraft:frogspawn",
-    "minecraft:end_rod",
-    "minecraft:decorated_pot",
-    "minecraft:fire",
-    "minecraft:soul_fire",
-];
-
-/// Pickaxe-mineable blocks that still drop when broken by hand.
-const NO_TOOL_NEEDED: &[&str] = &[
-    "minecraft:rail",
-    "minecraft:powered_rail",
-    "minecraft:detector_rail",
-    "minecraft:activator_rail",
-    "minecraft:pointed_dripstone",
-    "minecraft:piston",
-    "minecraft:sticky_piston",
-    "minecraft:piston_head",
-    "minecraft:conduit",
-];
-
-pub fn breaks_instantly(state: u16) -> bool {
-    let name = BlockInfo::of(state).name;
-    INSTANT_BREAK.contains(&name) || name.starts_with("minecraft:potted_")
+/// How much of `state` a survival player breaks per tick with `tool` in hand (vanilla's
+/// destroy progress): 1 or more breaks it at once, 0 means it cannot be broken.
+pub fn break_progress(state: u16, tool: i32) -> f32 {
+    let info = BlockInfo::of(state);
+    if info.hardness < 0.0 {
+        return 0.0;
+    }
+    if info.hardness == 0.0 {
+        return 1.0;
+    }
+    let speed = ItemInfo::get(tool).map_or(1.0, |i| i.mining_speed(state));
+    let divisor = if harvestable(state, tool) {
+        30.0
+    } else {
+        100.0
+    };
+    speed / info.hardness / divisor
 }
 
-/// Whether breaking `state` while holding `tool` drops anything. Vanilla flags each
-/// block that needs the correct tool; that flag is not in the generated data, so this
-/// treats pickaxe blocks (with a few exceptions), snow and cobwebs as needing one.
-pub fn drops_with_tool(state: u16, tool: i32) -> bool {
-    let name = BlockInfo::of(state).name;
-    let needs_tool = (block_has_tag(state, "minecraft:mineable/pickaxe")
-        && !NO_TOOL_NEEDED.contains(&name))
-        || matches!(
-            name,
-            "minecraft:snow" | "minecraft:snow_block" | "minecraft:cobweb"
-        );
-    !needs_tool || ItemInfo::get(tool).and_then(|t| t.correct_for_drops(state)) == Some(true)
+/// Whether breaking `state` while holding `tool` drops anything: blocks that require a
+/// tool need a correct one.
+pub fn harvestable(state: u16, tool: i32) -> bool {
+    !BlockInfo::of(state).requires_tool
+        || ItemInfo::get(tool).and_then(|t| t.correct_for_drops(state)) == Some(true)
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -408,5 +302,41 @@ impl World {
         for (id, packet) in dirty {
             self.send(id, packet);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use levitas_registry::block;
+
+    /// Ticks to break `state` with `tool`, as vanilla counts them.
+    fn ticks(state: u16, tool: &str) -> u32 {
+        let tool = ItemInfo::id_of(tool).unwrap_or(0);
+        (1.0 / break_progress(state, tool)).ceil() as u32
+    }
+
+    #[test]
+    fn mining_times_match_vanilla() {
+        // Stone: 7.5 s by hand, 1.15 s with a wooden pickaxe, 0.3 s with diamond.
+        assert_eq!(ticks(block::STONE, "minecraft:air"), 150);
+        assert_eq!(ticks(block::STONE, "minecraft:wooden_pickaxe"), 23);
+        assert_eq!(ticks(block::STONE, "minecraft:diamond_pickaxe"), 6);
+        // Dirt: 0.75 s by hand, 0.4 s with a wooden shovel.
+        assert_eq!(ticks(block::DIRT, "minecraft:air"), 15);
+        assert_eq!(ticks(block::DIRT, "minecraft:wooden_shovel"), 8);
+        // Logs need no tool; obsidian needs diamond to drop.
+        assert!(harvestable(block::OAK_LOG, 0));
+        assert!(!harvestable(
+            block::OBSIDIAN,
+            ItemInfo::id_of("minecraft:iron_pickaxe").unwrap()
+        ));
+        assert!(harvestable(
+            block::OBSIDIAN,
+            ItemInfo::id_of("minecraft:diamond_pickaxe").unwrap()
+        ));
+        // Flowers break at once, bedrock never.
+        assert!(break_progress(block::POPPY, 0) >= 1.0);
+        assert_eq!(break_progress(block::BEDROCK, 0), 0.0);
     }
 }

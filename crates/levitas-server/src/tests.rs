@@ -248,19 +248,9 @@ async fn survival_drops_pickup_death_and_respawn() {
     let mut alice = join(addr, "Alice", 1).await;
     read_until(&mut alice, play::clientbound::PLAYER_POSITION).await;
 
-    // Grass is not instant to break: starting does nothing, finishing breaks it.
+    // Grass takes 0.9 s by hand: starting does nothing, finishing in time breaks it.
     let grass = BlockPos::new(0, -61, 0);
-    for (status, sequence) in [(0, 1), (2, 2)] {
-        send(
-            &mut alice,
-            Writer::packet(play::serverbound::PLAYER_ACTION)
-                .varint(status)
-                .position(grass)
-                .u8(1)
-                .varint(sequence),
-        )
-        .await;
-    }
+    dig(&mut alice, grass, 900).await;
     let body = read_until(&mut alice, play::clientbound::BLOCK_UPDATE).await;
     let mut r = Reader::new(&body);
     assert_eq!(r.position().unwrap(), grass);
@@ -662,18 +652,18 @@ async fn look(client: &mut TcpStream, yaw: f32) {
     .await;
 }
 
-async fn dig(client: &mut TcpStream, pos: BlockPos) {
-    for (status, sequence) in [(0, 90), (2, 91)] {
-        send(
-            client,
-            Writer::packet(play::serverbound::PLAYER_ACTION)
-                .varint(status)
-                .position(pos)
-                .u8(1)
-                .varint(sequence),
-        )
-        .await;
-    }
+/// Starts digging, waits `millis` like a client holding the mouse, then finishes.
+async fn dig(client: &mut TcpStream, pos: BlockPos, millis: u64) {
+    let action = |status: i32, sequence: i32| {
+        Writer::packet(play::serverbound::PLAYER_ACTION)
+            .varint(status)
+            .position(pos)
+            .u8(1)
+            .varint(sequence)
+    };
+    send(client, action(0, 90)).await;
+    tokio::time::sleep(std::time::Duration::from_millis(millis)).await;
+    send(client, action(2, 91)).await;
 }
 
 #[tokio::test]
@@ -729,7 +719,8 @@ async fn torches_pop_off_when_their_wall_goes() {
     );
     assert_eq!(prop(torch, "facing"), Some("east"));
 
-    dig(&mut alice, wall).await;
+    command(&mut alice, "gamemode creative").await;
+    dig(&mut alice, wall, 0).await;
     assert_eq!(block_at(&mut alice, torch_pos).await, block::AIR);
     // The torch drops as an item.
     let body = read_until(&mut alice, play::clientbound::SET_ENTITY_DATA).await;
@@ -857,4 +848,50 @@ async fn chests_and_barrels_sound_and_barrels_open() {
         next_sound(&mut alice).await,
         sound("minecraft:block.barrel.open")
     );
+}
+
+/// Reads set-slot packets for the player inventory until `slot` changes; returns the
+/// item, count and damage.
+async fn slot_with_damage(client: &mut TcpStream, slot: i16) -> (i32, i32, i32) {
+    loop {
+        let body = read_until(client, play::clientbound::CONTAINER_SET_SLOT).await;
+        let mut r = Reader::new(&body);
+        let (window, _state, s) = (r.varint().unwrap(), r.varint().unwrap(), r.i16().unwrap());
+        if (window, s) != (0, slot) {
+            continue;
+        }
+        let count = r.varint().unwrap();
+        if count == 0 {
+            return (0, 0, 0);
+        }
+        let item = r.varint().unwrap();
+        let mut damage = 0;
+        for _ in 0..r.varint().unwrap() {
+            if r.varint().unwrap() == levitas_registry::component::DAMAGE {
+                damage = r.varint().unwrap();
+            }
+        }
+        return (item, count, damage);
+    }
+}
+
+#[tokio::test]
+async fn mining_takes_time_and_wears_tools() {
+    let stone = BlockPos::new(3, -60, 0);
+    let mut alice = join(server().await, "Alice", 1).await;
+    read_until(&mut alice, play::clientbound::PLAYER_POSITION).await;
+    give(&mut alice, "stone", 1).await;
+    send(&mut alice, use_on(BlockPos::new(3, -61, 0), 1, 1)).await;
+    block_at(&mut alice, stone).await;
+
+    // Stone takes 7.5 s by hand: finishing at once is refused and the block stays.
+    dig(&mut alice, stone, 0).await;
+    assert_eq!(block_at(&mut alice, stone).await, block::STONE);
+
+    // A wooden pickaxe needs 1.15 s, and loses one point of durability.
+    give(&mut alice, "wooden_pickaxe", 1).await;
+    dig(&mut alice, stone, 1200).await;
+    assert_eq!(block_at(&mut alice, stone).await, block::AIR);
+    let pickaxe = ItemInfo::id_of("minecraft:wooden_pickaxe").unwrap();
+    assert_eq!(slot_with_damage(&mut alice, 36).await, (pickaxe, 1, 1));
 }
