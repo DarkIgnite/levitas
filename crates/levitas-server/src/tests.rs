@@ -1017,3 +1017,92 @@ async fn torches_light_up_their_surroundings() {
     let i = (((-60i32 & 15) as usize) * 16 + 5) * 16 + 3;
     assert_eq!((nibbles[i >> 1] >> ((i & 1) * 4)) & 15, 14);
 }
+
+/// Stands at (`x` + 0.5, -60, `z` + 0.5) on the flat world, looking straight down.
+async fn stand_looking_down(client: &mut TcpStream, x: i32, z: i32) {
+    send(
+        client,
+        Writer::packet(play::serverbound::MOVE_PLAYER_POS_ROT)
+            .f64(f64::from(x) + 0.5)
+            .f64(-60.0)
+            .f64(f64::from(z) + 0.5)
+            .f32(0.0)
+            .f32(90.0)
+            .u8(1),
+    )
+    .await;
+}
+
+fn use_item(sequence: i32) -> Writer {
+    Writer::packet(play::serverbound::USE_ITEM)
+        .varint(0)
+        .varint(sequence)
+        .f32(0.0)
+        .f32(90.0)
+}
+
+fn fluid_level(state: u16, fluid: &str) -> Option<u8> {
+    let info = levitas_registry::BlockInfo::of(state);
+    (info.name == fluid).then(|| info.property(state, "level").unwrap().parse().unwrap())
+}
+
+#[tokio::test]
+async fn water_flows_from_a_bucket_and_is_scooped_back() {
+    let mut alice = join(server().await, "Alice", 1).await;
+    read_until(&mut alice, play::clientbound::PLAYER_POSITION).await;
+    give(&mut alice, "water_bucket", 1).await;
+    stand_looking_down(&mut alice, 5, 5).await;
+    send(&mut alice, use_item(1)).await;
+    let source = BlockPos::new(5, -60, 5);
+    assert_eq!(
+        fluid_level(block_at(&mut alice, source).await, "minecraft:water"),
+        Some(0)
+    );
+    let (item, _) = slot_update(&mut alice, 0, 36).await;
+    assert_eq!(item, ItemInfo::id_of("minecraft:bucket").unwrap());
+
+    // A tick of flow later, water spreads one block out on every side, one level weaker.
+    let side = BlockPos::new(6, -60, 5);
+    assert_eq!(
+        fluid_level(block_at(&mut alice, side).await, "minecraft:water"),
+        Some(1)
+    );
+
+    // Scooping the source up dries the flow.
+    send(&mut alice, use_item(2)).await;
+    assert_eq!(block_at(&mut alice, source).await, block::AIR);
+    let (item, _) = slot_update(&mut alice, 0, 36).await;
+    assert_eq!(item, ItemInfo::id_of("minecraft:water_bucket").unwrap());
+    // The flow weakens step by step until it is gone.
+    while block_at(&mut alice, side).await != block::AIR {}
+}
+
+#[tokio::test]
+async fn water_turns_a_lava_source_into_obsidian() {
+    let mut alice = join(server().await, "Alice", 1).await;
+    read_until(&mut alice, play::clientbound::PLAYER_POSITION).await;
+    command(&mut alice, "gamemode creative").await;
+    give(&mut alice, "lava_bucket", 1).await;
+    stand_looking_down(&mut alice, 5, 5).await;
+    send(&mut alice, use_item(1)).await;
+    let lava = BlockPos::new(5, -60, 5);
+    assert_eq!(
+        fluid_level(block_at(&mut alice, lava).await, "minecraft:lava"),
+        Some(0)
+    );
+
+    // Water two blocks away flows next to the lava before the lava moves.
+    send(
+        &mut alice,
+        Writer::packet(play::serverbound::SET_CARRIED_ITEM).i16(1),
+    )
+    .await;
+    give(&mut alice, "water_bucket", 1).await;
+    stand_looking_down(&mut alice, 7, 5).await;
+    send(&mut alice, use_item(2)).await;
+    loop {
+        if block_at(&mut alice, lava).await == block::OBSIDIAN {
+            break;
+        }
+    }
+}

@@ -4,6 +4,7 @@
 //!
 //! Functions read neighbours through a `get` closure so they can be tested without a world.
 
+pub mod fluid;
 pub mod place;
 
 use levitas_protocol::BlockPos;

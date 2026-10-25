@@ -78,8 +78,12 @@ Known gaps are listed under each phase instead of being hidden.
 
 ## Phase 3: Fluids, gravity and light
 
-- [ ] Water and lava flowing, sources, waterlogging, buckets
-- [ ] Lava and water interaction (cobblestone, stone, obsidian, basalt)
+- [x] Water and lava flowing, sources, waterlogging, buckets. Flow follows the wiki:
+      levels, falling columns, infinite water sources, the nearest way down within 4
+      (water) or 2 (lava) blocks; plants and torches wash away. Fluid ticks are saved.
+      Water breaks falls. Known gaps: placing a waterloggable block into water does
+      not waterlog it, and flowing water does not push dropped items.
+- [x] Lava and water interaction (cobblestone, stone, obsidian, basalt)
 - [ ] Swimming, drowning, fire and lava damage, burning, fire spread
 - [ ] Falling blocks: sand, gravel, concrete powder, anvils, pointed dripstone
 - [x] Real lighting: sky light and block light, propagated and updated on change

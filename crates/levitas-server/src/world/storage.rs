@@ -390,6 +390,7 @@ impl World {
             }
         }
         self.load_scheduled_ticks(&loaded.block_ticks);
+        self.load_fluid_ticks(&loaded.fluid_ticks);
         Some(loaded.chunk)
     }
 
@@ -405,7 +406,8 @@ impl World {
             .map(|(&pos, e)| e.to_nbt(pos))
             .collect();
         let ticks = self.scheduled_ticks_in(x, z);
-        let nbt = anvil::to_nbt(chunk, x, z, entities, ticks, self.tick as i64);
+        let fluid_ticks = self.fluid_ticks_in(x, z);
+        let nbt = anvil::to_nbt(chunk, x, z, entities, ticks, fluid_ticks, self.tick as i64);
         if let Err(e) = self.storage.write(x, z, &nbt) {
             error!("could not save chunk {x},{z}: {e}");
         }
@@ -457,6 +459,7 @@ impl World {
             self.chunks.remove(&(x, z));
             self.block_entities.retain(|pos, _| pos.chunk() != (x, z));
             self.drop_scheduled_ticks(x, z);
+            self.drop_fluid_ticks(x, z);
         }
     }
 

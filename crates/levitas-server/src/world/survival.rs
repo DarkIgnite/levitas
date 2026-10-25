@@ -191,6 +191,9 @@ impl World {
 
     pub(super) fn use_item(&mut self, id: i32, hand: i32, sequence: i32) {
         self.ack(id, sequence);
+        if self.use_bucket(id, hand) {
+            return;
+        }
         let tick = self.tick;
         let Some(p) = self.players.get_mut(&id) else {
             return;

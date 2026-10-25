@@ -5,6 +5,7 @@
 mod building;
 mod commands;
 mod containers;
+mod fluids;
 mod items;
 mod storage;
 mod survival;
@@ -277,6 +278,23 @@ impl Player {
         self.mode == GAME_MODE_SURVIVAL
     }
 
+    /// Where the player's eyes are, which way they look, and how far they reach.
+    fn eye_ray(&self) -> ([f64; 3], [f64; 3], f64) {
+        let eye_height = if self.sneaking { 1.27 } else { 1.62 };
+        let eye = [self.pos[0], self.pos[1] + eye_height, self.pos[2]];
+        let (yaw, pitch) = (
+            f64::from(self.yaw).to_radians(),
+            f64::from(self.pitch).to_radians(),
+        );
+        let look = [
+            -yaw.sin() * pitch.cos(),
+            -pitch.sin(),
+            yaw.cos() * pitch.cos(),
+        ];
+        let reach = if self.survival() { 4.5 } else { 5.0 };
+        (eye, look, reach)
+    }
+
     /// Inventory slot of the item in `hand` (0 main hand, 1 offhand).
     fn hand_slot(&self, hand: i32) -> usize {
         if hand == 0 {
@@ -306,6 +324,7 @@ struct World {
     generating: HashSet<(i32, i32)>,
     /// Keeps light right as blocks change.
     light: LightEngine,
+    fluid_ticks: fluids::FluidTicks,
     seed: i64,
     kind: WorldKind,
     loot: LootTables,
@@ -363,6 +382,7 @@ impl World {
             generation,
             generating: HashSet::new(),
             light: LightEngine::new(),
+            fluid_ticks: fluids::FluidTicks::default(),
             seed: level.seed,
             kind: level.kind,
             loot: LootTables::load(),
@@ -524,7 +544,7 @@ impl World {
         self.send(
             id,
             system_chat(&format!(
-                "Welcome to Levitas, {name}! Survival flat world. Try /gamemode creative, /give, /kill."
+                "Welcome to Levitas, {name}! Survival world. Try /gamemode creative, /give, /kill."
             )),
         );
         self.broadcast(system_chat(&format!("{name} joined the game")), Some(id));
@@ -617,6 +637,26 @@ impl World {
             p.pos = pos;
         }
         if !p.survival() {
+            p.fall_distance = 0.0;
+        }
+        // Water breaks a fall, and so does climbing.
+        let feet = BlockPos::new(
+            p.pos[0].floor() as i32,
+            p.pos[1].floor() as i32,
+            p.pos[2].floor() as i32,
+        );
+        let at_feet = self
+            .chunks
+            .get(&feet.chunk())
+            .filter(|_| (MIN_Y..=MAX_Y).contains(&feet.y))
+            .map_or(block::AIR, |c| {
+                c.get((feet.x & 15) as usize, feet.y, (feet.z & 15) as usize)
+            });
+        let p = self.players.get_mut(&id).expect("player exists");
+        if crate::blocks::fluid::fluid_at(at_feet)
+            .is_some_and(|f| f.fluid == crate::blocks::fluid::Fluid::Water)
+            || block_has_tag(at_feet, "minecraft:climbable")
+        {
             p.fall_distance = 0.0;
         }
         let fallen = if on_ground {
@@ -825,6 +865,7 @@ impl World {
             self.broadcast(packet, Some(id));
         }
         self.tick_scheduled();
+        self.tick_fluids();
         self.tick_survival();
         self.tick_items();
         self.tick_furnaces();
@@ -1027,6 +1068,7 @@ impl World {
         self.dirty.insert((cx, cz));
         self.light
             .block_changed(&mut self.chunks, [pos.x, pos.y, pos.z], old, state);
+        self.fluids_changed_around(pos);
         let update = frame(block_update(pos, state));
         for p in self.players.values_mut() {
             if p.loaded.contains(&(cx, cz)) {

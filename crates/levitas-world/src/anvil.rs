@@ -15,6 +15,8 @@ pub struct LoadedChunk {
     pub block_entities: Vec<Compound>,
     /// Pending block ticks (`i` block name, `x`, `y`, `z`, `t` ticks left, `p` priority).
     pub block_ticks: Vec<Tag>,
+    /// Pending fluid ticks, in the same form with a fluid name in `i`.
+    pub fluid_ticks: Vec<Tag>,
 }
 
 fn biomes() -> &'static SyncedRegistry {
@@ -32,6 +34,7 @@ pub fn to_nbt(
     cz: i32,
     block_entities: Vec<Compound>,
     block_ticks: Vec<Compound>,
+    fluid_ticks: Vec<Compound>,
     game_time: i64,
 ) -> Compound {
     let mut sections = Vec::new();
@@ -75,7 +78,13 @@ pub fn to_nbt(
                 .map(Tag::Compound)
                 .collect::<Vec<_>>(),
         )
-        .with("fluid_ticks", Vec::<Tag>::new())
+        .with(
+            "fluid_ticks",
+            fluid_ticks
+                .into_iter()
+                .map(Tag::Compound)
+                .collect::<Vec<_>>(),
+        )
         .with(
             "structures",
             Compound::new()
@@ -255,6 +264,7 @@ pub fn from_nbt(nbt: &Compound) -> Result<Option<LoadedChunk>, ChunkError> {
         chunk,
         block_entities,
         block_ticks: nbt.list("block_ticks").unwrap_or_default().to_vec(),
+        fluid_ticks: nbt.list("fluid_ticks").unwrap_or_default().to_vec(),
     }))
 }
 
@@ -312,7 +322,15 @@ mod tests {
             .with("x", 1)
             .with("y", 2)
             .with("z", 3);
-        let nbt = to_nbt(&chunk, 4, -7, vec![entity.clone()], Vec::new(), 123);
+        let nbt = to_nbt(
+            &chunk,
+            4,
+            -7,
+            vec![entity.clone()],
+            Vec::new(),
+            Vec::new(),
+            123,
+        );
         // Through the binary form too, as it would go to disk.
         let nbt = levitas_nbt::from_bytes(&levitas_nbt::to_bytes("", &nbt))
             .unwrap()
@@ -329,7 +347,7 @@ mod tests {
 
     #[test]
     fn vanilla_style_palette_entries() {
-        let nbt = to_nbt(&sample_chunk(), 0, 0, Vec::new(), Vec::new(), 0);
+        let nbt = to_nbt(&sample_chunk(), 0, 0, Vec::new(), Vec::new(), Vec::new(), 0);
         let sections = nbt.list("sections").unwrap();
         // y = 70 is section 4 (y 64..80); the list starts with the light-only section -5.
         let section = sections[9].as_compound().unwrap();

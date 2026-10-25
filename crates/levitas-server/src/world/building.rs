@@ -209,7 +209,7 @@ impl World {
     }
 
     /// A block knocked off by an update: it disappears and drops its loot.
-    fn pop_block(&mut self, pos: BlockPos, state: u16) {
+    pub(super) fn pop_block(&mut self, pos: BlockPos, state: u16) {
         self.set_block(pos, block::AIR);
         self.remove_block_entity(pos);
         self.broadcast(
@@ -300,7 +300,7 @@ impl World {
         self.scheduled.retain(|t| t.pos.chunk() != (cx, cz));
     }
 
-    fn play_sound(&mut self, name: &str, pos: BlockPos, except: Option<i32>) {
+    pub(super) fn play_sound(&mut self, name: &str, pos: BlockPos, except: Option<i32>) {
         let pitch = self.rng.f64() as f32 * 0.1 + 0.9;
         self.play_sound_pitched(name, pos, except, pitch);
     }
