@@ -20,9 +20,12 @@ CPU that a JVM-based server (Paper, Purpur, Leaf, ...) needs.
 
 ## Building
 
-Requires a stable Rust toolchain (install via [rustup](https://rustup.rs)).
+Requires a stable Rust toolchain (install via [rustup](https://rustup.rs)), plus Python 3
+and Java 21+ for the one-time data generation step.
 
 ```sh
+# Downloads the official 1.21.8 server.jar and runs its data generator into generated/
+python tools/datagen.py
 cargo build --release
 cargo run --release -p levitas-server
 ```

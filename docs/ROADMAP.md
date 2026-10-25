@@ -8,7 +8,7 @@ Each milestone ends with something that can be tested in a real 1.21.8 client.
 - [x] Cargo workspace and crate skeletons
 - [x] Rust toolchain installed, workspace builds
 - [ ] CI (fmt, clippy, test)
-- [ ] Data-generator pipeline for `levitas-registry`
+- [x] Data-generator pipeline for `levitas-registry`
 
 ## Milestone 1: Join the server
 

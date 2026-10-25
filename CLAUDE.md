@@ -11,6 +11,18 @@ reply in casual Indonesian. Code, comments, commits and docs are in English.
 - Follow docs/CLEAN_ROOM.md strictly. Never copy or translate decompiled Mojang code or
   Paper/Leaf patched sources. Generated data never goes into git.
 
+## Goal and workflow
+
+- North star: the owner wants to play on Levitas like a normal, working vanilla world.
+  Prioritise reaching a playable world over polish.
+- Repo: github.com/DarkIgnite/levitas (public). Commit and push every verified change
+  without asking.
+- Game data comes from `python tools/datagen.py` (downloads the official server.jar,
+  runs its data generator into `generated/`). `levitas-registry`'s build script needs it.
+- Avast on the owner's PC kills and quarantines freshly built `levitas.exe`. If the
+  server disappears with no log, that is the likely cause; they need an Avast exception
+  for C:\dev\levitas.
+
 ## Conventions
 
 - Workspace crates live in `crates/`, named `levitas-*`.
