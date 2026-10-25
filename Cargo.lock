@@ -830,6 +830,7 @@ version = "0.1.0"
 dependencies = [
  "levitas-registry",
  "levitas-world",
+ "pumpkin-config",
  "pumpkin-data",
  "pumpkin-util",
  "pumpkin-world",

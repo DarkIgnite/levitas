@@ -11,15 +11,41 @@ use levitas_registry::{block, BlockInfo, SyncedRegistry};
 use levitas_world::chunk::{Section, SECTIONS};
 use levitas_world::light::LIGHT_SECTIONS;
 use levitas_world::{is_air, Chunk, ChunkLight, Kind, LightLayer, PalettedContainer, MAX_Y, MIN_Y};
+use pumpkin_config::lighting::LightingEngineConfig;
 use pumpkin_data::chunk::Biome;
 use pumpkin_data::dimension::Dimension;
 use pumpkin_data::{BlockStateId, Mirror, Rotation};
 use pumpkin_util::world_seed::Seed;
 use pumpkin_world::chunk::format::LightContainer;
-use pumpkin_world::chunk_system::{generate_single_chunk, Chunk as PumpkinChunk, StagedChunkEnum};
+use pumpkin_world::chunk_system::generation_cache::Cache;
+use pumpkin_world::chunk_system::{Chunk as PumpkinChunk, StagedChunkEnum};
 use pumpkin_world::generation::generator::WorldGenerator;
 use pumpkin_world::generation::get_world_gen;
+use pumpkin_world::generation::proto_chunk::ProtoChunk;
 use pumpkin_world::world::{BlockAccessor, WorldPortalExt};
+
+/// Chunks per side of the square areas generated together.
+pub const AREA: i32 = 8;
+
+/// How far around an area each step must run so the area's own chunks come out
+/// complete: features (trees, ores, structures) of the chunks next to it reach into it,
+/// those features need their neighbors' terrain, and terrain surfaces need their
+/// neighbors' biomes.
+const STEPS: [(StagedChunkEnum, i32, i32); 8] = [
+    // (step, margin around the area, radius of chunks the step reads and writes)
+    (StagedChunkEnum::Biomes, 3, 0),
+    (StagedChunkEnum::StructureStart, 3, 0),
+    (StagedChunkEnum::StructureReferences, 3, 0),
+    (StagedChunkEnum::Noise, 2, 0),
+    (StagedChunkEnum::Surface, 2, 1),
+    (StagedChunkEnum::Carvers, 2, 0),
+    (StagedChunkEnum::Features, 1, 1),
+    (StagedChunkEnum::Lighting, 0, 1),
+];
+const MARGIN: i32 = 3;
+
+/// A finished chunk and its position.
+pub type Generated = ((i32, i32), Chunk);
 
 /// Overworld terrain for one seed.
 pub struct PumpkinTerrain {
@@ -62,15 +88,83 @@ impl PumpkinTerrain {
         }
     }
 
-    /// Generates chunk (`x`, `z`) with its features, structures and light.
-    pub fn generate(&self, x: i32, z: i32) -> Chunk {
-        let proto =
-            match generate_single_chunk(&self.generator, &Portals, x, z, StagedChunkEnum::Lighting)
-            {
-                PumpkinChunk::Proto(proto) => proto,
-                PumpkinChunk::Level(_) => unreachable!("generation stops before the full stage"),
-            };
+    /// Generates the area of [`AREA`] x [`AREA`] chunks with index (`ax`, `az`), the
+    /// one holding chunks `ax * AREA..(ax + 1) * AREA` along x and likewise along z.
+    pub fn generate_area(&self, ax: i32, az: i32) -> Vec<Generated> {
+        self.generate_region(ax * AREA, az * AREA, AREA)
+    }
 
+    /// Generates one chunk, together with the rest of its area.
+    pub fn generate(&self, x: i32, z: i32) -> Chunk {
+        let area = self.generate_area(x.div_euclid(AREA), z.div_euclid(AREA));
+        let (_, chunk) = area
+            .into_iter()
+            .find(|(pos, _)| *pos == (x, z))
+            .expect("the area holds the chunk");
+        chunk
+    }
+
+    /// Generates the `size` x `size` chunks starting at chunk (`x0`, `z0`).
+    fn generate_region(&self, x0: i32, z0: i32, size: i32) -> Vec<Generated> {
+        let mut grid = Grid {
+            x0: x0 - MARGIN,
+            z0: z0 - MARGIN,
+            size: size + 2 * MARGIN,
+            chunks: Vec::new(),
+        };
+        for x in grid.x0..grid.x0 + grid.size {
+            for z in grid.z0..grid.z0 + grid.size {
+                let proto = ProtoChunk::new(x, z, &self.generator);
+                grid.chunks.push(Some(PumpkinChunk::Proto(Box::new(proto))));
+            }
+        }
+        for (step, margin, radius) in STEPS {
+            for x in x0 - margin..x0 + size + margin {
+                for z in z0 - margin..z0 + size + margin {
+                    self.advance(&mut grid, x, z, step, radius);
+                }
+            }
+        }
+        let mut out = Vec::with_capacity((size * size) as usize);
+        for x in x0..x0 + size {
+            for z in z0..z0 + size {
+                let i = grid.index(x, z);
+                match grid.chunks[i].take() {
+                    Some(PumpkinChunk::Proto(proto)) => out.push(((x, z), self.translate(&proto))),
+                    _ => unreachable!("generation stops before the full stage"),
+                }
+            }
+        }
+        out
+    }
+
+    /// Runs one generation step on chunk (`x`, `z`), lending it the chunks around it.
+    fn advance(&self, grid: &mut Grid, x: i32, z: i32, step: StagedChunkEnum, radius: i32) {
+        let side = 2 * radius + 1;
+        let mut cache = Cache::new(x - radius, z - radius, side);
+        for dx in -radius..=radius {
+            for dz in -radius..=radius {
+                let i = grid.index(x + dx, z + dz);
+                cache
+                    .chunks
+                    .push(grid.chunks[i].take().expect("chunk is in the grid"));
+            }
+        }
+        cache.advance(
+            step,
+            &self.generator,
+            &Portals,
+            &LightingEngineConfig::Default,
+        );
+        for (n, chunk) in cache.chunks.into_iter().enumerate() {
+            let (dx, dz) = (n as i32 / side - radius, n as i32 % side - radius);
+            let i = grid.index(x + dx, z + dz);
+            grid.chunks[i] = Some(chunk);
+        }
+    }
+
+    /// A generated Pumpkin chunk as a 1.21.8 chunk.
+    fn translate(&self, proto: &ProtoChunk) -> Chunk {
         let mut blocks = vec![0u16; 4096];
         let mut biomes = [0u16; 64];
         let sections = (0..SECTIONS)
@@ -120,6 +214,21 @@ impl PumpkinTerrain {
                 && !levitas_registry::block_has_tag(state, "minecraft:logs")
         });
         [pos.x, ground.map_or(64, |y| y + 1), pos.z]
+    }
+}
+
+/// Chunks being generated, in a square around an area.
+struct Grid {
+    x0: i32,
+    z0: i32,
+    size: i32,
+    /// By x, then z; a chunk is out while a step borrows it.
+    chunks: Vec<Option<PumpkinChunk>>,
+}
+
+impl Grid {
+    fn index(&self, x: i32, z: i32) -> usize {
+        ((x - self.x0) * self.size + (z - self.z0)) as usize
     }
 }
 
@@ -418,9 +527,8 @@ mod tests {
             "minecraft:brown_mushroom",
         ];
         let mut checked = 0;
-        for cx in -3..3 {
-            for cz in -3..3 {
-                let chunk = terrain.generate(cx, cz);
+        for ((cx, cz), chunk) in terrain.generate_area(0, 0) {
+            {
                 for x in 0..16 {
                     for z in 0..16 {
                         for y in MIN_Y + 1..=MAX_Y {
@@ -441,6 +549,57 @@ mod tests {
             }
         }
         assert!(checked > 0, "no plants generated");
+    }
+
+    /// Trees are whole even where they cross a chunk border: right below the top of an
+    /// oak or birch trunk, leaves surround the log on all four sides.
+    #[test]
+    fn trees_are_whole_across_chunk_borders() {
+        let terrain = PumpkinTerrain::new(-4254893504593453935);
+        let chunks: std::collections::HashMap<(i32, i32), Chunk> =
+            terrain.generate_area(0, -6).into_iter().collect();
+        let at = |x: i32, y: i32, z: i32| {
+            chunks
+                .get(&(x.div_euclid(16), z.div_euclid(16)))
+                .map(|c| BlockInfo::of(c.get((x & 15) as usize, y, (z & 15) as usize)).name)
+        };
+        let (mut tops, mut cut) = (0, Vec::new());
+        // A wooded area of this seed.
+        let (x0, z0, edge) = (0, -6 * AREA * 16, AREA * 16);
+        for x in x0 + 1..x0 + edge - 1 {
+            for z in z0 + 1..z0 + edge - 1 {
+                for y in 0..MAX_Y {
+                    let log = at(x, y, z).unwrap();
+                    let leaves = match log {
+                        "minecraft:oak_log" => "minecraft:oak_leaves",
+                        "minecraft:birch_log" => "minecraft:birch_leaves",
+                        _ => continue,
+                    };
+                    // The top log of a trunk, with its crown above.
+                    if at(x, y + 1, z) != Some(leaves) || at(x, y - 1, z) != Some(log) {
+                        continue;
+                    }
+                    tops += 1;
+                    // Crowns of neighboring trees mix; big oaks branch out sideways.
+                    let sides: Vec<Option<&str>> = [(1, 0), (-1, 0), (0, 1), (0, -1)]
+                        .iter()
+                        .map(|(dx, dz)| at(x + dx, y, z + dz))
+                        .collect();
+                    if sides.contains(&Some(log)) {
+                        continue;
+                    }
+                    if sides.iter().flatten().any(|b| !b.ends_with("_leaves")) {
+                        cut.push((x, y, z));
+                    }
+                }
+            }
+        }
+        assert!(tops > 0, "no trees in the area");
+        assert!(
+            cut.is_empty(),
+            "{} of {tops} trees cut at {cut:?}",
+            cut.len()
+        );
     }
 
     #[test]

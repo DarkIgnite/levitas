@@ -317,7 +317,10 @@ fn frame(packet: Writer) -> Frame {
 }
 
 impl World {
-    fn new(dir: PathBuf, new: NewWorld) -> (Self, tokio::sync::mpsc::UnboundedReceiver<Generated>) {
+    fn new(
+        dir: PathBuf,
+        new: NewWorld,
+    ) -> (Self, tokio::sync::mpsc::UnboundedReceiver<Vec<Generated>>) {
         let existing = LevelData::load(&dir);
         let created = existing.is_none();
         let mut level = existing.unwrap_or_else(|| LevelData {
@@ -370,7 +373,7 @@ impl World {
     async fn run(
         mut self,
         mut events: mpsc::Receiver<Event>,
-        mut generated: tokio::sync::mpsc::UnboundedReceiver<Generated>,
+        mut generated: tokio::sync::mpsc::UnboundedReceiver<Vec<Generated>>,
     ) {
         let mut tick = tokio::time::interval(TICK);
         tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
@@ -381,7 +384,7 @@ impl World {
                     None => return,
                 },
                 _ = tick.tick() => self.tick(),
-                Some((pos, chunk)) = generated.recv() => self.chunk_generated(pos, chunk),
+                Some(area) = generated.recv() => self.area_generated(area),
             }
             let kicked: Vec<i32> = self
                 .players
@@ -882,16 +885,22 @@ impl World {
     /// on the spot if needed; [`World::ensure_chunk`] is for chunks a player is waiting for.
     fn chunk(&mut self, x: i32, z: i32) -> &mut Chunk {
         if !self.chunks.contains_key(&(x, z)) {
-            let chunk = match self.load_chunk(x, z) {
-                Some(chunk) => chunk,
-                None => {
-                    if !self.terrain.is_cheap() {
-                        self.dirty.insert((x, z));
-                    }
-                    self.terrain.generate(x, z)
+            match self.load_chunk(x, z) {
+                Some(chunk) => {
+                    self.chunks.insert((x, z), chunk);
                 }
-            };
-            self.chunks.insert((x, z), chunk);
+                None if self.terrain.is_cheap() => {
+                    self.chunks.insert((x, z), self.terrain.generate(x, z));
+                }
+                None => {
+                    // Real terrain comes a whole area at a time; keep all of it.
+                    let size = self.terrain.area();
+                    let area = self
+                        .terrain
+                        .generate_area(x.div_euclid(size), z.div_euclid(size));
+                    self.area_generated(area);
+                }
+            }
         }
         self.chunks.get_mut(&(x, z)).expect("just inserted")
     }
@@ -908,8 +917,10 @@ impl World {
         }
         match &self.generation {
             Some(pool) => {
-                if self.generating.insert((x, z)) {
-                    pool.request(x, z);
+                let size = self.terrain.area();
+                let area = (x.div_euclid(size), z.div_euclid(size));
+                if self.generating.insert(area) {
+                    pool.request(area.0, area.1);
                 }
                 false
             }
@@ -920,35 +931,58 @@ impl World {
         }
     }
 
-    /// A chunk the workers finished: keep it, and send it to everyone waiting for it.
-    fn chunk_generated(&mut self, pos: (i32, i32), chunk: Chunk) {
-        self.generating.remove(&pos);
-        if self.chunks.contains_key(&pos) {
-            return; // generated on the spot meanwhile
+    /// An area the workers finished: keep its chunks, and send them to everyone waiting
+    /// for them.
+    fn area_generated(&mut self, area: Vec<Generated>) {
+        let size = self.terrain.area();
+        if let Some(&((x, z), _)) = area.first() {
+            self.generating
+                .remove(&(x.div_euclid(size), z.div_euclid(size)));
         }
-        self.chunks.insert(pos, chunk);
-        self.dirty.insert(pos);
-        let in_view = |p: &Player| {
-            (pos.0 - p.center.0).abs() <= VIEW_DISTANCE
-                && (pos.1 - p.center.1).abs() <= VIEW_DISTANCE
-        };
-        let waiting: Vec<i32> = self
-            .players
-            .iter()
-            .filter(|(_, p)| in_view(p) && !p.loaded.contains(&pos))
-            .map(|(&id, _)| id)
-            .collect();
-        if waiting.is_empty() {
-            return;
+        let mut new = Vec::with_capacity(area.len());
+        for (pos, chunk) in area {
+            // Chunks generated on the spot meanwhile, or saved before, stay as they are.
+            if self.chunks.contains_key(&pos) {
+                continue;
+            }
+            match self.load_chunk(pos.0, pos.1) {
+                Some(saved) => {
+                    self.chunks.insert(pos, saved);
+                }
+                None => {
+                    self.chunks.insert(pos, chunk);
+                    self.dirty.insert(pos);
+                }
+            }
+            new.push(pos);
         }
-        let chunk = self.chunk_frame(pos.0, pos.1);
-        for id in waiting {
+        let ids: Vec<i32> = self.players.keys().copied().collect();
+        for id in ids {
+            let p = &self.players[&id];
+            let waiting: Vec<(i32, i32)> = new
+                .iter()
+                .copied()
+                .filter(|&(x, z)| {
+                    (x - p.center.0).abs() <= VIEW_DISTANCE
+                        && (z - p.center.1).abs() <= VIEW_DISTANCE
+                        && !p.loaded.contains(&(x, z))
+                })
+                .collect();
+            if waiting.is_empty() {
+                continue;
+            }
+            let frames: Vec<Frame> = waiting
+                .iter()
+                .map(|&(x, z)| self.chunk_frame(x, z))
+                .collect();
             let p = self.players.get_mut(&id).expect("player exists");
-            p.loaded.insert(pos);
             p.deliver(&frame(Writer::packet(clientbound::CHUNK_BATCH_START)));
-            p.deliver(&chunk);
+            for (pos, chunk) in waiting.iter().zip(&frames) {
+                p.loaded.insert(*pos);
+                p.deliver(chunk);
+            }
             p.deliver(&frame(
-                Writer::packet(clientbound::CHUNK_BATCH_FINISHED).varint(1),
+                Writer::packet(clientbound::CHUNK_BATCH_FINISHED).varint(waiting.len() as i32),
             ));
         }
     }

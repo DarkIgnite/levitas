@@ -166,7 +166,8 @@ Known gaps are listed under each phase instead of being hidden.
 
 - [x] Noise terrain, biomes and climate, carvers (caves, ravines), aquifers: generated
       by [Pumpkin](https://github.com/Pumpkin-MC/Pumpkin)'s `pumpkin-world` (GPL-3.0)
-      through `levitas-pumpkin`, on worker threads. New worlds use it by default;
+      through `levitas-pumpkin`, on worker threads, 8x8 chunks at a time so trees and
+      other features crossing chunk borders come out whole. New worlds use it by default;
       `LEVITAS_WORLD_TYPE=flat` makes the flat test world, `LEVITAS_SEED` picks the seed.
       Pumpkin targets a newer Minecraft version, so its newer blocks and biomes become
       their closest 1.21.8 relatives (poplar wood as birch, sulfur as sandstone, ...).

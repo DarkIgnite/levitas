@@ -2,7 +2,7 @@
 //!
 //! Generating real terrain takes milliseconds per chunk, far too long to do on the tick
 //! thread for the hundreds of chunks a joining player needs. A pool of worker threads
-//! generates chunks the world asks for and hands them back through a channel.
+//! generates the areas the world asks for and hands their chunks back through a channel.
 
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
@@ -14,6 +14,18 @@ use tokio::sync::mpsc as tokio_mpsc;
 /// A generator of chunks.
 pub trait Terrain: Send + Sync {
     fn generate(&self, x: i32, z: i32) -> Chunk;
+
+    /// Chunks per side of the square areas generated together: trees and structures
+    /// cross chunk borders, so real terrain comes out right only a whole area at a time.
+    fn area(&self) -> i32 {
+        1
+    }
+
+    /// Every chunk of area (`ax`, `az`), the one holding chunks
+    /// `ax * area..(ax + 1) * area` along x and likewise along z.
+    fn generate_area(&self, ax: i32, az: i32) -> Vec<Generated> {
+        vec![((ax, az), self.generate(ax, az))]
+    }
 
     /// Where players spawn in a new world: a block position to stand at.
     fn spawn_point(&self) -> [i32; 3];
@@ -33,22 +45,30 @@ impl Terrain for PumpkinTerrain {
     fn spawn_point(&self) -> [i32; 3] {
         PumpkinTerrain::spawn_point(self)
     }
+
+    fn area(&self) -> i32 {
+        levitas_pumpkin::AREA
+    }
+
+    fn generate_area(&self, ax: i32, az: i32) -> Vec<Generated> {
+        PumpkinTerrain::generate_area(self, ax, az)
+    }
 }
 
 /// A finished chunk: its position and contents.
 pub type Generated = ((i32, i32), Chunk);
 
-/// Worker threads that generate chunks on request.
+/// Worker threads that generate areas on request.
 pub struct GenerationPool {
     jobs: mpsc::Sender<(i32, i32)>,
 }
 
 impl GenerationPool {
-    /// Starts `workers` threads; finished chunks arrive on the returned receiver.
+    /// Starts `workers` threads; finished areas arrive on the returned receiver.
     pub fn start(
         terrain: Arc<dyn Terrain>,
         workers: usize,
-    ) -> (Self, tokio_mpsc::UnboundedReceiver<Generated>) {
+    ) -> (Self, tokio_mpsc::UnboundedReceiver<Vec<Generated>>) {
         let (jobs, queue) = mpsc::channel::<(i32, i32)>();
         let queue = Arc::new(Mutex::new(queue));
         let (done, finished) = tokio_mpsc::unbounded_channel();
@@ -66,8 +86,7 @@ impl GenerationPool {
                     let Ok((x, z)) = job else {
                         return; // the world is gone
                     };
-                    let chunk = terrain.generate(x, z);
-                    if done.send(((x, z), chunk)).is_err() {
+                    if done.send(terrain.generate_area(x, z)).is_err() {
                         return;
                     }
                 })
@@ -76,10 +95,11 @@ impl GenerationPool {
         (GenerationPool { jobs }, finished)
     }
 
-    pub fn request(&self, x: i32, z: i32) {
-        // Fails only if every worker died, in which case the chunk never arrives and the
+    /// Asks for area (`ax`, `az`).
+    pub fn request(&self, ax: i32, az: i32) {
+        // Fails only if every worker died, in which case the area never arrives and the
         // player keeps seeing the edge of the loaded world.
-        let _ = self.jobs.send((x, z));
+        let _ = self.jobs.send((ax, az));
     }
 }
 
@@ -101,7 +121,14 @@ mod tests {
         }
         let mut got: Vec<(i32, i32)> = Vec::new();
         for _ in 0..4 {
-            got.push(finished.recv().await.unwrap().0);
+            got.extend(
+                finished
+                    .recv()
+                    .await
+                    .unwrap()
+                    .into_iter()
+                    .map(|(pos, _)| pos),
+            );
         }
         got.sort_unstable();
         assert_eq!(got, [(0, 0), (1, -1), (2, -2), (3, -3)]);
