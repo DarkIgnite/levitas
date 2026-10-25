@@ -1,6 +1,10 @@
-//! The world task owns every chunk and player and runs the 20 TPS game loop. Connection
-//! tasks talk to it only through [`Event`]s and receive ready-to-write packet frames, so
-//! world state needs no locks.
+//! The world task owns every chunk, player and dropped item and runs the 20 TPS game
+//! loop. Connection tasks talk to it only through [`Event`]s and receive ready-to-write
+//! packet frames, so world state needs no locks.
+
+mod commands;
+mod items;
+mod survival;
 
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicI32, Ordering};
@@ -9,30 +13,41 @@ use std::time::Duration;
 
 use levitas_protocol::{angle, varint, BlockPos, Writer};
 use levitas_registry::packet::play::clientbound;
-use levitas_registry::{block, block_has_tag, entity_type, SyncedRegistry, ITEM_BLOCK};
+use levitas_registry::{block, block_has_tag, entity_type, ItemInfo, SyncedRegistry};
 use levitas_world::{is_air, Chunk, MAX_Y, MIN_Y};
 use tokio::sync::mpsc;
 use tracing::info;
 
 use crate::connection::Profile;
 use crate::flat::{FlatGenerator, SURFACE_Y};
+use crate::inventory::{Inventory, Stack, CRAFTING_GRID, HOTBAR, OFFHAND, SLOTS};
+use crate::loot::{LootContext, LootTables};
+use crate::rng::Rng;
+use items::ItemEntity;
+use survival::MAX_HEALTH;
 
 /// Chunk radius sent around each player.
 pub const VIEW_DISTANCE: i32 = 8;
 /// Frames a player may have queued before they are disconnected as too slow.
 pub const OUTGOING_CAPACITY: usize = 4096;
 const TICK: Duration = Duration::from_millis(50);
+const SPAWN: [f64; 3] = [0.5, SURFACE_Y, 0.5];
 
-const GAME_MODE_CREATIVE: u8 = 1;
+pub const GAME_MODE_SURVIVAL: u8 = 0;
+pub const GAME_MODE_CREATIVE: u8 = 1;
+const GAME_EVENT_CHANGE_GAME_MODE: u8 = 3;
 const GAME_EVENT_START_WAITING_FOR_CHUNKS: u8 = 13;
 /// Player info actions: add player, update game mode, update listed, update latency.
 const PLAYER_INFO_ACTIONS: u8 = 0x01 | 0x04 | 0x08 | 0x10;
+const PLAYER_INFO_UPDATE_GAME_MODE: u8 = 0x04;
 const LEVEL_EVENT_BLOCK_BREAK: i32 = 2001;
 const DIG_START: i32 = 0;
 const DIG_FINISH: i32 = 2;
-/// Inventory slots of the hotbar and the offhand in the player's inventory menu.
-const HOTBAR_SLOTS: std::ops::RangeInclusive<i16> = 36..=44;
-const OFFHAND_SLOT: i16 = 45;
+const DROP_STACK: i32 = 3;
+const DROP_ITEM: i32 = 4;
+const RELEASE_USE_ITEM: i32 = 5;
+/// Creative clients set this slot to drop an item from the inventory screen.
+const CREATIVE_DROP_SLOT: i16 = -1;
 
 /// A length-prefixed packet, shared by every player it is sent to.
 pub type Frame = Arc<[u8]>;
@@ -72,10 +87,27 @@ pub enum Event {
         face: i32,
         sequence: i32,
     },
+    UseItem {
+        id: i32,
+        hand: i32,
+        sequence: i32,
+    },
     CreativeSlot {
         id: i32,
         slot: i16,
-        item: i32,
+        stack: Stack,
+    },
+    /// A click in an open container. The client reports the resulting slots, which the
+    /// server trusts for now (no server-side click simulation yet).
+    ContainerClick {
+        id: i32,
+        window: i32,
+        changed: Vec<(i16, Stack)>,
+        carried: Stack,
+    },
+    ContainerClose {
+        id: i32,
+        window: i32,
     },
     HeldSlot {
         id: i32,
@@ -84,6 +116,13 @@ pub enum Event {
     Swing {
         id: i32,
         hand: i32,
+    },
+    Sprint {
+        id: i32,
+        sprinting: bool,
+    },
+    Respawn {
+        id: i32,
     },
     Chat {
         id: i32,
@@ -105,6 +144,7 @@ pub fn spawn() -> mpsc::Sender<Event> {
 struct Player {
     profile: Profile,
     out: mpsc::Sender<Frame>,
+    mode: u8,
     pos: [f64; 3],
     yaw: f32,
     pitch: f32,
@@ -114,17 +154,71 @@ struct Player {
     moved: bool,
     center: (i32, i32),
     loaded: HashSet<(i32, i32)>,
-    hotbar: [i32; 9],
-    offhand: i32,
+    inventory: Inventory,
     held: usize,
+    health: f32,
+    food: i32,
+    saturation: f32,
+    exhaustion: f32,
+    /// Ticks since the last natural heal or starvation damage.
+    food_timer: u32,
+    fall_distance: f64,
+    sprinting: bool,
+    alive: bool,
+    /// Hand and start tick of the food being eaten.
+    eating: Option<(i32, u64)>,
+    /// Health, food or saturation changed and the client has not been told.
+    health_dirty: bool,
     /// Set when the player's outgoing queue overflowed or closed.
     kicked: bool,
 }
 
 impl Player {
+    fn new(profile: Profile, out: mpsc::Sender<Frame>) -> Self {
+        Self {
+            profile,
+            out,
+            mode: GAME_MODE_SURVIVAL,
+            pos: SPAWN,
+            yaw: 0.0,
+            pitch: 0.0,
+            on_ground: true,
+            sent_pos: SPAWN,
+            moved: false,
+            center: (0, 0),
+            loaded: HashSet::new(),
+            inventory: Inventory::new(),
+            held: 0,
+            health: MAX_HEALTH,
+            food: 20,
+            saturation: 5.0,
+            exhaustion: 0.0,
+            food_timer: 0,
+            fall_distance: 0.0,
+            sprinting: false,
+            alive: true,
+            eating: None,
+            health_dirty: false,
+            kicked: false,
+        }
+    }
+
     fn deliver(&mut self, frame: &Frame) {
         if self.out.try_send(frame.clone()).is_err() {
             self.kicked = true;
+        }
+    }
+
+    fn survival(&self) -> bool {
+        self.mode == GAME_MODE_SURVIVAL
+    }
+
+    /// Inventory slot of the item in `hand` (0 main hand, 1 offhand).
+    fn hand_slot(&self, hand: i32) -> usize {
+        if hand == 0 {
+            HOTBAR + self.held
+        } else {
+            OFFHAND
         }
     }
 }
@@ -132,9 +226,13 @@ impl Player {
 struct World {
     chunks: HashMap<(i32, i32), Chunk>,
     players: HashMap<i32, Player>,
+    items: HashMap<i32, ItemEntity>,
     generator: FlatGenerator,
     /// Light data shared by every chunk packet: full sky light, no block light.
     light: Vec<u8>,
+    loot: LootTables,
+    rng: Rng,
+    tick: u64,
 }
 
 fn frame(packet: Writer) -> Frame {
@@ -146,8 +244,12 @@ impl World {
         Self {
             chunks: HashMap::new(),
             players: HashMap::new(),
+            items: HashMap::new(),
             generator: FlatGenerator::new(),
             light: full_sky_light(),
+            loot: LootTables::load(),
+            rng: Rng::from_time(),
+            tick: 0,
         }
     }
 
@@ -197,19 +299,20 @@ impl World {
                 face,
                 sequence,
             } => self.use_item_on(id, hand, pos, face, sequence),
-            Event::CreativeSlot { id, slot, item } => {
-                if let Some(p) = self.players.get_mut(&id) {
-                    if HOTBAR_SLOTS.contains(&slot) {
-                        p.hotbar[(slot - HOTBAR_SLOTS.start()) as usize] = item;
-                    } else if slot == OFFHAND_SLOT {
-                        p.offhand = item;
-                    }
-                }
-            }
+            Event::UseItem { id, hand, sequence } => self.use_item(id, hand, sequence),
+            Event::CreativeSlot { id, slot, stack } => self.creative_slot(id, slot, stack),
+            Event::ContainerClick {
+                id,
+                window,
+                changed,
+                carried,
+            } => self.container_click(id, window, changed, carried),
+            Event::ContainerClose { id, window } => self.container_close(id, window),
             Event::HeldSlot { id, slot } => {
                 if let (Some(p), Ok(slot)) = (self.players.get_mut(&id), usize::try_from(slot)) {
                     if slot < 9 {
                         p.held = slot;
+                        p.eating = None;
                     }
                 }
             }
@@ -220,6 +323,12 @@ impl World {
                     .u8(animation);
                 self.broadcast(packet, Some(id));
             }
+            Event::Sprint { id, sprinting } => {
+                if let Some(p) = self.players.get_mut(&id) {
+                    p.sprinting = sprinting;
+                }
+            }
+            Event::Respawn { id } => self.respawn(id),
             Event::Chat { id, message } => {
                 if let Some(p) = self.players.get(&id) {
                     let line = format!("<{}> {message}", p.profile.name);
@@ -227,60 +336,28 @@ impl World {
                     self.broadcast(system_chat(&line), None);
                 }
             }
-            Event::Command { id, command } => {
-                self.send(id, system_chat(&format!("Unknown command: /{command}")));
-            }
+            Event::Command { id, command } => self.command(id, &command),
         }
     }
 
     fn join(&mut self, id: i32, profile: Profile, out: mpsc::Sender<Frame>) {
         let name = profile.name.clone();
-        let player = Player {
-            profile,
-            out,
-            pos: [0.5, SURFACE_Y, 0.5],
-            yaw: 0.0,
-            pitch: 0.0,
-            on_ground: true,
-            sent_pos: [0.5, SURFACE_Y, 0.5],
-            moved: false,
-            center: (0, 0),
-            loaded: HashSet::new(),
-            hotbar: [0; 9],
-            offhand: 0,
-            held: 0,
-            kicked: false,
-        };
-        self.players.insert(id, player);
+        self.players.insert(id, Player::new(profile, out));
+        let mode = self.players[&id].mode;
 
-        let overworld = SyncedRegistry::get("minecraft:dimension_type")
-            .and_then(|r| r.id_of("minecraft:overworld"))
-            .expect("overworld dimension type");
-        self.send(
-            id,
-            Writer::packet(clientbound::LOGIN)
-                .i32(id)
-                .bool(false) // hardcore
-                .varint(1)
-                .string("minecraft:overworld") // dimension names
-                .varint(100) // max players (unused by the client)
-                .varint(VIEW_DISTANCE)
-                .varint(VIEW_DISTANCE) // simulation distance
-                .bool(false) // reduced debug info
-                .bool(true) // enable respawn screen
-                .bool(false) // limited crafting
-                .varint(overworld)
-                .string("minecraft:overworld")
-                .i64(0) // hashed seed
-                .u8(GAME_MODE_CREATIVE)
-                .i8(-1) // previous game mode: none
-                .bool(false) // debug world
-                .bool(true) // flat world
-                .bool(false) // no death location
-                .varint(0) // portal cooldown
-                .varint(63) // sea level
-                .bool(false), // enforces secure chat
-        );
+        let mut login = Writer::packet(clientbound::LOGIN)
+            .i32(id)
+            .bool(false) // hardcore
+            .varint(1)
+            .string("minecraft:overworld") // dimension names
+            .varint(100) // max players (unused by the client)
+            .varint(VIEW_DISTANCE)
+            .varint(VIEW_DISTANCE) // simulation distance
+            .bool(false) // reduced debug info
+            .bool(true) // enable respawn screen
+            .bool(false); // limited crafting
+        login = spawn_info(login, mode).bool(false); // enforces secure chat
+        self.send(id, login);
         self.send(
             id,
             Writer::packet(clientbound::GAME_EVENT)
@@ -294,39 +371,18 @@ impl World {
         let newcomer = player_info(&[&self.players[&id]]);
         self.send(id, everyone);
         self.broadcast(newcomer, Some(id));
-
-        let others: Vec<Writer> = self
-            .players
-            .iter()
-            .filter(|(&other, _)| other != id)
-            .flat_map(|(&other, p)| spawn_player(other, p))
-            .collect();
-        for packet in others {
-            self.send(id, packet);
-        }
         for packet in spawn_player(id, &self.players[&id]) {
             self.broadcast(packet, Some(id));
         }
+        self.send_entities_to(id);
 
         self.update_view(id);
-        self.send(
-            id,
-            Writer::packet(clientbound::PLAYER_POSITION)
-                .varint(1) // teleport ID
-                .f64(0.5)
-                .f64(SURFACE_Y)
-                .f64(0.5)
-                .f64(0.0)
-                .f64(0.0)
-                .f64(0.0) // velocity
-                .f32(0.0)
-                .f32(0.0) // yaw, pitch
-                .i32(0), // all values absolute
-        );
+        self.send(id, position_packet(SPAWN));
+        self.send_status(id);
         self.send(
             id,
             system_chat(&format!(
-                "Welcome to Levitas, {name}! This is a flat test world."
+                "Welcome to Levitas, {name}! Survival flat world. Try /gamemode creative, /give, /kill."
             )),
         );
         self.broadcast(system_chat(&format!("{name} joined the game")), Some(id));
@@ -354,6 +410,35 @@ impl World {
         info!(name, "left the game ({} online)", self.players.len());
     }
 
+    /// Spawns every other player and every dropped item for `id`, after joining or
+    /// respawning (the client forgets all entities on respawn).
+    fn send_entities_to(&mut self, id: i32) {
+        let mut packets: Vec<Writer> = self
+            .players
+            .iter()
+            .filter(|(&other, p)| other != id && p.alive)
+            .flat_map(|(&other, p)| spawn_player(other, p))
+            .collect();
+        for (&item_id, item) in &self.items {
+            packets.extend(items::spawn_packets(item_id, item));
+        }
+        for packet in packets {
+            self.send(id, packet);
+        }
+    }
+
+    /// Health, food and the whole inventory.
+    fn send_status(&mut self, id: i32) {
+        let Some(p) = self.players.get_mut(&id) else {
+            return;
+        };
+        let health = survival::health_packet(p);
+        let content = p.inventory.content_packet();
+        p.health_dirty = false;
+        self.send(id, health);
+        self.send(id, content);
+    }
+
     fn move_player(
         &mut self,
         id: i32,
@@ -364,45 +449,106 @@ impl World {
         let Some(p) = self.players.get_mut(&id) else {
             return;
         };
+        if !p.alive {
+            return;
+        }
         if let Some((yaw, pitch)) = rot {
             p.yaw = yaw;
             p.pitch = pitch;
         }
+        if let Some(pos) = pos {
+            let dy = pos[1] - p.pos[1];
+            if p.survival() {
+                let horizontal = (pos[0] - p.pos[0]).hypot(pos[2] - p.pos[2]);
+                if p.sprinting {
+                    p.exhaustion += 0.1 * horizontal as f32;
+                }
+                if p.on_ground && !on_ground && dy > 0.0 {
+                    p.exhaustion += if p.sprinting { 0.2 } else { 0.05 };
+                }
+                if !on_ground && dy < 0.0 {
+                    p.fall_distance -= dy;
+                }
+            }
+            p.pos = pos;
+        }
+        if !p.survival() {
+            p.fall_distance = 0.0;
+        }
+        let fallen = if on_ground {
+            std::mem::take(&mut p.fall_distance)
+        } else {
+            0.0
+        };
         p.on_ground = on_ground;
         p.moved = true;
-        let Some(pos) = pos else {
-            return;
-        };
-        p.pos = pos;
+
         let chunk = (
-            (pos[0] / 16.0).floor() as i32,
-            (pos[2] / 16.0).floor() as i32,
+            (p.pos[0] / 16.0).floor() as i32,
+            (p.pos[2] / 16.0).floor() as i32,
         );
         if chunk != p.center {
             p.center = chunk;
             self.update_view(id);
         }
+        if fallen > 3.0 {
+            self.damage(id, (fallen - 3.0).ceil() as f32, survival::Damage::Fall);
+        }
     }
 
     fn dig(&mut self, id: i32, status: i32, pos: BlockPos, sequence: i32) {
-        // Creative players break blocks instantly when they start digging.
-        if status == DIG_START || status == DIG_FINISH {
-            let old = self.block(pos);
-            if !is_air(old) {
-                self.set_block(pos, block::AIR);
-                let effect = Writer::packet(clientbound::LEVEL_EVENT)
-                    .i32(LEVEL_EVENT_BLOCK_BREAK)
-                    .position(pos)
-                    .i32(i32::from(old))
-                    .bool(false);
-                self.broadcast(effect, Some(id));
+        let Some(p) = self.players.get(&id) else {
+            return;
+        };
+        let (alive, survival) = (p.alive, p.survival());
+        match status {
+            DIG_START | DIG_FINISH if alive => {
+                let state = self.block(pos);
+                // Creative players and zero-hardness blocks break at once; otherwise
+                // the client digs and reports when it is done.
+                let breaks = !survival || status == DIG_FINISH || survival::breaks_instantly(state);
+                if breaks && !is_air(state) {
+                    self.break_block(id, pos, state);
+                }
             }
+            DROP_STACK | DROP_ITEM if alive => self.drop_held(id, status == DROP_STACK),
+            RELEASE_USE_ITEM => {
+                if let Some(p) = self.players.get_mut(&id) {
+                    p.eating = None;
+                }
+            }
+            _ => {}
         }
-        if (0..=DIG_FINISH).contains(&status) {
-            self.send(
-                id,
-                Writer::packet(clientbound::BLOCK_CHANGED_ACK).varint(sequence),
-            );
+        if (DIG_START..=DIG_FINISH).contains(&status) {
+            self.ack(id, sequence);
+        }
+    }
+
+    fn break_block(&mut self, id: i32, pos: BlockPos, state: u16) {
+        self.set_block(pos, block::AIR);
+        let effect = Writer::packet(clientbound::LEVEL_EVENT)
+            .i32(LEVEL_EVENT_BLOCK_BREAK)
+            .position(pos)
+            .i32(i32::from(state))
+            .bool(false);
+        self.broadcast(effect, Some(id));
+
+        let p = self.players.get_mut(&id).expect("player exists");
+        if !p.survival() {
+            return;
+        }
+        p.exhaustion += 0.005;
+        let tool = p.inventory.held(p.held).item;
+        if !survival::drops_with_tool(state, tool) {
+            return;
+        }
+        let drops = self.loot.block_drops(&mut LootContext {
+            state,
+            tool,
+            rng: &mut self.rng,
+        });
+        for (item, count) in drops {
+            self.drop_at_block(pos, Stack::new(item, count));
         }
     }
 
@@ -410,16 +556,11 @@ impl World {
         let Some(p) = self.players.get(&id) else {
             return;
         };
-        let item = if hand == 0 {
-            p.hotbar[p.held]
-        } else {
-            p.offhand
-        };
-        let state = usize::try_from(item)
-            .ok()
-            .and_then(|i| ITEM_BLOCK.get(i).copied())
-            .unwrap_or(block::AIR);
-        if state != block::AIR {
+        let slot = p.hand_slot(hand);
+        let stack = p.inventory.slots[slot];
+        let (alive, survival) = (p.alive, p.survival());
+        let state = ItemInfo::get(stack.item).map_or(block::AIR, |i| i.block);
+        if alive && !stack.is_empty() && state != block::AIR {
             // Placing on grass or similar replaces it; otherwise place against the face.
             let target = if block_has_tag(self.block(pos), "minecraft:replaceable") {
                 pos
@@ -430,21 +571,102 @@ impl World {
             let in_world = (MIN_Y..=MAX_Y).contains(&target.y);
             if in_world && block_has_tag(current, "minecraft:replaceable") {
                 self.set_block(target, state);
+                if survival {
+                    let p = self.players.get_mut(&id).expect("player exists");
+                    p.inventory.take(slot, 1);
+                    let update = p.inventory.set_slot_packet(slot);
+                    self.send(id, update);
+                }
             } else {
                 // Undo the client's predicted placement.
                 self.send(id, block_update(target, current));
             }
         }
-        self.send(
-            id,
-            Writer::packet(clientbound::BLOCK_CHANGED_ACK).varint(sequence),
-        );
+        self.ack(id, sequence);
     }
 
-    /// Broadcasts entity movement of players who moved since the last tick.
+    fn creative_slot(&mut self, id: i32, slot: i16, stack: Stack) {
+        let Some(p) = self.players.get_mut(&id) else {
+            return;
+        };
+        if p.mode != GAME_MODE_CREATIVE {
+            return;
+        }
+        if slot == CREATIVE_DROP_SLOT {
+            if !stack.is_empty() {
+                self.throw_from_player(id, stack);
+            }
+        } else if let Some(s) = usize::try_from(slot).ok().filter(|&s| s < SLOTS) {
+            p.inventory.slots[s] = stack;
+        }
+    }
+
+    fn container_click(
+        &mut self,
+        id: i32,
+        window: i32,
+        changed: Vec<(i16, Stack)>,
+        carried: Stack,
+    ) {
+        let Some(p) = self.players.get_mut(&id) else {
+            return;
+        };
+        if window != 0 {
+            return; // other containers are not implemented yet
+        }
+        let before = p.inventory.totals();
+        for (slot, stack) in changed {
+            if let Some(s) = usize::try_from(slot).ok().filter(|&s| s < SLOTS) {
+                p.inventory.slots[s] = stack;
+            }
+        }
+        p.inventory.carried = carried;
+        // Whatever left the inventory was thrown out (Q, or a click outside the window).
+        let after = p.inventory.totals();
+        let thrown: Vec<Stack> = before
+            .into_iter()
+            .filter_map(|(item, count)| {
+                let lost = count - after.get(&item).copied().unwrap_or(0);
+                (lost > 0).then(|| Stack::new(item, lost))
+            })
+            .collect();
+        for stack in thrown {
+            self.throw_from_player(id, stack);
+        }
+    }
+
+    /// Closing the inventory returns the crafting grid and cursor items to the inventory,
+    /// dropping what does not fit, as vanilla does.
+    fn container_close(&mut self, id: i32, window: i32) {
+        let Some(p) = self.players.get_mut(&id) else {
+            return;
+        };
+        if window != 0 {
+            return;
+        }
+        let mut returned: Vec<Stack> = CRAFTING_GRID
+            .map(|s| std::mem::take(&mut p.inventory.slots[s]))
+            .collect();
+        returned.push(std::mem::take(&mut p.inventory.carried));
+        let mut overflow = Vec::new();
+        for stack in returned.into_iter().filter(|s| !s.is_empty()) {
+            let (_, left) = p.inventory.add(stack.item, stack.count);
+            if left > 0 {
+                overflow.push(Stack::new(stack.item, left));
+            }
+        }
+        let content = p.inventory.content_packet();
+        self.send(id, content);
+        for stack in overflow {
+            self.throw_from_player(id, stack);
+        }
+    }
+
+    /// Broadcasts entity movement and runs survival and item updates.
     fn tick(&mut self) {
+        self.tick += 1;
         let mut packets = Vec::new();
-        for (&id, p) in self.players.iter_mut().filter(|(_, p)| p.moved) {
+        for (&id, p) in self.players.iter_mut().filter(|(_, p)| p.moved && p.alive) {
             p.moved = false;
             let delta = [0, 1, 2].map(|i| ((p.pos[i] - p.sent_pos[i]) * 4096.0).round());
             let movement = if delta.iter().all(|d| d.abs() <= f64::from(i16::MAX)) {
@@ -482,6 +704,8 @@ impl World {
         for (id, packet) in packets {
             self.broadcast(packet, Some(id));
         }
+        self.tick_survival();
+        self.tick_items();
     }
 
     /// Recenters a player's chunk view, unloading chunks that left the view distance and
@@ -571,6 +795,14 @@ impl World {
         }
     }
 
+    /// Confirms the client's predicted block change with this sequence number.
+    fn ack(&mut self, id: i32, sequence: i32) {
+        self.send(
+            id,
+            Writer::packet(clientbound::BLOCK_CHANGED_ACK).varint(sequence),
+        );
+    }
+
     fn send(&mut self, id: i32, packet: Writer) {
         if let Some(p) = self.players.get_mut(&id) {
             p.deliver(&frame(packet));
@@ -587,6 +819,38 @@ impl World {
     }
 }
 
+/// The spawn information shared by the login and respawn packets.
+fn spawn_info(packet: Writer, mode: u8) -> Writer {
+    let overworld = SyncedRegistry::get("minecraft:dimension_type")
+        .and_then(|r| r.id_of("minecraft:overworld"))
+        .expect("overworld dimension type");
+    packet
+        .varint(overworld)
+        .string("minecraft:overworld")
+        .i64(0) // hashed seed
+        .u8(mode)
+        .i8(-1) // previous game mode: none
+        .bool(false) // debug world
+        .bool(true) // flat world
+        .bool(false) // no death location
+        .varint(0) // portal cooldown
+        .varint(63) // sea level
+}
+
+fn position_packet(pos: [f64; 3]) -> Writer {
+    Writer::packet(clientbound::PLAYER_POSITION)
+        .varint(1) // teleport ID
+        .f64(pos[0])
+        .f64(pos[1])
+        .f64(pos[2])
+        .f64(0.0)
+        .f64(0.0)
+        .f64(0.0) // velocity
+        .f32(0.0)
+        .f32(0.0) // yaw, pitch
+        .i32(0) // all values absolute
+}
+
 fn system_chat(text: &str) -> Writer {
     Writer::packet(clientbound::SYSTEM_CHAT)
         .text(text)
@@ -599,6 +863,10 @@ fn block_update(pos: BlockPos, state: u16) -> Writer {
         .varint(i32::from(state))
 }
 
+fn entity_event(id: i32, event: i8) -> Writer {
+    Writer::packet(clientbound::ENTITY_EVENT).i32(id).i8(event)
+}
+
 fn player_info(players: &[&Player]) -> Writer {
     let mut packet = Writer::packet(clientbound::PLAYER_INFO_UPDATE)
         .u8(PLAYER_INFO_ACTIONS)
@@ -608,7 +876,7 @@ fn player_info(players: &[&Player]) -> Writer {
             .uuid(p.profile.uuid)
             .string(&p.profile.name)
             .varint(0) // add player: no profile properties
-            .varint(i32::from(GAME_MODE_CREATIVE)) // update game mode
+            .varint(i32::from(p.mode)) // update game mode
             .bool(true) // update listed
             .varint(0); // update latency
     }

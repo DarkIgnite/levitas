@@ -10,10 +10,16 @@ use tokio::io::BufReader;
 use tokio::net::tcp::OwnedReadHalf;
 use tokio::sync::mpsc;
 
-use crate::connection::{read_frame, Conn, Outgoing, Profile};
+use crate::connection::{invalid, read_frame, Conn, Outgoing, Profile};
+use crate::inventory::Stack;
 use crate::world::{self, Event, Frame, OUTGOING_CAPACITY};
 
 const KEEP_ALIVE_INTERVAL: Duration = Duration::from_secs(10);
+/// The protocol caps the slots one container click may change.
+const MAX_CHANGED_SLOTS: i32 = 128;
+const CLIENT_COMMAND_RESPAWN: i32 = 0;
+const PLAYER_COMMAND_START_SPRINTING: i32 = 1;
+const PLAYER_COMMAND_STOP_SPRINTING: i32 = 2;
 
 pub async fn run(conn: Conn, profile: Profile, world: mpsc::Sender<Event>) -> io::Result<()> {
     let Conn { mut reader, out } = conn;
@@ -149,7 +155,60 @@ fn decode(id: i32, packet: &[u8]) -> io::Result<Option<Event>> {
             let slot = r.i16()?;
             let count = r.varint()?;
             let item = if count > 0 { r.varint()? } else { 0 };
-            Event::CreativeSlot { id, slot, item }
+            Event::CreativeSlot {
+                id,
+                slot,
+                stack: Stack::new(item, count),
+            }
+        }
+        serverbound::CONTAINER_CLICK => {
+            let window = r.varint()?;
+            let _state_id = r.varint()?;
+            let _slot = r.i16()?;
+            let _button = r.u8()?;
+            let _mode = r.varint()?;
+            let count = r.varint()?;
+            if !(0..=MAX_CHANGED_SLOTS).contains(&count) {
+                return Err(invalid(format!("container click changes {count} slots")));
+            }
+            let mut changed = Vec::new();
+            for _ in 0..count {
+                let slot = r.i16()?;
+                changed.push((slot, hashed_stack(&mut r)?));
+            }
+            Event::ContainerClick {
+                id,
+                window,
+                changed,
+                carried: hashed_stack(&mut r)?,
+            }
+        }
+        serverbound::CONTAINER_CLOSE => Event::ContainerClose {
+            id,
+            window: r.varint()?,
+        },
+        serverbound::USE_ITEM => Event::UseItem {
+            id,
+            hand: r.varint()?,
+            sequence: r.varint()?,
+        },
+        serverbound::CLIENT_COMMAND => match r.varint()? {
+            CLIENT_COMMAND_RESPAWN => Event::Respawn { id },
+            _ => return Ok(None),
+        },
+        serverbound::PLAYER_COMMAND => {
+            let _entity = r.varint()?;
+            match r.varint()? {
+                PLAYER_COMMAND_START_SPRINTING => Event::Sprint {
+                    id,
+                    sprinting: true,
+                },
+                PLAYER_COMMAND_STOP_SPRINTING => Event::Sprint {
+                    id,
+                    sprinting: false,
+                },
+                _ => return Ok(None),
+            }
         }
         serverbound::SET_CARRIED_ITEM => Event::HeldSlot { id, slot: r.i16()? },
         serverbound::SWING => Event::Swing {
@@ -167,4 +226,22 @@ fn decode(id: i32, packet: &[u8]) -> io::Result<Option<Event>> {
         _ => return Ok(None),
     };
     Ok(Some(event))
+}
+
+/// Reads a hashed item stack (sent by container clicks since 1.21.5): the item and count,
+/// plus hashes of its components, which are skipped.
+fn hashed_stack(r: &mut Reader<'_>) -> io::Result<Stack> {
+    if !r.bool()? {
+        return Ok(Stack::EMPTY);
+    }
+    let item = r.varint()?;
+    let count = r.varint()?;
+    for _ in 0..r.varint()? {
+        let _component = r.varint()?;
+        let _hash = r.i32()?;
+    }
+    for _ in 0..r.varint()? {
+        let _component = r.varint()?;
+    }
+    Ok(Stack::new(item, count))
 }

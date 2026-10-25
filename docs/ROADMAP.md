@@ -31,8 +31,14 @@ Each milestone ends with something that can be tested in a real 1.21.8 client.
 
 ## Milestone 3: Basic survival
 
-- [ ] Health, damage, hunger, death and respawn
-- [ ] Crafting, furnace, chests
+- [x] Survival mode: mining with loot-table drops and correct-tool checks
+- [x] Dropped items: physics, pickup, Q / click-outside throwing, death drops
+- [x] Health, fall/void/starvation damage, hunger, regeneration, eating
+- [x] Death screen and respawn
+- [x] Server-side player inventory (container clicks trusted, not yet simulated)
+- [x] Commands: /gamemode, /give, /kill
+- [ ] Mining speed validation (needs block hardness data)
+- [ ] Crafting (2x2 and crafting table), furnace, chests
 - [ ] Day/night cycle, weather
 
 ## Milestone 4: Entities and mobs

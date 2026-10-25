@@ -49,6 +49,76 @@ pub fn block_has_tag(state: u16, tag: &str) -> bool {
         .is_some_and(|blocks| blocks.members(tag).binary_search(&i64::from(block)).is_ok())
 }
 
+pub struct BlockInfo {
+    pub name: &'static str,
+    pub first_state: u16,
+    pub default_state: u16,
+    /// Property names with their possible values, in state ID order.
+    pub properties: &'static [(&'static str, &'static [&'static str])],
+}
+
+impl BlockInfo {
+    /// The block a state belongs to.
+    pub fn of(state: u16) -> &'static BlockInfo {
+        &BLOCKS[usize::from(STATE_BLOCK[usize::from(state)])]
+    }
+
+    /// Value of property `name` in `state`, which must be a state of this block.
+    pub fn property(&self, state: u16, name: &str) -> Option<&'static str> {
+        // State IDs count through property values with the last property fastest.
+        let mut index = usize::from(state - self.first_state);
+        for (prop, values) in self.properties.iter().rev() {
+            let value = values[index % values.len()];
+            if *prop == name {
+                return Some(value);
+            }
+            index /= values.len();
+        }
+        None
+    }
+}
+
+pub struct ItemInfo {
+    pub name: &'static str,
+    pub max_stack: u8,
+    /// Default state of the block this item places, or air (0).
+    pub block: u16,
+    pub food: Option<Food>,
+    pub tool_rules: &'static [ToolRule],
+}
+
+impl ItemInfo {
+    pub fn get(id: i32) -> Option<&'static ItemInfo> {
+        usize::try_from(id).ok().and_then(|i| ITEMS.get(i))
+    }
+
+    pub fn id_of(name: &str) -> Option<i32> {
+        ITEMS.iter().position(|i| i.name == name).map(|i| i as i32)
+    }
+
+    /// Whether this item, used as a tool, makes `state` drop its loot. `None` if no rule
+    /// of the tool mentions the block.
+    pub fn correct_for_drops(&self, state: u16) -> Option<bool> {
+        let block = i64::from(STATE_BLOCK[usize::from(state)]);
+        self.tool_rules
+            .iter()
+            .find(|r| r.blocks.binary_search(&block).is_ok())
+            .and_then(|r| r.correct_for_drops)
+    }
+}
+
+pub struct Food {
+    pub nutrition: i32,
+    pub saturation: f32,
+    pub can_always_eat: bool,
+}
+
+pub struct ToolRule {
+    /// Block registry IDs, sorted.
+    pub blocks: &'static [i64],
+    pub correct_for_drops: Option<bool>,
+}
+
 include!(concat!(env!("OUT_DIR"), "/generated.rs"));
 
 #[cfg(test)]
@@ -63,6 +133,26 @@ mod tests {
         assert!(biomes.id_of("minecraft:plains").is_some());
         let dims = SyncedRegistry::get("minecraft:dimension_type").unwrap();
         assert!(dims.id_of("minecraft:overworld").is_some());
+    }
+
+    #[test]
+    fn block_properties() {
+        let info = BlockInfo::of(block::GRASS_BLOCK);
+        assert_eq!(info.name, "minecraft:grass_block");
+        assert_eq!(info.property(block::GRASS_BLOCK, "snowy"), Some("false"));
+        let wheat = BlockInfo::of(block::WHEAT);
+        assert_eq!(wheat.property(wheat.first_state + 7, "age"), Some("7"));
+    }
+
+    #[test]
+    fn items() {
+        let pickaxe = ItemInfo::get(ItemInfo::id_of("minecraft:wooden_pickaxe").unwrap()).unwrap();
+        assert_eq!(pickaxe.max_stack, 1);
+        assert_eq!(pickaxe.correct_for_drops(block::STONE), Some(true));
+        assert_eq!(pickaxe.correct_for_drops(block::IRON_ORE), Some(false));
+        let bread = ItemInfo::get(ItemInfo::id_of("minecraft:bread").unwrap()).unwrap();
+        assert_eq!(bread.food.as_ref().unwrap().nutrition, 5);
+        assert!(BLOCK_LOOT_JSON.contains("minecraft:cobblestone"));
     }
 
     #[test]

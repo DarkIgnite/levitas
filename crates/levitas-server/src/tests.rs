@@ -2,7 +2,7 @@
 
 use levitas_protocol::{BlockPos, Reader, Writer, PROTOCOL_VERSION};
 use levitas_registry::packet::{configuration, login, play};
-use levitas_registry::{block, entity_type};
+use levitas_registry::{block, entity_type, ItemInfo};
 use tokio::io::AsyncWriteExt;
 use tokio::net::{TcpListener, TcpStream};
 
@@ -148,7 +148,12 @@ async fn players_share_one_world() {
     assert_eq!(r.uuid().unwrap(), 2);
     read_until(&mut bob, play::clientbound::PLAYER_POSITION).await;
 
-    // Alice breaks the grass under spawn; Bob sees it disappear.
+    // In creative, Alice breaks the grass under spawn; Bob sees it disappear.
+    send(
+        &mut alice,
+        Writer::packet(play::serverbound::CHAT_COMMAND).string("gamemode creative"),
+    )
+    .await;
     let grass = BlockPos::new(0, -61, 0);
     send(
         &mut alice,
@@ -167,10 +172,7 @@ async fn players_share_one_world() {
     assert_eq!(r.varint().unwrap(), i32::from(block::AIR));
 
     // Alice puts stone in her hotbar and places it back in the hole.
-    let stone_item = levitas_registry::ITEM_BLOCK
-        .iter()
-        .position(|&b| b == block::STONE)
-        .unwrap() as i32;
+    let stone_item = ItemInfo::id_of("minecraft:stone").unwrap();
     send(
         &mut alice,
         Writer::packet(play::serverbound::SET_CREATIVE_MODE_SLOT)
@@ -212,4 +214,73 @@ async fn players_share_one_world() {
             break;
         }
     }
+}
+
+#[tokio::test]
+async fn survival_drops_pickup_death_and_respawn() {
+    let addr = server().await;
+    let mut alice = join(addr, "Alice", 1).await;
+    read_until(&mut alice, play::clientbound::PLAYER_POSITION).await;
+
+    // Grass is not instant to break: starting does nothing, finishing breaks it.
+    let grass = BlockPos::new(0, -61, 0);
+    for (status, sequence) in [(0, 1), (2, 2)] {
+        send(
+            &mut alice,
+            Writer::packet(play::serverbound::PLAYER_ACTION)
+                .varint(status)
+                .position(grass)
+                .u8(1)
+                .varint(sequence),
+        )
+        .await;
+    }
+    let body = read_until(&mut alice, play::clientbound::BLOCK_UPDATE).await;
+    let mut r = Reader::new(&body);
+    assert_eq!(r.position().unwrap(), grass);
+    assert_eq!(r.varint().unwrap(), i32::from(block::AIR));
+
+    // It drops dirt, which Alice picks up after stepping into the hole.
+    let body = read_until(&mut alice, play::clientbound::ADD_ENTITY).await;
+    let mut r = Reader::new(&body);
+    r.varint().unwrap();
+    r.uuid().unwrap();
+    assert_eq!(r.varint().unwrap(), entity_type::ITEM);
+    send(
+        &mut alice,
+        Writer::packet(play::serverbound::MOVE_PLAYER_POS)
+            .f64(0.5)
+            .f64(-61.0)
+            .f64(0.5)
+            .u8(1),
+    )
+    .await;
+    read_until(&mut alice, play::clientbound::TAKE_ITEM_ENTITY).await;
+    let dirt = ItemInfo::id_of("minecraft:dirt").unwrap();
+    loop {
+        let body = read_until(&mut alice, play::clientbound::CONTAINER_SET_SLOT).await;
+        let mut r = Reader::new(&body);
+        let (_window, _state, slot) = (r.varint().unwrap(), r.varint().unwrap(), r.i16().unwrap());
+        let (count, item) = (r.varint().unwrap(), r.varint().unwrap());
+        if slot == 36 {
+            assert_eq!((count, item), (1, dirt));
+            break;
+        }
+    }
+
+    // /kill shows the death screen; respawning sends her back to spawn.
+    send(
+        &mut alice,
+        Writer::packet(play::serverbound::CHAT_COMMAND).string("kill"),
+    )
+    .await;
+    read_until(&mut alice, play::clientbound::PLAYER_COMBAT_KILL).await;
+    send(
+        &mut alice,
+        Writer::packet(play::serverbound::CLIENT_COMMAND).varint(0),
+    )
+    .await;
+    read_until(&mut alice, play::clientbound::RESPAWN).await;
+    let body = read_until(&mut alice, play::clientbound::SET_HEALTH).await;
+    assert_eq!(Reader::new(&body).f32().unwrap(), 20.0);
 }

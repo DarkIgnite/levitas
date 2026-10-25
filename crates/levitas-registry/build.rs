@@ -53,8 +53,9 @@ fn main() {
     let synced = synced_registries(&data, &mut out);
     tags(&data, &synced, &mut out);
 
-    let dest = PathBuf::from(std::env::var("OUT_DIR").unwrap()).join("generated.rs");
-    fs::write(dest, out).unwrap();
+    let out_dir = PathBuf::from(std::env::var("OUT_DIR").unwrap());
+    block_loot(&data, &out_dir, &mut out);
+    fs::write(out_dir.join("generated.rs"), out).unwrap();
 }
 
 fn read_json(path: &Path) -> Value {
@@ -91,20 +92,50 @@ fn packets(data: &Path, out: &mut String) {
     out.push_str("}\n\n");
 }
 
-/// Writes default block state IDs and returns them by block name.
+/// Writes block constants and the block and block state tables. Returns each block's
+/// default state ID by name.
 fn blocks(data: &Path, out: &mut String) -> HashMap<String, u64> {
     let blocks = read_json(&data.join("reports/blocks.json"));
     let block_ids = &read_json(&data.join("reports/registries.json"))["minecraft:block"]["entries"];
     let mut defaults = HashMap::new();
     let mut state_count = 0;
     let mut state_block = Vec::new();
+    let mut rows = vec![String::new(); block_ids.as_object().unwrap().len()];
     out.push_str("/// Default block state ID of every block.\npub mod block {\n");
     for (name, block) in blocks.as_object().unwrap() {
         let states = block["states"].as_array().unwrap();
         state_count += states.len();
         let block_id = block_ids[name]["protocol_id"].as_u64().unwrap();
+        let first = states
+            .iter()
+            .map(|s| s["id"].as_u64().unwrap())
+            .min()
+            .unwrap();
+        let properties: Vec<(String, Vec<String>)> = block
+            .get("properties")
+            .and_then(Value::as_object)
+            .map(|props| {
+                props
+                    .iter()
+                    .map(|(k, v)| {
+                        let values = v.as_array().unwrap();
+                        let values = values.iter().map(|x| x.as_str().unwrap().to_owned());
+                        (k.clone(), values.collect())
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
         for state in states {
-            let id = state["id"].as_u64().unwrap() as usize;
+            let id = state["id"].as_u64().unwrap();
+            // State IDs count through property values with the last property fastest;
+            // BlockInfo::property relies on it.
+            let mut index = 0;
+            for (prop, values) in &properties {
+                let value = state["properties"][prop].as_str().unwrap();
+                index = index * values.len() + values.iter().position(|v| v == value).unwrap();
+            }
+            assert_eq!(id - first, index as u64, "state order of {name}");
+            let id = id as usize;
             if state_block.len() <= id {
                 state_block.resize(id + 1, 0);
             }
@@ -113,10 +144,20 @@ fn blocks(data: &Path, out: &mut String) -> HashMap<String, u64> {
         let default = states
             .iter()
             .find(|s| s["default"].as_bool() == Some(true))
+            .unwrap()["id"]
+            .as_u64()
             .unwrap();
-        let id = default["id"].as_u64().unwrap();
-        writeln!(out, "pub const {}: u16 = {id};", const_name(name)).unwrap();
-        defaults.insert(name.clone(), id);
+        writeln!(out, "pub const {}: u16 = {default};", const_name(name)).unwrap();
+        defaults.insert(name.clone(), default);
+        let props: Vec<String> = properties
+            .iter()
+            .map(|(k, values)| format!("({k:?}, &{values:?})"))
+            .collect();
+        rows[block_id as usize] = format!(
+            "BlockInfo {{ name: {name:?}, first_state: {first}, default_state: {default}, \
+             properties: &[{}] }},",
+            props.join(", ")
+        );
     }
     out.push_str("}\n\n");
     writeln!(
@@ -131,10 +172,16 @@ fn blocks(data: &Path, out: &mut String) -> HashMap<String, u64> {
          pub static STATE_BLOCK: &[u16] = &{state_block:?};\n"
     )
     .unwrap();
+    writeln!(
+        out,
+        "/// Every block, indexed by block registry ID.\npub static BLOCKS: &[BlockInfo] = &[\n{}\n];\n",
+        rows.join("\n")
+    )
+    .unwrap();
     defaults
 }
 
-/// Entity type IDs, and for every item the default state of the block it places.
+/// Entity type IDs and the item table.
 fn items_and_entities(data: &Path, block_defaults: &HashMap<String, u64>, out: &mut String) {
     let registries = read_json(&data.join("reports/registries.json"));
     let entries = |name: &str| -> Vec<(String, u64)> {
@@ -154,18 +201,85 @@ fn items_and_entities(data: &Path, block_defaults: &HashMap<String, u64>, out: &
     }
     out.push_str("}\n\n");
 
-    // Block items share their block's name; for other items the block is air (0).
-    let items = entries("minecraft:item");
-    let item_blocks: Vec<u64> = items
-        .iter()
-        .map(|(name, _)| block_defaults.get(name).copied().unwrap_or(0))
+    let block_ids: HashMap<String, i64> = entries("minecraft:block")
+        .into_iter()
+        .map(|(name, id)| (name, id as i64))
         .collect();
-    writeln!(
-        out,
-        "/// Default block state placed by each item, indexed by item ID; 0 (air) if the \
-         item is not a block.\npub static ITEM_BLOCK: &[u16] = &{item_blocks:?};\n"
-    )
-    .unwrap();
+    let block_tags = data.join("data/minecraft/tags/block");
+    let resolve_blocks = |spec: &Value| -> Vec<i64> {
+        let mut ids = Vec::new();
+        let names: Vec<&str> = match spec {
+            Value::String(s) => vec![s.as_str()],
+            Value::Array(list) => list.iter().map(|v| v.as_str().unwrap()).collect(),
+            _ => panic!("unexpected tool rule blocks {spec}"),
+        };
+        for name in names {
+            match name.strip_prefix('#') {
+                Some(tag) => resolve_tag(&block_tags, tag, &block_ids, &mut ids, &mut Vec::new()),
+                None => ids.extend(block_ids.get(name)),
+            }
+        }
+        ids.sort_unstable();
+        ids.dedup();
+        ids
+    };
+
+    let components = read_json(&data.join("reports/items.json"));
+    out.push_str(
+        "/// Every item, indexed by item registry ID.\npub static ITEMS: &[ItemInfo] = &[\n",
+    );
+    for (name, _) in entries("minecraft:item") {
+        let c = &components[&name]["components"];
+        let max_stack = c["minecraft:max_stack_size"].as_u64().unwrap_or(64);
+        // Block items share their block's name; for other items the block is air (0).
+        let block = block_defaults.get(&name).copied().unwrap_or(0);
+        let food = match c.get("minecraft:food") {
+            Some(f) => format!(
+                "Some(Food {{ nutrition: {}, saturation: {:?}, can_always_eat: {} }})",
+                f["nutrition"].as_i64().unwrap(),
+                f["saturation"].as_f64().unwrap() as f32,
+                f["can_always_eat"].as_bool().unwrap_or(false)
+            ),
+            None => "None".to_owned(),
+        };
+        let mut rules = Vec::new();
+        if let Some(tool) = c.get("minecraft:tool") {
+            for rule in tool["rules"].as_array().unwrap() {
+                let blocks = resolve_blocks(&rule["blocks"]);
+                let correct = rule["correct_for_drops"].as_bool();
+                rules.push(format!(
+                    "ToolRule {{ blocks: &{blocks:?}, correct_for_drops: {correct:?} }}"
+                ));
+            }
+        }
+        writeln!(
+            out,
+            "ItemInfo {{ name: {name:?}, max_stack: {max_stack}, block: {block}, food: {food}, \
+             tool_rules: &[{}] }},",
+            rules.join(", ")
+        )
+        .unwrap();
+    }
+    out.push_str("];\n\n");
+}
+
+/// Collects every block loot table into one JSON object keyed by block name.
+fn block_loot(data: &Path, out_dir: &Path, out: &mut String) {
+    let dir = data.join("data/minecraft/loot_table/blocks");
+    let mut tables = serde_json::Map::new();
+    let mut names = Vec::new();
+    collect_entries(&dir, &dir, &mut names);
+    names.sort();
+    for name in names {
+        let path = dir.join(format!("{}.json", name.strip_prefix("minecraft:").unwrap()));
+        tables.insert(name, read_json(&path));
+    }
+    let json = serde_json::to_string(&Value::Object(tables)).unwrap();
+    fs::write(out_dir.join("block_loot.json"), json).unwrap();
+    out.push_str(
+        "/// Block loot tables as JSON: an object mapping block names to loot tables.\n\
+         pub static BLOCK_LOOT_JSON: &str = include_str!(concat!(env!(\"OUT_DIR\"), \"/block_loot.json\"));\n\n",
+    );
 }
 
 /// Collects entry names of each synced registry, sorted so their IDs are stable.

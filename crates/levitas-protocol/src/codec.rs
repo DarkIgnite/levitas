@@ -89,6 +89,10 @@ impl<'a> Reader<'a> {
         self.i64().map(BlockPos::from_packed)
     }
 
+    pub fn i32(&mut self) -> Result<i32, DecodeError> {
+        self.array().map(i32::from_be_bytes)
+    }
+
     pub fn i64(&mut self) -> Result<i64, DecodeError> {
         self.array().map(i64::from_be_bytes)
     }

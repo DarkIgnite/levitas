@@ -1,6 +1,9 @@
 mod connection;
 mod flat;
+mod inventory;
+mod loot;
 mod play;
+mod rng;
 #[cfg(test)]
 mod tests;
 mod world;
