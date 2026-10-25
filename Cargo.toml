@@ -1,0 +1,20 @@
+[workspace]
+resolver = "2"
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "GPL-3.0-only"
+repository = "https://github.com/DarkIgnite/levitas"
+rust-version = "1.80"
+
+[workspace.dependencies]
+levitas-protocol = { path = "crates/levitas-protocol" }
+levitas-nbt = { path = "crates/levitas-nbt" }
+levitas-registry = { path = "crates/levitas-registry" }
+levitas-world = { path = "crates/levitas-world" }
+
+[profile.release]
+lto = "thin"
+codegen-units = 1

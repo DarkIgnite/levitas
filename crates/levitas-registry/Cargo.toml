@@ -1,0 +1,8 @@
+[package]
+name = "levitas-registry"
+description = "Block, item and registry data generated from the data-generator reports"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true

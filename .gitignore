@@ -1,0 +1,5 @@
+/target
+# Data generated from the user-supplied server.jar (see docs/CLEAN_ROOM.md)
+/generated
+/run
+*.jar

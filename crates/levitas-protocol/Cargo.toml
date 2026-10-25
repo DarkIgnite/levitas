@@ -1,0 +1,8 @@
+[package]
+name = "levitas-protocol"
+description = "Minecraft 1.21.8 network protocol: packet types and codecs"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
