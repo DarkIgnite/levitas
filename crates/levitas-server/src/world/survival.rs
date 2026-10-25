@@ -256,12 +256,16 @@ impl World {
         p.saturation = 5.0;
         p.exhaustion = 0.0;
         p.food_timer = 0;
-        p.pos = SPAWN;
-        p.sent_pos = SPAWN;
+        let spawn = self.spawn;
+        p.pos = spawn;
+        p.sent_pos = spawn;
         p.yaw = 0.0;
         p.pitch = 0.0;
         p.moved = false;
-        p.center = (0, 0);
+        p.center = (
+            (spawn[0] / 16.0).floor() as i32,
+            (spawn[2] / 16.0).floor() as i32,
+        );
         // The client throws away its chunks and entities on respawn.
         p.loaded.clear();
         let mode = p.mode;
@@ -275,7 +279,7 @@ impl World {
                 .f32(0.0),
         );
         self.update_view(id);
-        self.send(id, position_packet(SPAWN));
+        self.send(id, position_packet(spawn, 0.0, 0.0));
         self.send_status(id);
         self.send_entities_to(id);
 

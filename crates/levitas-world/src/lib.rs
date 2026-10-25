@@ -1,7 +1,10 @@
-//! Chunks and paletted block/biome storage. Anvil (.mca) region I/O comes later.
+//! Chunks, paletted block/biome storage, and the Anvil world format on disk.
 
+pub mod anvil;
 pub mod chunk;
 pub mod paletted;
+pub mod region;
 
 pub use chunk::{is_air, Chunk, MAX_Y, MIN_Y};
 pub use paletted::{Kind, PalettedContainer};
+pub use region::RegionStorage;

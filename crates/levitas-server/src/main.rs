@@ -11,13 +11,18 @@ mod world;
 
 use std::io;
 use std::net::SocketAddr;
+use std::path::PathBuf;
+use std::time::Duration;
 
 use levitas_protocol::{GAME_VERSION, PROTOCOL_VERSION};
 use tokio::net::TcpListener;
+use tokio::sync::oneshot;
 use tracing::{debug, info, warn};
 
 /// Localhost only for now, so testing does not open the machine to the network.
 const DEFAULT_ADDR: &str = "127.0.0.1:25565";
+/// The world folder, unless `LEVITAS_WORLD` names another.
+const DEFAULT_WORLD: &str = "world";
 
 #[tokio::main]
 async fn main() -> io::Result<()> {
@@ -34,7 +39,9 @@ async fn main() -> io::Result<()> {
                 format!("invalid listen address: {e}"),
             )
         })?;
-    let world = world::spawn();
+    let world_dir = std::env::var_os("LEVITAS_WORLD")
+        .map_or_else(|| PathBuf::from(DEFAULT_WORLD), PathBuf::from);
+    let world = world::spawn(world_dir);
     let listener = TcpListener::bind(addr).await?;
     info!(
         "Levitas {} for Minecraft {GAME_VERSION} (protocol {PROTOCOL_VERSION}) listening on {addr}",
@@ -42,7 +49,21 @@ async fn main() -> io::Result<()> {
     );
 
     loop {
-        let (stream, peer) = match listener.accept().await {
+        let accepted = tokio::select! {
+            accepted = listener.accept() => accepted,
+            _ = tokio::signal::ctrl_c() => {
+                info!("stopping: saving the world");
+                let (done, saved) = oneshot::channel();
+                if world.send(world::Event::Shutdown { done }).await.is_ok() {
+                    let _ = saved.await;
+                }
+                // Give connections a moment to deliver the disconnect message.
+                tokio::time::sleep(Duration::from_millis(200)).await;
+                info!("stopped");
+                return Ok(());
+            }
+        };
+        let (stream, peer) = match accepted {
             Ok(accepted) => accepted,
             Err(e) => {
                 warn!("failed to accept connection: {e}");

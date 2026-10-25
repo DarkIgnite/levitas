@@ -7,9 +7,11 @@
 
 use std::collections::HashMap;
 
+use levitas_nbt::Compound;
 use levitas_registry::{block_entity_type, menu, BlockInfo, STATE_BLOCK};
 
 use super::*;
+use crate::inventory::{items_from_nbt, items_to_nbt};
 use crate::recipes::{fuel_remainder, fuel_ticks};
 
 const CHEST_SLOTS: usize = 27;
@@ -47,6 +49,63 @@ pub struct Furnace {
 }
 
 impl BlockEntity {
+    /// The vanilla saved form, as stored in a chunk's `block_entities` list.
+    pub fn to_nbt(&self, pos: BlockPos) -> Compound {
+        let (id, items) = match self {
+            BlockEntity::Chest(c) if c.kind == block_entity_type::BARREL => {
+                ("minecraft:barrel", &c.items[..])
+            }
+            BlockEntity::Chest(c) => ("minecraft:chest", &c.items[..]),
+            BlockEntity::Furnace(f) => ("minecraft:furnace", &f.items[..]),
+        };
+        let mut nbt = Compound::new()
+            .with("id", id)
+            .with("x", pos.x)
+            .with("y", pos.y)
+            .with("z", pos.z)
+            .with("keepPacked", false)
+            .with("Items", items_to_nbt(items.iter().copied().enumerate()));
+        if let BlockEntity::Furnace(f) = self {
+            let short = |v: i32| v.clamp(0, i32::from(i16::MAX)) as i16;
+            nbt.insert("lit_time_remaining", short(f.burn_left));
+            nbt.insert("lit_total_time", short(f.burn_total));
+            nbt.insert("cooking_time_spent", short(f.cook));
+            nbt.insert("cooking_total_time", short(f.cook_total));
+        }
+        nbt
+    }
+
+    /// Reads a saved block entity Levitas understands, with its position.
+    pub fn from_nbt(nbt: &Compound) -> Option<(BlockPos, BlockEntity)> {
+        let pos = BlockPos::new(
+            nbt.int("x")? as i32,
+            nbt.int("y")? as i32,
+            nbt.int("z")? as i32,
+        );
+        let mut entity = match nbt.str("id")? {
+            "minecraft:chest" => Self::for_block(block::CHEST)?,
+            "minecraft:barrel" => Self::for_block(block::BARREL)?,
+            "minecraft:furnace" => Self::for_block(block::FURNACE)?,
+            _ => return None,
+        };
+        let items = entity.items_mut();
+        for (slot, stack) in items_from_nbt(nbt.list("Items").unwrap_or_default()) {
+            if let Some(s) = items.get_mut(slot) {
+                *s = stack;
+            }
+        }
+        if let BlockEntity::Furnace(f) = &mut entity {
+            // Names before 1.21.4 are read too, for older worlds.
+            let int =
+                |new: &str, old: &str| nbt.int(new).or_else(|| nbt.int(old)).unwrap_or(0) as i32;
+            f.burn_left = int("lit_time_remaining", "BurnTime");
+            f.burn_total = int("lit_total_time", "BurnTime");
+            f.cook = int("cooking_time_spent", "CookTime");
+            f.cook_total = int("cooking_total_time", "CookTimeTotal");
+        }
+        Some((pos, entity))
+    }
+
     /// The block entity a newly placed block needs, if any.
     pub fn for_block(state: u16) -> Option<Self> {
         let chest = |kind| {
@@ -236,6 +295,7 @@ impl World {
             View::Chest(pos) | View::Furnace(pos) => {
                 if let Some(entity) = self.block_entities.get_mut(&pos) {
                     entity.items_mut().copy_from_slice(&slots[..n]);
+                    self.dirty.insert(pos.chunk());
                 }
             }
         }
@@ -541,6 +601,9 @@ impl World {
 
             if was_lit != (f.burn_left > 0) {
                 lit_changes.push((pos, f.burn_left > 0));
+            }
+            if f.burn_left > 0 || f.cook > 0 || !changed.is_empty() {
+                self.dirty.insert(pos.chunk());
             }
             if !f.viewers.is_empty() {
                 updates.push((pos, changed));

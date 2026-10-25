@@ -30,6 +30,24 @@ impl Section {
         }
     }
 
+    /// A section from its block and biome containers.
+    pub fn from_parts(blocks: PalettedContainer, biomes: PalettedContainer) -> Self {
+        let block_count = blocks.values().iter().filter(|&&s| !is_air(s)).count() as i16;
+        Self {
+            block_count,
+            blocks,
+            biomes,
+        }
+    }
+
+    pub fn blocks(&self) -> &PalettedContainer {
+        &self.blocks
+    }
+
+    pub fn biomes(&self) -> &PalettedContainer {
+        &self.biomes
+    }
+
     fn index(x: usize, y: usize, z: usize) -> usize {
         (y * 16 + z) * 16 + x
     }
@@ -61,6 +79,16 @@ impl Chunk {
         Self {
             sections: vec![Section::empty(biome, biome_kind); SECTIONS],
         }
+    }
+
+    /// A chunk from its sections, bottom to top; there must be [`SECTIONS`] of them.
+    pub fn from_sections(sections: Vec<Section>) -> Self {
+        assert_eq!(sections.len(), SECTIONS);
+        Self { sections }
+    }
+
+    pub fn sections(&self) -> &[Section] {
+        &self.sections
     }
 
     /// Local x/z in 0..16, world y in MIN_Y..=MAX_Y.

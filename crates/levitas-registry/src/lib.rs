@@ -77,6 +77,32 @@ impl BlockInfo {
         None
     }
 
+    /// The block called `name` (e.g. `minecraft:oak_stairs`).
+    pub fn by_name(name: &str) -> Option<&'static BlockInfo> {
+        let i = BLOCKS_BY_NAME
+            .binary_search_by_key(&name, |(n, _)| n)
+            .ok()?;
+        Some(BlockInfo::of(BLOCKS_BY_NAME[i].1))
+    }
+
+    /// The state of this block with the given property values. Properties not listed
+    /// keep their default value; unknown properties or values are ignored.
+    pub fn state_with<'a>(&self, properties: impl IntoIterator<Item = (&'a str, &'a str)>) -> u16 {
+        let mut state = self.default_state;
+        for (name, value) in properties {
+            state = self.with(state, name, value).unwrap_or(state);
+        }
+        state
+    }
+
+    /// Property names and values of `state`, in property order.
+    pub fn properties_of(&self, state: u16) -> Vec<(&'static str, &'static str)> {
+        self.properties
+            .iter()
+            .filter_map(|(name, _)| Some((*name, self.property(state, name)?)))
+            .collect()
+    }
+
     /// `state` with property `name` set to `value`, or `None` if the block has no such
     /// property or value.
     pub fn with(&self, state: u16, name: &str, value: &str) -> Option<u16> {
@@ -170,6 +196,14 @@ mod tests {
         assert_eq!(furnace.with(lit, "lit", "false"), Some(block::FURNACE));
         assert_eq!(furnace.with(lit, "lit", "maybe"), None);
         assert!(RECIPES_JSON.contains("minecraft:crafting_table"));
+
+        let stairs = BlockInfo::by_name("minecraft:oak_stairs").unwrap();
+        let east = stairs.state_with([("facing", "east"), ("half", "top")]);
+        assert_eq!(stairs.property(east, "facing"), Some("east"));
+        assert_eq!(stairs.property(east, "half"), Some("top"));
+        assert_eq!(stairs.properties_of(east).len(), stairs.properties.len());
+        assert!(BlockInfo::by_name("minecraft:not_a_block").is_none());
+        assert_eq!(DATA_VERSION, 4440);
         assert_ne!(menu::GENERIC_9X3, menu::CRAFTING);
     }
 

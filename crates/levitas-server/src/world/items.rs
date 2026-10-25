@@ -166,6 +166,10 @@ impl World {
                 p[2].floor() as i32,
             )
         };
+        // Items in chunks nobody has loaded stay frozen, as in vanilla.
+        if !self.chunks.contains_key(&cell(item.pos).chunk()) {
+            return;
+        }
         if item.on_ground {
             let below = cell([item.pos[0], item.pos[1] - 0.01, item.pos[2]]);
             if !solid(self.block(below)) {

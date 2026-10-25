@@ -1,8 +1,9 @@
 """Download the official 1.21.8 server.jar and run its data generator.
 
 Output goes to generated/1.21.8/ (ignored by git, see docs/CLEAN_ROOM.md):
-  reports/   blocks.json, registries.json, packets.json, ...
-  data/      data-driven registries and tags
+  reports/       blocks.json, registries.json, packets.json, ...
+  data/          data-driven registries and tags
+  version.json   the jar's version info (data version, protocol, pack formats)
 
 Requires Java 21+. Usage: python tools/datagen.py
 """
@@ -14,6 +15,7 @@ import shutil
 import subprocess
 import sys
 import urllib.request
+import zipfile
 
 VERSION = "1.21.8"
 MANIFEST = "https://piston-meta.mojang.com/mc/game/version_manifest_v2.json"
@@ -54,6 +56,8 @@ def main():
          "--reports", "--server", "--output", str(out)],
         cwd=work, check=True,
     )
+    with zipfile.ZipFile(jar) as z:
+        (out / "version.json").write_bytes(z.read("version.json"))
     print(f"data written to {out}")
 
 

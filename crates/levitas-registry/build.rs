@@ -39,7 +39,7 @@ fn main() {
     let manifest = PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap());
     let data = manifest.join("../../generated").join(VERSION);
     println!("cargo:rerun-if-changed={}", data.display());
-    if !data.join("reports").is_dir() {
+    if !data.join("version.json").is_file() {
         panic!(
             "missing {}: run `python tools/datagen.py` first (needs Java 21+)",
             data.display()
@@ -47,8 +47,29 @@ fn main() {
     }
 
     let mut out = String::new();
+    let version = read_json(&data.join("version.json"));
+    writeln!(
+        out,
+        "/// Data version of 1.21.8 worlds, stored in chunks, level.dat and player data.\n\
+         pub const DATA_VERSION: i32 = {};\n",
+        version["world_version"].as_i64().unwrap()
+    )
+    .unwrap();
     packets(&data, &mut out);
     let block_defaults = blocks(&data, &mut out);
+    let mut by_name: Vec<(&String, u64)> = block_defaults.iter().map(|(n, &d)| (n, d)).collect();
+    by_name.sort();
+    let by_name: Vec<String> = by_name
+        .iter()
+        .map(|(name, default)| format!("({name:?}, {default})"))
+        .collect();
+    writeln!(
+        out,
+        "/// Block names with their default state, sorted by name.\n\
+         pub static BLOCKS_BY_NAME: &[(&str, u16)] = &[{}];\n",
+        by_name.join(", ")
+    )
+    .unwrap();
     items_and_entities(&data, &block_defaults, &mut out);
     let synced = synced_registries(&data, &mut out);
     tags(&data, &synced, &mut out);

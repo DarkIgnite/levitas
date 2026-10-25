@@ -41,13 +41,15 @@ Known gaps are listed under each phase instead of being hidden.
 
 ## Phase 1: Persistence
 
-- [ ] NBT reader and writer (file and network forms, modified UTF-8)
-- [ ] Anvil region files: read and write chunks, including oversized external chunks
-- [ ] Chunk sections, block palettes, biomes and block entities saved in vanilla format
-- [ ] level.dat: spawn point, world time, game rules
-- [ ] Player data: position, rotation, inventory, health, hunger, game mode
-- [ ] Autosave every 5 minutes, save on shutdown (Ctrl-C), unload unused chunks
+- [x] NBT reader and writer (file and network forms, modified UTF-8)
+- [x] Anvil region files: read and write chunks, including oversized external chunks
+- [x] Chunk sections, block palettes, biomes and block entities saved in vanilla format
+- [x] level.dat: spawn point and world time (game rules come with Phase 11)
+- [x] Player data: position, rotation, inventory, equipment, health, hunger, game mode
+- [x] Autosave every 5 minutes, save on shutdown (Ctrl-C), unload unused chunks
 - [ ] Dropped items and other entities saved (with Phase 4)
+- [ ] LZ4-compressed region files (vanilla's optional format)
+- [ ] Item components preserved when loading worlds from other servers (with Phase 11)
 
 ## Phase 2: Blocks behave correctly
 

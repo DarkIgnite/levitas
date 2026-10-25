@@ -8,5 +8,7 @@ repository.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+flate2 = "1.1.10"
 levitas-protocol.workspace = true
+levitas-nbt.workspace = true
 levitas-registry.workspace = true

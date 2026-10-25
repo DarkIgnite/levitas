@@ -5,9 +5,11 @@
 mod commands;
 mod containers;
 mod items;
+mod storage;
 mod survival;
 
 use std::collections::{HashMap, HashSet};
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
@@ -15,8 +17,8 @@ use std::time::Duration;
 use levitas_protocol::{angle, varint, BlockPos, Writer};
 use levitas_registry::packet::play::clientbound;
 use levitas_registry::{block, block_has_tag, entity_type, ItemInfo, SyncedRegistry};
-use levitas_world::{is_air, Chunk, MAX_Y, MIN_Y};
-use tokio::sync::mpsc;
+use levitas_world::{is_air, Chunk, RegionStorage, MAX_Y, MIN_Y};
+use tokio::sync::{mpsc, oneshot};
 use tracing::info;
 
 use crate::connection::Profile;
@@ -27,6 +29,9 @@ use crate::recipes::Recipes;
 use crate::rng::Rng;
 use containers::{BlockEntity, Open};
 use items::ItemEntity;
+#[cfg(test)]
+pub use storage::uuid_string;
+use storage::{LevelData, AUTOSAVE_TICKS, UNLOAD_TICKS};
 use survival::MAX_HEALTH;
 
 /// Chunk radius sent around each player.
@@ -34,7 +39,6 @@ pub const VIEW_DISTANCE: i32 = 8;
 /// Frames a player may have queued before they are disconnected as too slow.
 pub const OUTGOING_CAPACITY: usize = 4096;
 const TICK: Duration = Duration::from_millis(50);
-const SPAWN: [f64; 3] = [0.5, SURFACE_Y, 0.5];
 
 pub const GAME_MODE_SURVIVAL: u8 = 0;
 pub const GAME_MODE_CREATIVE: u8 = 1;
@@ -140,12 +144,17 @@ pub enum Event {
         id: i32,
         command: String,
     },
+    /// Save everything and disconnect everyone; `done` is signalled when finished.
+    Shutdown {
+        done: oneshot::Sender<()>,
+    },
 }
 
-/// Starts the world task and returns the channel connections send events to.
-pub fn spawn() -> mpsc::Sender<Event> {
+/// Starts the world task for the world saved in `dir` (created if missing) and returns
+/// the channel connections send events to.
+pub fn spawn(dir: impl Into<PathBuf>) -> mpsc::Sender<Event> {
     let (tx, rx) = mpsc::channel(1024);
-    tokio::spawn(World::new().run(rx));
+    tokio::spawn(World::new(dir.into()).run(rx));
     tx
 }
 
@@ -186,18 +195,21 @@ struct Player {
 }
 
 impl Player {
-    fn new(profile: Profile, out: mpsc::Sender<Frame>) -> Self {
+    fn new(profile: Profile, out: mpsc::Sender<Frame>, spawn: [f64; 3]) -> Self {
         Self {
             profile,
             out,
             mode: GAME_MODE_SURVIVAL,
-            pos: SPAWN,
+            pos: spawn,
             yaw: 0.0,
             pitch: 0.0,
             on_ground: true,
-            sent_pos: SPAWN,
+            sent_pos: spawn,
             moved: false,
-            center: (0, 0),
+            center: (
+                (spawn[0] / 16.0).floor() as i32,
+                (spawn[2] / 16.0).floor() as i32,
+            ),
             loaded: HashSet::new(),
             inventory: Inventory::new(),
             held: 0,
@@ -239,7 +251,13 @@ impl Player {
 }
 
 struct World {
+    /// The world folder: level.dat, region/ and playerdata/.
+    dir: PathBuf,
+    storage: RegionStorage,
     chunks: HashMap<(i32, i32), Chunk>,
+    /// Chunks changed since they were last saved.
+    dirty: HashSet<(i32, i32)>,
+    spawn: [f64; 3],
     players: HashMap<i32, Player>,
     items: HashMap<i32, ItemEntity>,
     block_entities: HashMap<BlockPos, BlockEntity>,
@@ -257,9 +275,19 @@ fn frame(packet: Writer) -> Frame {
 }
 
 impl World {
-    fn new() -> Self {
+    fn new(dir: PathBuf) -> Self {
+        let level = LevelData::load(&dir);
+        info!("world folder: {}", dir.display());
         Self {
+            storage: RegionStorage::new(dir.join("region")),
+            dir,
             chunks: HashMap::new(),
+            dirty: HashSet::new(),
+            spawn: [
+                f64::from(level.spawn[0]) + 0.5,
+                f64::from(level.spawn[1]),
+                f64::from(level.spawn[2]) + 0.5,
+            ],
             players: HashMap::new(),
             items: HashMap::new(),
             block_entities: HashMap::new(),
@@ -268,7 +296,7 @@ impl World {
             loot: LootTables::load(),
             recipes: Recipes::load(),
             rng: Rng::from_time(),
-            tick: 0,
+            tick: level.time.max(0) as u64,
         }
     }
 
@@ -362,12 +390,18 @@ impl World {
                 }
             }
             Event::Command { id, command } => self.command(id, &command),
+            Event::Shutdown { done } => {
+                self.shutdown();
+                let _ = done.send(());
+            }
         }
     }
 
     fn join(&mut self, id: i32, profile: Profile, out: mpsc::Sender<Frame>) {
         let name = profile.name.clone();
-        self.players.insert(id, Player::new(profile, out));
+        self.players
+            .insert(id, Player::new(profile, out, self.spawn));
+        self.load_player(id);
         let mode = self.players[&id].mode;
 
         let mut login = Writer::packet(clientbound::LOGIN)
@@ -402,7 +436,9 @@ impl World {
         self.send_entities_to(id);
 
         self.update_view(id);
-        self.send(id, position_packet(SPAWN));
+        let p = &self.players[&id];
+        let position = position_packet(p.pos, p.yaw, p.pitch);
+        self.send(id, position);
         self.send_status(id);
         self.send(
             id,
@@ -416,6 +452,7 @@ impl World {
 
     fn leave(&mut self, id: i32) {
         self.close_container(id);
+        self.save_player(id);
         let Some(player) = self.players.remove(&id) else {
             return;
         };
@@ -682,6 +719,12 @@ impl World {
         self.tick_survival();
         self.tick_items();
         self.tick_furnaces();
+        if self.tick % AUTOSAVE_TICKS == 0 {
+            self.save_all();
+        }
+        if self.tick % UNLOAD_TICKS == 0 {
+            self.unload_unseen_chunks();
+        }
     }
 
     /// Recenters a player's chunk view, unloading chunks that left the view distance and
@@ -731,11 +774,15 @@ impl World {
         ));
     }
 
+    /// A chunk, loaded from disk or generated if it is not in memory yet.
     fn chunk(&mut self, x: i32, z: i32) -> &mut Chunk {
-        let generator = &self.generator;
-        self.chunks
-            .entry((x, z))
-            .or_insert_with(|| generator.generate(x, z))
+        if !self.chunks.contains_key(&(x, z)) {
+            let chunk = self
+                .load_chunk(x, z)
+                .unwrap_or_else(|| self.generator.generate(x, z));
+            self.chunks.insert((x, z), chunk);
+        }
+        self.chunks.get_mut(&(x, z)).expect("just inserted")
     }
 
     fn chunk_frame(&mut self, x: i32, z: i32) -> Frame {
@@ -770,6 +817,7 @@ impl World {
         let (cx, cz) = pos.chunk();
         self.chunk(cx, cz)
             .set((pos.x & 15) as usize, pos.y, (pos.z & 15) as usize, state);
+        self.dirty.insert((cx, cz));
         let update = frame(block_update(pos, state));
         for p in self.players.values_mut() {
             if p.loaded.contains(&(cx, cz)) {
@@ -820,7 +868,7 @@ fn spawn_info(packet: Writer, mode: u8) -> Writer {
         .varint(63) // sea level
 }
 
-fn position_packet(pos: [f64; 3]) -> Writer {
+fn position_packet(pos: [f64; 3], yaw: f32, pitch: f32) -> Writer {
     Writer::packet(clientbound::PLAYER_POSITION)
         .varint(1) // teleport ID
         .f64(pos[0])
@@ -829,8 +877,8 @@ fn position_packet(pos: [f64; 3]) -> Writer {
         .f64(0.0)
         .f64(0.0)
         .f64(0.0) // velocity
-        .f32(0.0)
-        .f32(0.0) // yaw, pitch
+        .f32(yaw)
+        .f32(pitch)
         .i32(0) // all values absolute
 }
 

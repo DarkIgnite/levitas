@@ -1,6 +1,7 @@
 //! The player inventory, in the slot layout of the player's inventory menu:
 //! 0 crafting result, 1-4 crafting grid, 5-8 armor, 9-35 main, 36-44 hotbar, 45 offhand.
 
+use levitas_nbt::{Compound, Tag};
 use levitas_protocol::Writer;
 use levitas_registry::ItemInfo;
 
@@ -30,6 +31,42 @@ impl Stack {
     pub fn max_stack(&self) -> i32 {
         ItemInfo::get(self.item).map_or(64, |i| i32::from(i.max_stack))
     }
+
+    /// The vanilla saved form: `{id, count}`. Item components are not tracked yet.
+    pub fn to_nbt(self) -> Compound {
+        let name = ItemInfo::get(self.item).map_or("minecraft:air", |i| i.name);
+        Compound::new().with("id", name).with("count", self.count)
+    }
+
+    /// Reads a saved stack; unknown items come back empty.
+    pub fn from_nbt(nbt: &Compound) -> Stack {
+        let Some(item) = nbt.str("id").and_then(ItemInfo::id_of) else {
+            return Stack::EMPTY;
+        };
+        let count = nbt.int("count").unwrap_or(1) as i32;
+        Stack::new(item, count)
+    }
+}
+
+/// Stacks as a saved item list: each entry is a stack with a `Slot` byte.
+pub fn items_to_nbt(stacks: impl IntoIterator<Item = (usize, Stack)>) -> Vec<Tag> {
+    stacks
+        .into_iter()
+        .filter(|(_, s)| !s.is_empty())
+        .map(|(slot, s)| Tag::Compound(s.to_nbt().with("Slot", slot as i8)))
+        .collect()
+}
+
+/// Reads a saved item list as `(slot, stack)` pairs.
+pub fn items_from_nbt(list: &[Tag]) -> Vec<(usize, Stack)> {
+    list.iter()
+        .filter_map(Tag::as_compound)
+        .filter_map(|c| {
+            let slot = usize::try_from(c.int("Slot")? as i8).ok()?;
+            let stack = Stack::from_nbt(c);
+            (!stack.is_empty()).then_some((slot, stack))
+        })
+        .collect()
 }
 
 /// Appends a stack in the protocol's slot format (without components).

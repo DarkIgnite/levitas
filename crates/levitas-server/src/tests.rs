@@ -3,24 +3,50 @@
 use levitas_protocol::{BlockPos, Reader, Writer, PROTOCOL_VERSION};
 use levitas_registry::packet::{configuration, login, play};
 use levitas_registry::{block, entity_type, ItemInfo};
+use std::net::SocketAddr;
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicU32, Ordering};
+
 use tokio::io::AsyncWriteExt;
 use tokio::net::{TcpListener, TcpStream};
+use tokio::sync::{mpsc, oneshot};
 
 use crate::connection::{handle, read_frame};
-use crate::world::{self, VIEW_DISTANCE};
+use crate::world::{self, Event, VIEW_DISTANCE};
 
-/// Starts a server with its own world and returns its address.
-async fn server() -> std::net::SocketAddr {
+/// A fresh, empty world folder for one test.
+fn temp_world() -> PathBuf {
+    static NEXT: AtomicU32 = AtomicU32::new(0);
+    let n = NEXT.fetch_add(1, Ordering::Relaxed);
+    let dir = std::env::temp_dir().join(format!("levitas-test-{}-{n}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    dir
+}
+
+/// Starts a server on the world in `dir`; returns its address and its world channel.
+async fn server_in(dir: PathBuf) -> (SocketAddr, mpsc::Sender<Event>) {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
-    let world = world::spawn();
+    let world = world::spawn(dir);
+    let events = world.clone();
     tokio::spawn(async move {
         loop {
             let (stream, _) = listener.accept().await.unwrap();
             tokio::spawn(handle(stream, world.clone()));
         }
     });
-    addr
+    (addr, events)
+}
+
+/// Starts a server with its own fresh world and returns its address.
+async fn server() -> SocketAddr {
+    server_in(temp_world()).await.0
+}
+
+async fn shutdown(world: &mpsc::Sender<Event>) {
+    let (done, saved) = oneshot::channel();
+    world.send(Event::Shutdown { done }).await.unwrap();
+    saved.await.unwrap();
 }
 
 async fn send(client: &mut TcpStream, packet: Writer) {
@@ -47,7 +73,7 @@ fn handshake(intent: i32) -> Writer {
 }
 
 /// Logs in and completes configuration, leaving the client in the play state.
-async fn join(addr: std::net::SocketAddr, name: &str, uuid: u128) -> TcpStream {
+async fn join(addr: SocketAddr, name: &str, uuid: u128) -> TcpStream {
     let mut client = TcpStream::connect(addr).await.unwrap();
     send(&mut client, handshake(2)).await;
     send(
@@ -488,4 +514,111 @@ async fn furnaces_smelt_with_fuel() {
         slot_update(&mut alice, window, 2).await,
         (item("minecraft:iron_ingot"), 1)
     );
+}
+
+/// Sends a chat message and waits for it to come back, so every packet sent before it
+/// has been handled by the world.
+async fn sync(client: &mut TcpStream, name: &str) {
+    send(
+        client,
+        Writer::packet(play::serverbound::CHAT).string("sync"),
+    )
+    .await;
+    let line = format!("<{name}> sync");
+    loop {
+        let body = read_until(client, play::clientbound::SYSTEM_CHAT).await;
+        if String::from_utf8_lossy(&body).contains(&line) {
+            return;
+        }
+    }
+}
+
+#[tokio::test]
+async fn world_and_players_survive_a_restart() {
+    let item = |name| ItemInfo::id_of(name).unwrap();
+    let (dirt, stone) = (item("minecraft:dirt"), item("minecraft:stone"));
+    let dir = temp_world();
+    let chest = BlockPos::new(2, -60, 0);
+
+    let (addr, world) = server_in(dir.clone()).await;
+    let mut alice = join(addr, "Alice", 0xA11CE).await;
+    read_until(&mut alice, play::clientbound::PLAYER_POSITION).await;
+    give(&mut alice, "chest", 1).await;
+    send(&mut alice, use_on(BlockPos::new(2, -61, 0), 1, 1)).await;
+    give(&mut alice, "dirt", 5).await;
+    send(&mut alice, use_on(chest, 1, 2)).await;
+    let (window, _) = opened(&mut alice).await;
+    send(&mut alice, click(window, 54, &[(54, 0, 0)], (dirt, 5))).await;
+    send(&mut alice, click(window, 0, &[(0, dirt, 5)], (0, 0))).await;
+    send(
+        &mut alice,
+        Writer::packet(play::serverbound::CONTAINER_CLOSE).varint(window),
+    )
+    .await;
+    give(&mut alice, "stone", 3).await;
+    send(
+        &mut alice,
+        Writer::packet(play::serverbound::MOVE_PLAYER_POS_ROT)
+            .f64(5.5)
+            .f64(-60.0)
+            .f64(3.5)
+            .f32(45.0)
+            .f32(10.0)
+            .u8(1),
+    )
+    .await;
+    sync(&mut alice, "Alice").await;
+    shutdown(&world).await;
+    read_until(&mut alice, play::clientbound::DISCONNECT).await;
+
+    assert!(dir.join("level.dat").is_file());
+    assert!(dir.join("region").join("r.0.0.mca").is_file());
+    assert!(dir
+        .join("playerdata")
+        .join(format!("{}.dat", world::uuid_string(0xA11CE)))
+        .is_file());
+
+    // A new server on the same folder has everything back.
+    let (addr, _world) = server_in(dir.clone()).await;
+    let mut alice = join(addr, "Alice", 0xA11CE).await;
+    let body = read_until(&mut alice, play::clientbound::PLAYER_POSITION).await;
+    let mut r = Reader::new(&body);
+    r.varint().unwrap();
+    assert_eq!(
+        (r.f64().unwrap(), r.f64().unwrap(), r.f64().unwrap()),
+        (5.5, -60.0, 3.5)
+    );
+    let body = read_until(&mut alice, play::clientbound::CONTAINER_SET_CONTENT).await;
+    let mut r = Reader::new(&body);
+    let (_window, _state, len) = (
+        r.varint().unwrap(),
+        r.varint().unwrap(),
+        r.varint().unwrap(),
+    );
+    let mut slots = Vec::new();
+    for _ in 0..len {
+        let count = r.varint().unwrap();
+        if count > 0 {
+            slots.push((r.varint().unwrap(), count));
+            r.varint().unwrap();
+            r.varint().unwrap();
+        } else {
+            slots.push((0, 0));
+        }
+    }
+    assert_eq!(slots[36], (stone, 3), "inventory was restored");
+
+    send(&mut alice, use_on(chest, 1, 1)).await;
+    let (window, _) = opened(&mut alice).await;
+    let body = read_until(&mut alice, play::clientbound::CONTAINER_SET_CONTENT).await;
+    let mut r = Reader::new(&body);
+    assert_eq!(r.varint().unwrap(), window);
+    r.varint().unwrap();
+    r.varint().unwrap();
+    assert_eq!(
+        (r.varint().unwrap(), r.varint().unwrap()),
+        (5, dirt),
+        "chest contents were restored"
+    );
+    let _ = std::fs::remove_dir_all(dir);
 }

@@ -38,7 +38,7 @@ impl Kind {
 }
 
 /// Bits needed to store values `0..count`.
-fn bits_for(count: usize) -> u8 {
+pub fn bits_for(count: usize) -> u8 {
     (usize::BITS - (count.max(2) - 1).leading_zeros()) as u8
 }
 
@@ -113,6 +113,47 @@ impl PalettedContainer {
             Storage::Direct(data) => data.set(index, u64::from(value)),
         }
         old
+    }
+
+    /// Builds a container holding `values` (one per entry), in the most compact form.
+    pub fn from_values(kind: Kind, values: &[u16]) -> Self {
+        assert_eq!(values.len(), kind.entries);
+        let mut palette: Vec<u16> = Vec::new();
+        let mut indices = Vec::with_capacity(values.len());
+        for &v in values {
+            let slot = match palette.iter().position(|&p| p == v) {
+                Some(slot) => slot,
+                None => {
+                    palette.push(v);
+                    palette.len() - 1
+                }
+            };
+            indices.push(slot as u64);
+        }
+        let storage = if palette.len() == 1 {
+            Storage::Single(palette[0])
+        } else {
+            let bits = bits_for(palette.len()).max(kind.min_bits);
+            if bits <= kind.max_indirect_bits {
+                let mut data = PackedArray::new(bits, kind.entries);
+                for (i, &slot) in indices.iter().enumerate() {
+                    data.set(i, slot);
+                }
+                Storage::Indirect { palette, data }
+            } else {
+                let mut data = PackedArray::new(kind.direct_bits, kind.entries);
+                for (i, &v) in values.iter().enumerate() {
+                    data.set(i, u64::from(v));
+                }
+                Storage::Direct(data)
+            }
+        };
+        Self { kind, storage }
+    }
+
+    /// Every entry's value, in index order.
+    pub fn values(&self) -> Vec<u16> {
+        (0..self.kind.entries).map(|i| self.get(i)).collect()
     }
 
     /// Network form: bits per entry, palette, then the packed longs (no length prefix
@@ -236,6 +277,23 @@ mod tests {
         };
         assert_eq!(data.bits, 5);
         assert_eq!(data.longs.len(), 342);
+    }
+
+    #[test]
+    fn from_values_picks_the_compact_form() {
+        let kind = Kind::blocks();
+        assert!(matches!(
+            PalettedContainer::from_values(kind, &[3; 4096]).storage,
+            Storage::Single(3)
+        ));
+        let mixed: Vec<u16> = (0..4096).map(|i| (i % 20) as u16).collect();
+        let c = PalettedContainer::from_values(kind, &mixed);
+        assert!(matches!(&c.storage, Storage::Indirect { data, .. } if data.bits == 5));
+        assert_eq!(c.values(), mixed);
+        let varied: Vec<u16> = (0..4096).map(|i| (i % 1000) as u16).collect();
+        let c = PalettedContainer::from_values(kind, &varied);
+        assert!(matches!(c.storage, Storage::Direct(_)));
+        assert_eq!(c.values(), varied);
     }
 
     #[test]
