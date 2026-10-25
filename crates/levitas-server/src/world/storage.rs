@@ -154,6 +154,8 @@ impl LevelData {
                     .with("dimensions", dimensions),
             );
         let root = Compound::new().with("Data", data);
+        // A world where nothing has changed yet has no folder so far.
+        fs::create_dir_all(dir)?;
         let path = dir.join("level.dat");
         if path.exists() {
             // Keep the previous copy as a backup, as vanilla does.
@@ -430,6 +432,23 @@ impl World {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn level_data_in_a_new_folder() {
+        let dir = std::env::temp_dir().join(format!("levitas-level-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        let level = LevelData {
+            spawn: [3, -60, -7],
+            time: 12_345,
+        };
+        level.save(&dir).unwrap();
+        // Saving twice keeps the previous copy as level.dat_old.
+        level.save(&dir).unwrap();
+        assert!(dir.join("level.dat_old").is_file());
+        let loaded = LevelData::load(&dir);
+        assert_eq!((loaded.spawn, loaded.time), ([3, -60, -7], 12_345));
+        fs::remove_dir_all(dir).unwrap();
+    }
 
     #[test]
     fn uuid_format() {
