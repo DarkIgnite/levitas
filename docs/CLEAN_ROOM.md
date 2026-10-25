@@ -10,7 +10,10 @@ Levitas is GPL-3.0 open source. To keep it legally distributable, every contribu
   `java -DbundlerMainClass=net.minecraft.data.Main -jar server.jar --all`
 - Observing a running vanilla/Leaf server: packet captures, in-game behaviour, timings.
 - The Minecraft Wiki's descriptions of game mechanics.
-- Open-source code under GPL-3.0-compatible licenses, with attribution.
+- Open-source code under GPL-3.0-compatible licenses, with attribution. In particular
+  [Pumpkin](https://github.com/Pumpkin-MC/Pumpkin) (GPL-3.0): files adapted from it say so
+  in their header and keep its copyright notice. AGPL code (such as SteelMC) is not copied,
+  since it would bring the AGPL's network-use terms with it.
 - Block hardness and collision shapes from [PrismarineJS minecraft-data](https://github.com/PrismarineJS/minecraft-data)
   (MIT), downloaded by `tools/datagen.py` at a pinned commit. The official data generator
   does not output these.

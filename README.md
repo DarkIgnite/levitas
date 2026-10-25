@@ -30,8 +30,11 @@ cargo build --release
 cargo run --release -p levitas-server
 ```
 
+To keep a playable server apart from the source code, `tools/deploy.ps1` builds a release
+and installs it in `../levitas-server` with a `start.bat`.
+
 The server listens on `127.0.0.1:25565` (pass another address as the first argument) and
-keeps its world in `./world`, or the folder named by `LEVITAS_WORLD`. The world is saved
+keeps its world in `./world` relative to where it runs, or the folder named by `LEVITAS_WORLD`. The world is saved
 in the vanilla Anvil format every five minutes and when the server is stopped with Ctrl-C.
 
 ## Clean-room policy

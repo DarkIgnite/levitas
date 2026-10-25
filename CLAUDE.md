@@ -19,8 +19,11 @@ reply in casual Indonesian. Code, comments, commits and docs are in English.
   without asking.
 - Game data comes from `python tools/datagen.py` (downloads the official server.jar,
   runs its data generator into `generated/`). `levitas-registry`'s build script needs it.
-- The world lives in `./world` (Anvil format, gitignored). Stop the server with Ctrl-C
-  (in the terminal tab) so it saves; killing the process loses up to 5 minutes.
+- The playable server lives apart from the code, in `C:\dev\levitas-server` (levitas.exe,
+  start.bat, world/). `tools/deploy.ps1` builds a release and installs it there; stop the
+  server first. Stop it with Ctrl-C so it saves; killing it loses up to 5 minutes.
+- Pumpkin (github.com/Pumpkin-MC/Pumpkin, GPL-3.0) may be ported from, with attribution
+  (see docs/CLEAN_ROOM.md). SteelMC is AGPL-3.0: read for ideas only, never copy.
 - Avast on the owner's PC kills and quarantines freshly built `levitas.exe`. If the
   server disappears with no log, that is the likely cause; they need an Avast exception
   for C:\dev\levitas.
