@@ -240,13 +240,16 @@ impl World {
             _ => return false,
         };
         self.close_container(id);
+        let mut first_viewer = false;
         for (part, _) in view.parts() {
             let part_state = self.block(part);
             if let Some(entity) = BlockEntity::for_block(part_state) {
                 self.block_entities.entry(part).or_insert(entity);
             }
             if let Some(entity) = self.block_entities.get_mut(&part) {
-                entity.viewers_mut().insert(id);
+                let viewers = entity.viewers_mut();
+                viewers.insert(id);
+                first_viewer |= viewers.len() == 1;
             }
         }
 
@@ -282,6 +285,10 @@ impl World {
                 }
             }
             _ => {}
+        }
+        // The screen first, then the sound, as vanilla orders them.
+        if first_viewer {
+            self.container_opened(view, true);
         }
         true
     }
@@ -478,12 +485,53 @@ impl World {
         }
     }
 
+    /// The first player opening a container, or the last one closing it: chests and
+    /// barrels make a sound, and barrels show their open state.
+    fn container_opened(&mut self, view: View, open: bool) {
+        let parts = view.parts();
+        let Some(&(first, _)) = parts.first() else {
+            return;
+        };
+        let state = self.block(first);
+        let action = if open { "open" } else { "close" };
+        // Double chests sound once, from between their halves.
+        let n = parts.len() as f64;
+        let centre = [0, 1, 2].map(|axis| {
+            parts
+                .iter()
+                .map(|(p, _)| f64::from([p.x, p.y, p.z][axis]) + 0.5)
+                .sum::<f64>()
+                / n
+        });
+        let pitch = self.rng.f64() as f32 * 0.1 + 0.9;
+        match blocks::name(state) {
+            "minecraft:chest" | "minecraft:trapped_chest" => {
+                let sound = format!("minecraft:block.chest.{action}");
+                self.play_sound_at(&sound, centre, 0.5, pitch, None);
+            }
+            "minecraft:barrel" => {
+                self.set_block(first, blocks::with_bool(state, "open", open));
+                // The sound comes from the barrel's lid side.
+                let step = blocks::prop(state, "facing")
+                    .and_then(blocks::Dir::from_name)
+                    .map_or([0; 3], blocks::Dir::step);
+                let at = [0, 1, 2].map(|i| centre[i] + f64::from(step[i]) * 0.5);
+                let sound = format!("minecraft:block.barrel.{action}");
+                self.play_sound_at(&sound, at, 0.5, pitch, None);
+            }
+            _ => {}
+        }
+    }
+
     fn chest_viewers_changed(&mut self, pos: BlockPos) {
         let Some(BlockEntity::Chest(chest)) = self.block_entities.get(&pos) else {
             return;
         };
         let viewers = chest.viewers.len().min(255) as u8;
         let state = self.block(pos);
+        if !blocks::is_chest(state) {
+            return; // only chests have a lid to animate
+        }
         self.broadcast(
             Writer::packet(clientbound::BLOCK_EVENT)
                 .position(pos)
@@ -526,11 +574,16 @@ impl World {
         match open.view {
             View::Crafting => returned.extend(open.grid),
             View::Chest(_) | View::Furnace(_) | View::DoubleChest(..) => {
+                let mut last_viewer = false;
                 for (part, _) in open.view.parts() {
                     if let Some(entity) = self.block_entities.get_mut(&part) {
-                        entity.viewers_mut().remove(&id);
+                        let viewers = entity.viewers_mut();
+                        last_viewer |= viewers.remove(&id) && viewers.is_empty();
                     }
                     self.chest_viewers_changed(part);
+                }
+                if last_viewer {
+                    self.container_opened(open.view, false);
                 }
             }
             View::Inventory => {}

@@ -810,3 +810,51 @@ async fn blocks_cannot_be_placed_inside_players() {
         block::AIR
     );
 }
+
+/// Reads sound packets until one arrives; returns its sound event ID.
+async fn next_sound(client: &mut TcpStream) -> i32 {
+    let body = read_until(client, play::clientbound::SOUND).await;
+    Reader::new(&body).varint().unwrap() - 1
+}
+
+#[tokio::test]
+async fn chests_and_barrels_sound_and_barrels_open() {
+    let sound = |name| levitas_registry::sound_id(name).unwrap();
+    let mut alice = join(server().await, "Alice", 1).await;
+    read_until(&mut alice, play::clientbound::PLAYER_POSITION).await;
+    give(&mut alice, "chest", 1).await;
+    let chest = BlockPos::new(3, -60, 0);
+    send(&mut alice, use_on(BlockPos::new(3, -61, 0), 1, 1)).await;
+    block_at(&mut alice, chest).await;
+
+    // The opener hears it too: chest sounds come from the server.
+    send(&mut alice, use_on(chest, 1, 2)).await;
+    let (window, _) = opened(&mut alice).await;
+    assert_eq!(
+        next_sound(&mut alice).await,
+        sound("minecraft:block.chest.open")
+    );
+    send(
+        &mut alice,
+        Writer::packet(play::serverbound::CONTAINER_CLOSE).varint(window),
+    )
+    .await;
+    assert_eq!(
+        next_sound(&mut alice).await,
+        sound("minecraft:block.chest.close")
+    );
+
+    give(&mut alice, "barrel", 1).await;
+    let barrel = BlockPos::new(5, -60, 0);
+    send(&mut alice, use_on(BlockPos::new(5, -61, 0), 1, 3)).await;
+    block_at(&mut alice, barrel).await;
+    send(&mut alice, use_on(barrel, 1, 4)).await;
+    assert_eq!(
+        prop(block_at(&mut alice, barrel).await, "open"),
+        Some("true")
+    );
+    assert_eq!(
+        next_sound(&mut alice).await,
+        sound("minecraft:block.barrel.open")
+    );
+}

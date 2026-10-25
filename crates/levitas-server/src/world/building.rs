@@ -308,19 +308,32 @@ impl World {
     /// Plays a sound at a block for everyone but `except` (who already heard it, having
     /// predicted the action).
     fn play_sound_pitched(&mut self, name: &str, pos: BlockPos, except: Option<i32>, pitch: f32) {
+        let centre = [pos.x, pos.y, pos.z].map(|v| f64::from(v) + 0.5);
+        self.play_sound_at(name, centre, 1.0, pitch, except);
+    }
+
+    /// Plays a block sound at a point for everyone but `except`.
+    pub(super) fn play_sound_at(
+        &mut self,
+        name: &str,
+        at: [f64; 3],
+        volume: f32,
+        pitch: f32,
+        except: Option<i32>,
+    ) {
         let Some(sound) = sound_id(name) else {
             return;
         };
         let seed = self.rng.next_u64() as i64;
-        let fixed = |v: i32| v * 8 + 4; // block centre, in 1/8 blocks
+        let fixed = |v: f64| (v * 8.0) as i32; // positions are sent in 1/8 blocks
         self.broadcast(
             Writer::packet(clientbound::SOUND)
                 .varint(sound + 1)
                 .varint(SOUND_CATEGORY_BLOCKS)
-                .i32(fixed(pos.x))
-                .i32(fixed(pos.y))
-                .i32(fixed(pos.z))
-                .f32(1.0)
+                .i32(fixed(at[0]))
+                .i32(fixed(at[1]))
+                .i32(fixed(at[2]))
+                .f32(volume)
                 .f32(pitch)
                 .i64(seed),
             except,

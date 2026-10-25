@@ -76,6 +76,18 @@ impl Dir {
         self.clockwise().opposite()
     }
 
+    /// One step in this direction, as `[x, y, z]`.
+    pub fn step(self) -> [i32; 3] {
+        match self {
+            Dir::Down => [0, -1, 0],
+            Dir::Up => [0, 1, 0],
+            Dir::North => [0, 0, -1],
+            Dir::South => [0, 0, 1],
+            Dir::West => [-1, 0, 0],
+            Dir::East => [1, 0, 0],
+        }
+    }
+
     pub fn is_horizontal(self) -> bool {
         !matches!(self, Dir::Down | Dir::Up)
     }
