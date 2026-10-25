@@ -14,6 +14,7 @@ use levitas_world::anvil;
 use tracing::{error, info, warn};
 
 use super::*;
+use crate::flat::SURFACE_Y;
 use crate::inventory::{items_from_nbt, items_to_nbt};
 
 /// Autosave every 5 minutes, like vanilla.
@@ -21,15 +22,26 @@ pub const AUTOSAVE_TICKS: u64 = 6000;
 /// How often chunks no player can see are saved and dropped from memory.
 pub const UNLOAD_TICKS: u64 = 100;
 
+/// How a world's new chunks are made.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WorldKind {
+    /// Superflat test terrain.
+    Flat,
+    /// Vanilla-style generated terrain.
+    Noise,
+}
+
 /// What `level.dat` holds that Levitas uses.
 pub struct LevelData {
     pub spawn: [i32; 3],
     pub time: i64,
+    pub seed: i64,
+    pub kind: WorldKind,
 }
 
 impl LevelData {
-    /// Reads `level.dat`, falling back to `level.dat_old`, then to a new world.
-    pub fn load(dir: &Path) -> Self {
+    /// Reads `level.dat`, falling back to `level.dat_old`. `None` for a new world.
+    pub fn load(dir: &Path) -> Option<Self> {
         for name in ["level.dat", "level.dat_old"] {
             let path = dir.join(name);
             let Ok(bytes) = fs::read(&path) else { continue };
@@ -37,28 +49,50 @@ impl LevelData {
                 Ok((_, root)) => {
                     let data = root.compound("Data").cloned().unwrap_or_default();
                     let int = |key: &str, default: i64| data.int(key).unwrap_or(default) as i32;
-                    return LevelData {
+                    let gen = data
+                        .compound("WorldGenSettings")
+                        .cloned()
+                        .unwrap_or_default();
+                    let overworld_type = gen
+                        .compound("dimensions")
+                        .and_then(|d| d.compound("minecraft:overworld"))
+                        .and_then(|o| o.compound("generator"))
+                        .and_then(|g| g.str("type"))
+                        .unwrap_or("minecraft:flat");
+                    return Some(LevelData {
                         spawn: [
                             int("SpawnX", 0),
                             int("SpawnY", SURFACE_Y as i64),
                             int("SpawnZ", 0),
                         ],
                         time: data.int("Time").unwrap_or(0),
-                    };
+                        seed: gen.int("seed").unwrap_or(0),
+                        kind: if overworld_type == "minecraft:noise" {
+                            WorldKind::Noise
+                        } else {
+                            WorldKind::Flat
+                        },
+                    });
                 }
                 Err(e) => error!("{} is unreadable: {e}", path.display()),
             }
         }
-        LevelData {
-            spawn: [0, SURFACE_Y as i32, 0],
-            time: 0,
-        }
+        None
     }
 
     pub fn save(&self, dir: &Path) -> io::Result<()> {
         let layer = |block: &str, height: i32| {
             Tag::Compound(Compound::new().with("block", block).with("height", height))
         };
+        let overworld_noise = Compound::new()
+            .with("type", "minecraft:noise")
+            .with("settings", "minecraft:overworld")
+            .with(
+                "biome_source",
+                Compound::new()
+                    .with("type", "minecraft:multi_noise")
+                    .with("preset", "minecraft:overworld"),
+            );
         let flat = Compound::new().with("type", "minecraft:flat").with(
             "settings",
             Compound::new()
@@ -91,7 +125,13 @@ impl LevelData {
         let dimensions = Compound::new()
             .with(
                 "minecraft:overworld",
-                dimension("minecraft:overworld", flat),
+                dimension(
+                    "minecraft:overworld",
+                    match self.kind {
+                        WorldKind::Flat => flat,
+                        WorldKind::Noise => overworld_noise,
+                    },
+                ),
             )
             .with(
                 "minecraft:the_nether",
@@ -148,7 +188,7 @@ impl LevelData {
             .with(
                 "WorldGenSettings",
                 Compound::new()
-                    .with("seed", 0i64)
+                    .with("seed", self.seed)
                     .with("generate_features", false)
                     .with("bonus_chest", false)
                     .with("dimensions", dimensions),
@@ -388,6 +428,8 @@ impl World {
                 self.spawn[2].floor() as i32,
             ],
             time: self.tick as i64,
+            seed: self.seed,
+            kind: self.kind,
         };
         if let Err(e) = level.save(&self.dir) {
             error!("could not save level.dat: {e}");
@@ -440,16 +482,20 @@ mod tests {
     fn level_data_in_a_new_folder() {
         let dir = std::env::temp_dir().join(format!("levitas-level-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
+        assert!(LevelData::load(&dir).is_none());
         let level = LevelData {
             spawn: [3, -60, -7],
             time: 12_345,
+            seed: -42,
+            kind: WorldKind::Noise,
         };
         level.save(&dir).unwrap();
         // Saving twice keeps the previous copy as level.dat_old.
         level.save(&dir).unwrap();
         assert!(dir.join("level.dat_old").is_file());
-        let loaded = LevelData::load(&dir);
+        let loaded = LevelData::load(&dir).unwrap();
         assert_eq!((loaded.spawn, loaded.time), ([3, -60, -7], 12_345));
+        assert_eq!((loaded.seed, loaded.kind), (-42, WorldKind::Noise));
         fs::remove_dir_all(dir).unwrap();
     }
 

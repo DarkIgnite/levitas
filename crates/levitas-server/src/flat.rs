@@ -29,8 +29,18 @@ impl FlatGenerator {
         }
         Self { template }
     }
+}
 
-    pub fn generate(&self, _x: i32, _z: i32) -> Chunk {
+impl crate::terrain::Terrain for FlatGenerator {
+    fn generate(&self, _x: i32, _z: i32) -> Chunk {
         self.template.clone()
+    }
+
+    fn spawn_point(&self) -> [i32; 3] {
+        [0, SURFACE_Y as i32, 0]
+    }
+
+    fn is_cheap(&self) -> bool {
+        true
     }
 }

@@ -27,7 +27,13 @@ fn temp_world() -> PathBuf {
 async fn server_in(dir: PathBuf) -> (SocketAddr, mpsc::Sender<Event>) {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
-    let world = world::spawn(dir);
+    let world = world::spawn(
+        dir,
+        world::NewWorld {
+            kind: world::WorldKind::Flat,
+            seed: Some(0),
+        },
+    );
     let events = world.clone();
     tokio::spawn(async move {
         loop {

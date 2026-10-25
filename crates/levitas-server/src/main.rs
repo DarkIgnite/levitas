@@ -7,6 +7,7 @@ mod loot;
 mod play;
 mod recipes;
 mod rng;
+mod terrain;
 #[cfg(test)]
 mod tests;
 mod world;
@@ -43,7 +44,15 @@ async fn main() -> io::Result<()> {
         })?;
     let world_dir = std::env::var_os("LEVITAS_WORLD")
         .map_or_else(|| PathBuf::from(DEFAULT_WORLD), PathBuf::from);
-    let world = world::spawn(world_dir);
+    // New worlds get generated terrain unless LEVITAS_WORLD_TYPE=flat asks for superflat.
+    let kind = match std::env::var("LEVITAS_WORLD_TYPE").as_deref() {
+        Ok("flat") => world::WorldKind::Flat,
+        _ => world::WorldKind::Noise,
+    };
+    let seed = std::env::var("LEVITAS_SEED")
+        .ok()
+        .and_then(|s| s.parse().ok());
+    let world = world::spawn(world_dir, world::NewWorld { kind, seed });
     let listener = TcpListener::bind(addr).await?;
     info!(
         "Levitas {} for Minecraft {GAME_VERSION} (protocol {PROTOCOL_VERSION}) listening on {addr}",

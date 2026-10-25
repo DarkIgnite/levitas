@@ -23,16 +23,18 @@ use tokio::sync::{mpsc, oneshot};
 use tracing::info;
 
 use crate::connection::Profile;
-use crate::flat::{FlatGenerator, SURFACE_Y};
+use crate::flat::FlatGenerator;
 use crate::inventory::{Inventory, Stack, CRAFTING_GRID, HOTBAR, OFFHAND, SLOTS};
 use crate::loot::{LootContext, LootTables};
 use crate::recipes::Recipes;
 use crate::rng::Rng;
+use crate::terrain::{default_workers, Generated, GenerationPool, Terrain};
 use building::ScheduledTick;
 use containers::{BlockEntity, Open};
 use items::ItemEntity;
 #[cfg(test)]
 pub use storage::uuid_string;
+pub use storage::WorldKind;
 use storage::{LevelData, AUTOSAVE_TICKS, UNLOAD_TICKS};
 use survival::MAX_HEALTH;
 
@@ -161,12 +163,28 @@ pub enum Event {
     },
 }
 
-/// Starts the world task for the world saved in `dir` (created if missing) and returns
-/// the channel connections send events to.
-pub fn spawn(dir: impl Into<PathBuf>) -> mpsc::Sender<Event> {
+/// How to create a world when `dir` has none yet.
+#[derive(Debug, Clone, Copy)]
+pub struct NewWorld {
+    pub kind: WorldKind,
+    /// The seed; random when `None`.
+    pub seed: Option<i64>,
+}
+
+/// Starts the world task for the world saved in `dir` (created as `new` if missing) and
+/// returns the channel connections send events to.
+pub fn spawn(dir: impl Into<PathBuf>, new: NewWorld) -> mpsc::Sender<Event> {
     let (tx, rx) = mpsc::channel(1024);
-    tokio::spawn(World::new(dir.into()).run(rx));
+    let (world, generated) = World::new(dir.into(), new);
+    tokio::spawn(world.run(rx, generated));
     tx
+}
+
+/// The terrain generator for a world of this kind.
+fn terrain_for(kind: WorldKind, _seed: i64) -> Arc<dyn Terrain> {
+    match kind {
+        WorldKind::Flat | WorldKind::Noise => Arc::new(FlatGenerator::new()),
+    }
 }
 
 struct Player {
@@ -279,7 +297,13 @@ struct World {
     items: HashMap<i32, ItemEntity>,
     block_entities: HashMap<BlockPos, BlockEntity>,
     scheduled: Vec<ScheduledTick>,
-    generator: FlatGenerator,
+    terrain: Arc<dyn Terrain>,
+    /// Workers generating chunks for expensive terrain.
+    generation: Option<GenerationPool>,
+    /// Chunks requested from the workers and not back yet.
+    generating: HashSet<(i32, i32)>,
+    seed: i64,
+    kind: WorldKind,
     loot: LootTables,
     recipes: Recipes,
     rng: Rng,
@@ -291,10 +315,30 @@ fn frame(packet: Writer) -> Frame {
 }
 
 impl World {
-    fn new(dir: PathBuf) -> Self {
-        let level = LevelData::load(&dir);
+    fn new(dir: PathBuf, new: NewWorld) -> (Self, tokio::sync::mpsc::UnboundedReceiver<Generated>) {
+        let existing = LevelData::load(&dir);
+        let created = existing.is_none();
+        let mut level = existing.unwrap_or_else(|| LevelData {
+            spawn: [0, 0, 0],
+            time: 0,
+            seed: new
+                .seed
+                .unwrap_or_else(|| Rng::from_time().next_u64() as i64),
+            kind: new.kind,
+        });
+        let terrain = terrain_for(level.kind, level.seed);
+        if created {
+            level.spawn = terrain.spawn_point();
+            info!("created a new {:?} world, seed {}", level.kind, level.seed);
+        }
         info!("world folder: {}", dir.display());
-        Self {
+        let (generation, generated) = if terrain.is_cheap() {
+            (None, tokio::sync::mpsc::unbounded_channel().1)
+        } else {
+            let (pool, generated) = GenerationPool::start(Arc::clone(&terrain), default_workers());
+            (Some(pool), generated)
+        };
+        let world = Self {
             storage: RegionStorage::new(dir.join("region")),
             dir,
             chunks: HashMap::new(),
@@ -308,15 +352,24 @@ impl World {
             items: HashMap::new(),
             block_entities: HashMap::new(),
             scheduled: Vec::new(),
-            generator: FlatGenerator::new(),
+            terrain,
+            generation,
+            generating: HashSet::new(),
+            seed: level.seed,
+            kind: level.kind,
             loot: LootTables::load(),
             recipes: Recipes::load(),
             rng: Rng::from_time(),
             tick: level.time.max(0) as u64,
-        }
+        };
+        (world, generated)
     }
 
-    async fn run(mut self, mut events: mpsc::Receiver<Event>) {
+    async fn run(
+        mut self,
+        mut events: mpsc::Receiver<Event>,
+        mut generated: tokio::sync::mpsc::UnboundedReceiver<Generated>,
+    ) {
         let mut tick = tokio::time::interval(TICK);
         tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         loop {
@@ -326,6 +379,7 @@ impl World {
                     None => return,
                 },
                 _ = tick.tick() => self.tick(),
+                Some((pos, chunk)) = generated.recv() => self.chunk_generated(pos, chunk),
             }
             let kicked: Vec<i32> = self
                 .players
@@ -792,8 +846,10 @@ impl World {
                 }
             }
         }
-        // Nearest first, so the area around the player appears first.
+        // Nearest first, so the area around the player appears first. Chunks that still
+        // have to be generated are sent once they are ready.
         new.sort_by_key(|&(x, z)| (x - cx).pow(2) + (z - cz).pow(2));
+        new.retain(|&(x, z)| self.ensure_chunk(x, z));
         let chunk_frames: Vec<Frame> = new.iter().map(|&(x, z)| self.chunk_frame(x, z)).collect();
 
         let p = self.players.get_mut(&id).expect("player exists");
@@ -820,15 +876,79 @@ impl World {
         ));
     }
 
-    /// A chunk, loaded from disk or generated if it is not in memory yet.
+    /// A chunk, loaded from disk or generated if it is not in memory yet. This generates
+    /// on the spot if needed; [`World::ensure_chunk`] is for chunks a player is waiting for.
     fn chunk(&mut self, x: i32, z: i32) -> &mut Chunk {
         if !self.chunks.contains_key(&(x, z)) {
-            let chunk = self
-                .load_chunk(x, z)
-                .unwrap_or_else(|| self.generator.generate(x, z));
+            let chunk = match self.load_chunk(x, z) {
+                Some(chunk) => chunk,
+                None => {
+                    if !self.terrain.is_cheap() {
+                        self.dirty.insert((x, z));
+                    }
+                    self.terrain.generate(x, z)
+                }
+            };
             self.chunks.insert((x, z), chunk);
         }
         self.chunks.get_mut(&(x, z)).expect("just inserted")
+    }
+
+    /// Makes a chunk available if that is quick (in memory, on disk, or cheap terrain);
+    /// otherwise asks the workers for it. Returns whether it is available now.
+    fn ensure_chunk(&mut self, x: i32, z: i32) -> bool {
+        if self.chunks.contains_key(&(x, z)) {
+            return true;
+        }
+        if let Some(chunk) = self.load_chunk(x, z) {
+            self.chunks.insert((x, z), chunk);
+            return true;
+        }
+        match &self.generation {
+            Some(pool) => {
+                if self.generating.insert((x, z)) {
+                    pool.request(x, z);
+                }
+                false
+            }
+            None => {
+                self.chunk(x, z);
+                true
+            }
+        }
+    }
+
+    /// A chunk the workers finished: keep it, and send it to everyone waiting for it.
+    fn chunk_generated(&mut self, pos: (i32, i32), chunk: Chunk) {
+        self.generating.remove(&pos);
+        if self.chunks.contains_key(&pos) {
+            return; // generated on the spot meanwhile
+        }
+        self.chunks.insert(pos, chunk);
+        self.dirty.insert(pos);
+        let in_view = |p: &Player| {
+            (pos.0 - p.center.0).abs() <= VIEW_DISTANCE
+                && (pos.1 - p.center.1).abs() <= VIEW_DISTANCE
+        };
+        let waiting: Vec<i32> = self
+            .players
+            .iter()
+            .filter(|(_, p)| in_view(p) && !p.loaded.contains(&pos))
+            .map(|(&id, _)| id)
+            .collect();
+        if waiting.is_empty() {
+            return;
+        }
+        let chunk = self.chunk_frame(pos.0, pos.1);
+        for id in waiting {
+            let p = self.players.get_mut(&id).expect("player exists");
+            p.loaded.insert(pos);
+            p.deliver(&frame(Writer::packet(clientbound::CHUNK_BATCH_START)));
+            p.deliver(&chunk);
+            p.deliver(&frame(
+                Writer::packet(clientbound::CHUNK_BATCH_FINISHED).varint(1),
+            ));
+        }
     }
 
     fn chunk_frame(&mut self, x: i32, z: i32) -> Frame {
