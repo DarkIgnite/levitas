@@ -2,7 +2,8 @@
 
 use super::*;
 
-const HELP: &str = "Commands: /gamemode <survival|creative>, /give <item> [count], /kill";
+const HELP: &str = "Commands: /gamemode <survival|creative>, /give <item> [count], /kill, \
+                    /time <set|add|query> ..., /weather <clear|rain|thunder> [seconds]";
 
 impl World {
     pub(super) fn command(&mut self, id: i32, command: &str) {
@@ -24,10 +25,54 @@ impl World {
                 self.damage(id, f32::MAX, survival::Damage::Kill);
                 return;
             }
+            Some("time") => self.time_command(args.next(), args.next()),
+            Some("weather") => match args.next() {
+                Some(kind) => {
+                    let ticks = args
+                        .next()
+                        .and_then(|s| s.parse::<i32>().ok())
+                        .map(|s| s * 20);
+                    if self.set_weather(kind, ticks) {
+                        format!("Set the weather to {kind}")
+                    } else {
+                        "Usage: /weather <clear|rain|thunder> [seconds]".to_owned()
+                    }
+                }
+                None => "Usage: /weather <clear|rain|thunder> [seconds]".to_owned(),
+            },
             Some("help") => HELP.to_owned(),
             _ => format!("Unknown command: /{command}. {HELP}"),
         };
         self.send(id, system_chat(&reply));
+    }
+
+    fn time_command(&mut self, action: Option<&str>, value: Option<&str>) -> String {
+        const USAGE: &str =
+            "Usage: /time <set|add> <ticks|day|noon|night|midnight> or /time query daytime";
+        let named = |v: &str| match v {
+            "day" => Some(1_000),
+            "noon" => Some(6_000),
+            "night" => Some(13_000),
+            "midnight" => Some(18_000),
+            other => other.parse::<i64>().ok(),
+        };
+        match (action, value.and_then(named)) {
+            (Some("set"), Some(time)) => {
+                // Like vanilla, setting the time keeps the day count.
+                let day = self.day_time - self.day_time.rem_euclid(time::DAY_TICKS);
+                self.day_time = day + time.rem_euclid(time::DAY_TICKS);
+            }
+            (Some("add"), Some(ticks)) => self.day_time += ticks,
+            (Some("query"), _) => {
+                return format!("The time is {}", self.day_time.rem_euclid(time::DAY_TICKS));
+            }
+            _ => return USAGE.to_owned(),
+        }
+        self.broadcast(self.time_packet(), None);
+        format!(
+            "Set the time to {}",
+            self.day_time.rem_euclid(time::DAY_TICKS)
+        )
     }
 
     fn set_game_mode(&mut self, id: i32, mode: u8) -> String {

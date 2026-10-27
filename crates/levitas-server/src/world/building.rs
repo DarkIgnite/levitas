@@ -126,6 +126,9 @@ impl World {
 
     /// Opens, closes, flips or presses a block. Returns whether it was something to use.
     fn interact(&mut self, id: i32, pos: BlockPos, state: u16) -> bool {
+        if self.use_bed(id, pos, state) {
+            return true;
+        }
         if !blocks::toggles(state) {
             return false;
         }

@@ -122,6 +122,7 @@ impl World {
     }
 
     fn die(&mut self, id: i32, kind: Damage) {
+        self.wake_up(id);
         self.close_container(id);
         let p = self.players.get_mut(&id).expect("player exists");
         p.alive = false;
@@ -148,19 +149,17 @@ impl World {
     }
 
     pub(super) fn respawn(&mut self, id: i32) {
-        let Some(p) = self.players.get_mut(&id) else {
-            return;
-        };
-        if p.alive {
+        if self.players.get(&id).is_none_or(|p| p.alive) {
             return;
         }
+        let spawn = self.respawn_point(id);
+        let p = self.players.get_mut(&id).expect("player exists");
         p.alive = true;
         p.health = MAX_HEALTH;
         p.food = 20;
         p.saturation = 5.0;
         p.exhaustion = 0.0;
         p.food_timer = 0;
-        let spawn = self.spawn;
         p.pos = spawn;
         p.sent_pos = spawn;
         p.yaw = 0.0;
@@ -185,6 +184,7 @@ impl World {
         self.update_view(id);
         self.send(id, position_packet(spawn, 0.0, 0.0));
         self.send_status(id);
+        self.send_time_and_weather(id);
         self.send_entities_to(id);
 
         self.broadcast(

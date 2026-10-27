@@ -10,6 +10,7 @@ mod fluids;
 mod items;
 mod storage;
 mod survival;
+mod time;
 
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
@@ -141,6 +142,10 @@ pub enum Event {
         id: i32,
         hand: i32,
     },
+    /// The player clicked "Leave Bed".
+    LeaveBed {
+        id: i32,
+    },
     Sprint {
         id: i32,
         sprinting: bool,
@@ -229,6 +234,11 @@ struct Player {
     next_window: i32,
     /// Set when the player's outgoing queue overflowed or closed.
     kicked: bool,
+    /// The head of the bed the player is lying in, and for how many ticks.
+    sleeping: Option<BlockPos>,
+    sleep_ticks: u32,
+    /// The bed the player respawns at.
+    respawn: Option<BlockPos>,
 }
 
 impl Player {
@@ -266,6 +276,9 @@ impl Player {
             open: None,
             next_window: 0,
             kicked: false,
+            sleeping: None,
+            sleep_ticks: 0,
+            respawn: None,
         }
     }
 
@@ -327,6 +340,9 @@ struct World {
     /// Keeps light right as blocks change.
     light: LightEngine,
     fluid_ticks: fluids::FluidTicks,
+    /// Time of day in ticks (0 is sunrise); unlike `tick`, sleeping moves it on.
+    day_time: i64,
+    weather: time::Weather,
     seed: i64,
     kind: WorldKind,
     loot: LootTables,
@@ -349,6 +365,8 @@ impl World {
         let mut level = existing.unwrap_or_else(|| LevelData {
             spawn: [0, 0, 0],
             time: 0,
+            day_time: 0,
+            weather: time::Weather::default(),
             seed: new
                 .seed
                 .unwrap_or_else(|| Rng::from_time().next_u64() as i64),
@@ -386,6 +404,8 @@ impl World {
             generating: HashSet::new(),
             light: LightEngine::new(),
             fluid_ticks: fluids::FluidTicks::default(),
+            day_time: level.day_time,
+            weather: level.weather.clone(),
             seed: level.seed,
             kind: level.kind,
             loot: LootTables::load(),
@@ -475,6 +495,7 @@ impl World {
                     .u8(animation);
                 self.broadcast(packet, Some(id));
             }
+            Event::LeaveBed { id } => self.wake_up(id),
             Event::Sprint { id, sprinting } => {
                 if let Some(p) = self.players.get_mut(&id) {
                     p.sprinting = sprinting;
@@ -544,6 +565,7 @@ impl World {
         let position = position_packet(p.pos, p.yaw, p.pitch);
         self.send(id, position);
         self.send_status(id);
+        self.send_time_and_weather(id);
         self.send(
             id,
             system_chat(&format!(
@@ -555,6 +577,7 @@ impl World {
     }
 
     fn leave(&mut self, id: i32) {
+        self.wake_up(id);
         self.close_container(id);
         self.save_player(id);
         let Some(player) = self.players.remove(&id) else {
@@ -889,6 +912,7 @@ impl World {
         }
         self.tick_scheduled();
         self.tick_fluids();
+        self.tick_time();
         self.tick_falling_blocks();
         self.tick_survival();
         self.tick_items();

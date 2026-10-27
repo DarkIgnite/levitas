@@ -122,7 +122,11 @@ Known gaps are listed under each phase instead of being hidden.
 
 ## Phase 6: Farming, nature and time
 
-- [ ] Day/night cycle, weather (rain, thunder, lightning), sleeping in beds
+- [x] Day/night cycle, weather (rain, thunder), sleeping in beds (`world/time.rs`):
+      time and weather saved in level.dat, `/time` and `/weather`, beds set the
+      respawn point and skip the night once everyone has slept 100 ticks.
+      Known gaps: no lightning bolts, rain does not put out fires or fill cauldrons,
+      and sleeping ignores nearby monsters (there are none yet).
 - [ ] Random ticks: crops grow, saplings become trees, grass and mycelium spread
 - [ ] Bone meal, composters, farmland and trampling, sugar cane, cactus, bamboo,
       kelp, vines, melons and pumpkins, cocoa, sweet berries, mushrooms

@@ -20,6 +20,7 @@ const MAX_CHANGED_SLOTS: i32 = 128;
 const CLIENT_COMMAND_RESPAWN: i32 = 0;
 /// Flag in the player input packet for the sneak key.
 const INPUT_SNEAK: u8 = 0x20;
+const PLAYER_COMMAND_LEAVE_BED: i32 = 0;
 const PLAYER_COMMAND_START_SPRINTING: i32 = 1;
 const PLAYER_COMMAND_STOP_SPRINTING: i32 = 2;
 
@@ -214,6 +215,7 @@ fn decode(id: i32, packet: &[u8]) -> io::Result<Option<Event>> {
         serverbound::PLAYER_COMMAND => {
             let _entity = r.varint()?;
             match r.varint()? {
+                PLAYER_COMMAND_LEAVE_BED => Event::LeaveBed { id },
                 PLAYER_COMMAND_START_SPRINTING => Event::Sprint {
                     id,
                     sprinting: true,

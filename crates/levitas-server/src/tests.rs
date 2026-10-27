@@ -1406,3 +1406,81 @@ async fn falling_anvil_damages_player_and_crushes_torch() {
         .name
         .contains("anvil"));
 }
+
+/// Reads time updates until one shows a time of day accepted by `want`.
+async fn day_time_until(client: &mut TcpStream, want: impl Fn(i64) -> bool) -> i64 {
+    loop {
+        let body = read_until(client, play::clientbound::SET_TIME).await;
+        let mut r = Reader::new(&body);
+        let (_game_time, day_time) = (r.i64().unwrap(), r.i64().unwrap());
+        if want(day_time) {
+            return day_time;
+        }
+    }
+}
+
+#[tokio::test]
+async fn days_pass_and_the_time_can_be_set() {
+    let mut alice = join(server().await, "Alice", 1).await;
+    // Joining tells the client the time; then it keeps being sent as the day moves on.
+    let start = day_time_until(&mut alice, |_| true).await;
+    day_time_until(&mut alice, |t| t > start).await;
+    command(&mut alice, "time set night").await;
+    day_time_until(&mut alice, |t| t.rem_euclid(24_000) == 13_000).await;
+}
+
+#[tokio::test]
+async fn rain_starts_on_command() {
+    let mut alice = join(server().await, "Alice", 1).await;
+    command(&mut alice, "weather rain").await;
+    loop {
+        let body = read_until(&mut alice, play::clientbound::GAME_EVENT).await;
+        if body[0] == 1 {
+            break; // started raining
+        }
+    }
+}
+
+#[tokio::test]
+async fn sleeping_through_the_night_and_respawning_at_the_bed() {
+    let mut alice = join(server().await, "Alice", 1).await;
+    read_until(&mut alice, play::clientbound::PLAYER_POSITION).await;
+    give(&mut alice, "red_bed", 1).await;
+    send(&mut alice, use_on(BlockPos::new(4, -61, 0), 1, 1)).await;
+    let foot = BlockPos::new(4, -60, 0);
+    assert!(crate::blocks::is_bed(block_at(&mut alice, foot).await));
+
+    // In the day the bed only becomes the respawn point.
+    send(&mut alice, use_on(foot, 1, 2)).await;
+    command(&mut alice, "time set midnight").await;
+    send(&mut alice, use_on(foot, 1, 3)).await;
+    // The player lies down: their pose becomes sleeping.
+    loop {
+        let body = read_until(&mut alice, play::clientbound::SET_ENTITY_DATA).await;
+        let mut r = Reader::new(&body);
+        r.varint().unwrap();
+        if (r.u8().unwrap(), r.varint().unwrap(), r.varint().unwrap()) == (6, 21, 2) {
+            break;
+        }
+    }
+    // After 100 ticks asleep the night is skipped to the next morning.
+    day_time_until(&mut alice, |t| t.rem_euclid(24_000) == 0 && t > 0).await;
+    read_until(&mut alice, play::clientbound::ANIMATE).await;
+
+    // Dying brings the player back on their bed rather than at the world spawn.
+    command(&mut alice, "kill").await;
+    send(
+        &mut alice,
+        Writer::packet(play::serverbound::CLIENT_COMMAND).varint(0),
+    )
+    .await;
+    read_until(&mut alice, play::clientbound::RESPAWN).await;
+    let body = read_until(&mut alice, play::clientbound::PLAYER_POSITION).await;
+    let mut r = Reader::new(&body);
+    r.varint().unwrap();
+    let (x, y, z) = (r.f64().unwrap(), r.f64().unwrap(), r.f64().unwrap());
+    assert!(
+        (x - 4.5).abs() < 2.0 && (z - 0.5).abs() < 2.0,
+        "respawned at {x} {y} {z}"
+    );
+}

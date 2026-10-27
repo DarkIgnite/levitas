@@ -144,33 +144,30 @@ Phase 0–1 and most of Phase 2, plus parts of 3 and 12 (details in ROADMAP.md):
 - **Falling blocks** (sand, gravel, concrete powder, anvils, pointed dripstone) with 2-tick
   scheduled ticks, entity gravity/drag, concrete hardening, anvil damage/crushing/degradation,
   and stalactite damage/drops.
+- **Day/night and weather**: time sync every second, rain/thunder cycle with fading,
+  `/time`, `/weather`, sleeping skips the night, beds are respawn points.
 
 ## 7. What to do next (in this order)
 
 The owner's last request was: keep going until the world is playable like vanilla. The
-agreed next steps were **falling blocks (done), day/night, then mobs**.
+agreed next steps were **falling blocks (done), day/night (done), then mobs**.
 
-1. **Day/night cycle and weather** (Phase 6): advance world time every tick, send
-   `SET_TIME` (game time + day time) every 20 ticks, save `DayTime`/`Time` in level.dat
-   (already has `time`). `/time` and `/weather` commands; rain/thunder game events;
-   sleeping in beds to skip the night. Sky light levels on the client follow time
-   automatically.
-2. **Mobs** (Phase 4–5), the biggest gap for "normal survival": entity framework
+1. **Mobs** (Phase 4–5), the biggest gap for "normal survival": entity framework
    (IDs, tracking per player view, movement packets, physics, collisions, saving
    entities to `entities/` region files), then passive mobs (cow, pig, sheep, chicken
    for food), natural spawning by light/biome/time, simple AI (wander, panic, follow
    food), drops; then hostiles (zombie, skeleton, creeper, spider) with melee and
    pathfinding; player combat (attack damage, cooldown, knockback, armor).
-4. **Structure loot** (Phase 12): `ProtoChunk::pending_block_entities` from Pumpkin
+2. **Structure loot** (Phase 12): `ProtoChunk::pending_block_entities` from Pumpkin
    holds chest NBT with `LootTable` keys and spawners; convert them into Levitas block
    entities in `levitas-pumpkin` (return them alongside each chunk) and fill chests from
    loot tables on first open (`loot.rs` already evaluates block loot tables).
-5. **Random ticks** (Phase 6): crops, saplings (can reuse Pumpkin tree features?),
+3. **Random ticks** (Phase 6): crops, saplings (can reuse Pumpkin tree features?),
    grass spread, leaf decay, ice/snow.
-6. Remaining Phase 2: blast furnace, smoker, campfire, stonecutter, smithing table,
+4. Remaining Phase 2: blast furnace, smoker, campfire, stonecutter, smithing table,
    special recipes, signs (editing), flower pots, jukebox, note blocks, placement
    sounds for other players.
-7. Then Phases 7–11 (redstone, enchanting/anvil/brewing, Nether/End with Pumpkin's
+5. Then Phases 7–11 (redstone, enchanting/anvil/brewing, Nether/End with Pumpkin's
    generator for those dimensions, villagers, commands/config/online mode) and Phase 13
    (plugin API and economy, the owner's original goal for their server).
 

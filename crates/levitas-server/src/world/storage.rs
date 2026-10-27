@@ -35,6 +35,8 @@ pub enum WorldKind {
 pub struct LevelData {
     pub spawn: [i32; 3],
     pub time: i64,
+    pub day_time: i64,
+    pub weather: super::time::Weather,
     pub seed: i64,
     pub kind: WorldKind,
 }
@@ -66,6 +68,23 @@ impl LevelData {
                             int("SpawnZ", 0),
                         ],
                         time: data.int("Time").unwrap_or(0),
+                        day_time: data
+                            .int("DayTime")
+                            .or_else(|| data.int("Time"))
+                            .unwrap_or(0),
+                        weather: {
+                            let raining = data.int("raining").unwrap_or(0) != 0;
+                            let thundering = data.int("thundering").unwrap_or(0) != 0;
+                            super::time::Weather {
+                                raining,
+                                thundering,
+                                rain_time: data.int("rainTime").unwrap_or(0) as i32,
+                                thunder_time: data.int("thunderTime").unwrap_or(0) as i32,
+                                clear_time: data.int("clearWeatherTime").unwrap_or(0) as i32,
+                                rain_level: if raining { 1.0 } else { 0.0 },
+                                thunder_level: if thundering { 1.0 } else { 0.0 },
+                            }
+                        },
                         seed: gen.int("seed").unwrap_or(0),
                         kind: if overworld_type == "minecraft:noise" {
                             WorldKind::Noise
@@ -177,7 +196,12 @@ impl LevelData {
             .with("SpawnZ", self.spawn[2])
             .with("SpawnAngle", 0.0f32)
             .with("Time", self.time)
-            .with("DayTime", self.time)
+            .with("DayTime", self.day_time)
+            .with("raining", self.weather.raining)
+            .with("thundering", self.weather.thundering)
+            .with("rainTime", self.weather.rain_time)
+            .with("thunderTime", self.weather.thunder_time)
+            .with("clearWeatherTime", self.weather.clear_time)
             .with(
                 "LastPlayed",
                 std::time::UNIX_EPOCH
@@ -250,7 +274,7 @@ impl Player {
                 equipment.insert(name, stack.to_nbt());
             }
         }
-        Compound::new()
+        let nbt = Compound::new()
             .with("DataVersion", DATA_VERSION)
             .with(
                 "Pos",
@@ -270,7 +294,18 @@ impl Player {
             .with("playerGameType", i32::from(self.mode))
             .with("SelectedItemSlot", self.held as i32)
             .with("Inventory", inventory)
-            .with("equipment", equipment)
+            .with("equipment", equipment);
+        match self.respawn {
+            Some(bed) => nbt.with(
+                "respawn",
+                Compound::new()
+                    .with("pos", vec![bed.x, bed.y, bed.z])
+                    .with("dimension", "minecraft:overworld")
+                    .with("angle", 0.0f32)
+                    .with("forced", false),
+            ),
+            None => nbt,
+        }
     }
 
     /// Applies saved data. A player saved while dead comes back alive at spawn.
@@ -294,6 +329,17 @@ impl Player {
             }
         }
         self.held = nbt.int("SelectedItemSlot").unwrap_or(0).clamp(0, 8) as usize;
+        self.respawn = nbt
+            .compound("respawn")
+            .filter(|r| {
+                r.str("dimension")
+                    .is_none_or(|d| d == "minecraft:overworld")
+            })
+            .and_then(|r| r.int_array("pos"))
+            .and_then(|pos| match pos {
+                &[x, y, z] => Some(BlockPos::new(x, y, z)),
+                _ => None,
+            });
 
         let health = nbt.float("Health").unwrap_or(f64::from(MAX_HEALTH)) as f32;
         if health <= 0.0 {
@@ -430,6 +476,8 @@ impl World {
                 self.spawn[2].floor() as i32,
             ],
             time: self.tick as i64,
+            day_time: self.day_time,
+            weather: self.weather.clone(),
             seed: self.seed,
             kind: self.kind,
         };
@@ -489,6 +537,12 @@ mod tests {
         let level = LevelData {
             spawn: [3, -60, -7],
             time: 12_345,
+            day_time: 30_000,
+            weather: crate::world::time::Weather {
+                raining: true,
+                rain_time: 777,
+                ..Default::default()
+            },
             seed: -42,
             kind: WorldKind::Noise,
         };
@@ -498,6 +552,9 @@ mod tests {
         assert!(dir.join("level.dat_old").is_file());
         let loaded = LevelData::load(&dir).unwrap();
         assert_eq!((loaded.spawn, loaded.time), ([3, -60, -7], 12_345));
+        assert_eq!(loaded.day_time, 30_000);
+        assert!(loaded.weather.raining && !loaded.weather.thundering);
+        assert_eq!(loaded.weather.rain_time, 777);
         assert_eq!((loaded.seed, loaded.kind), (-42, WorldKind::Noise));
         fs::remove_dir_all(dir).unwrap();
     }
