@@ -104,6 +104,10 @@ pub fn place(
 
     let mut state = choose_variant(block_state, ctx)?;
     state = orient(state, ctx, target, existing, get)?;
+    // Leaves a player places never decay.
+    if prop(state, "persistent").is_some() && block_has_tag(state, "minecraft:leaves") {
+        state = with_bool(state, "persistent", true);
+    }
     if prop(existing, "level") == Some("0")
         && name(existing) == "minecraft:water"
         && prop(state, "type") != Some("double")

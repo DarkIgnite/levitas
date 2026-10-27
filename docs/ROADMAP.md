@@ -155,10 +155,18 @@ Known gaps are listed under each phase instead of being hidden.
       respawn point and skip the night once everyone has slept 100 ticks.
       Known gaps: no lightning bolts, rain does not put out fires or fill cauldrons,
       and sleeping ignores nearby monsters (there are none yet).
-- [ ] Random ticks: crops grow, saplings become trees, grass and mycelium spread
-- [ ] Bone meal, composters, farmland and trampling, sugar cane, cactus, bamboo,
+- [ ] Random ticks: crops grow, saplings become trees, grass and mycelium spread.
+      Done (`world/nature.rs`): three random ticks per section per tick; wheat,
+      carrots, potatoes and beetroots ripen by the wiki's growth formula; oak, birch,
+      spruce, jungle, acacia, cherry and dark oak (2x2) saplings grow trees; grass and
+      mycelium spread and die under cover; farmland dries out; sugar cane and cacti
+      grow. Missing: stems, melons and pumpkins, vines, bamboo, kelp, mushrooms.
+- [ ] Bone meal (crops, saplings, grass), hoes tilling farmland, seeds and crops that
+      plant under another name: done. Composters, trampling, sugar cane, cactus, bamboo,
       kelp, vines, melons and pumpkins, cocoa, sweet berries, mushrooms
-- [ ] Leaf decay
+- [x] Leaf decay: leaves track their distance from a log through neighbour updates and
+      rot (dropping saplings, sticks and apples) once out of reach; leaves players place
+      never decay.
 
 ## Phase 7: Redstone
 

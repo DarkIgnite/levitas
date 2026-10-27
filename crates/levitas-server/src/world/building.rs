@@ -53,6 +53,10 @@ impl World {
             return self.ack(id, sequence);
         }
 
+        if !stack.is_empty() && self.use_tool_on_block(id, slot, pos, face, clicked) {
+            return self.ack(id, sequence);
+        }
+
         let block_state = ItemInfo::get(stack.item).map_or(block::AIR, |i| i.block);
         if !stack.is_empty() && block_state != block::AIR {
             let ctx = PlaceContext {

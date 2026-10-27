@@ -1869,3 +1869,35 @@ async fn experience_levels_and_survives_a_restart() {
     experience_until(&mut alice, |_, level, total| level == 1 && total == 10).await;
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[tokio::test]
+async fn hoes_till_and_bone_meal_grows_crops() {
+    let mut alice = join(server().await, "Alice", 1).await;
+    read_until(&mut alice, play::clientbound::PLAYER_POSITION).await;
+    give(&mut alice, "wooden_hoe", 1).await;
+    let soil = BlockPos::new(3, -61, 0);
+    send(&mut alice, use_on(soil, 1, 1)).await;
+    let tilled = block_at(&mut alice, soil).await;
+    assert_eq!(
+        levitas_registry::BlockInfo::of(tilled).name,
+        "minecraft:farmland"
+    );
+    // Plant wheat with the seeds in the next hotbar slot, then bone meal it.
+    send(
+        &mut alice,
+        Writer::packet(play::serverbound::SET_CARRIED_ITEM).i16(1),
+    )
+    .await;
+    give(&mut alice, "wheat_seeds", 1).await;
+    send(&mut alice, use_on(soil, 1, 2)).await;
+    let crop = BlockPos::new(3, -60, 0);
+    assert_eq!(prop(block_at(&mut alice, crop).await, "age"), Some("0"));
+    // The seeds are used up, so the bone meal lands in the selected slot.
+    give(&mut alice, "bone_meal", 1).await;
+    send(&mut alice, use_on(crop, 1, 3)).await;
+    let grown: u8 = prop(block_at(&mut alice, crop).await, "age")
+        .unwrap()
+        .parse()
+        .unwrap();
+    assert!((2..=5).contains(&grown), "age {grown}");
+}

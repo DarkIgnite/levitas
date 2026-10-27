@@ -110,6 +110,23 @@ fn main() {
     fs::write(out_dir.join("generated.rs"), out).unwrap();
 }
 
+/// Items that place a block of another name: seeds, crops and a few others.
+const PLACED_UNDER_ANOTHER_NAME: &[(&str, &str)] = &[
+    ("minecraft:wheat_seeds", "minecraft:wheat"),
+    ("minecraft:beetroot_seeds", "minecraft:beetroots"),
+    ("minecraft:carrot", "minecraft:carrots"),
+    ("minecraft:potato", "minecraft:potatoes"),
+    ("minecraft:melon_seeds", "minecraft:melon_stem"),
+    ("minecraft:pumpkin_seeds", "minecraft:pumpkin_stem"),
+    ("minecraft:torchflower_seeds", "minecraft:torchflower_crop"),
+    ("minecraft:pitcher_pod", "minecraft:pitcher_crop"),
+    ("minecraft:sweet_berries", "minecraft:sweet_berry_bush"),
+    ("minecraft:cocoa_beans", "minecraft:cocoa"),
+    ("minecraft:glow_berries", "minecraft:cave_vines"),
+    ("minecraft:redstone", "minecraft:redstone_wire"),
+    ("minecraft:string", "minecraft:tripwire"),
+];
+
 fn read_json(path: &Path) -> Value {
     let text = fs::read_to_string(path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
     serde_json::from_str(&text).unwrap_or_else(|e| panic!("{}: {e}", path.display()))
@@ -432,8 +449,13 @@ fn items_and_entities(data: &Path, block_defaults: &HashMap<String, u64>, out: &
     for (name, _) in entries("minecraft:item") {
         let c = &components[&name]["components"];
         let max_stack = c["minecraft:max_stack_size"].as_u64().unwrap_or(64);
-        // Block items share their block's name; for other items the block is air (0).
-        let block = block_defaults.get(&name).copied().unwrap_or(0);
+        // Block items share their block's name, except the few below that place a
+        // differently named block; for other items the block is air (0).
+        let places = PLACED_UNDER_ANOTHER_NAME
+            .iter()
+            .find(|(item, _)| *item == name)
+            .map_or(name.as_str(), |(_, block)| block);
+        let block = block_defaults.get(places).copied().unwrap_or(0);
         let food = match c.get("minecraft:food") {
             Some(f) => format!(
                 "Some(Food {{ nutrition: {}, saturation: {:?}, can_always_eat: {} }})",

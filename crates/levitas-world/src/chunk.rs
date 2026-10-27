@@ -41,6 +41,11 @@ impl Section {
         }
     }
 
+    /// Whether the section holds nothing but air.
+    pub fn is_empty(&self) -> bool {
+        self.block_count == 0
+    }
+
     pub fn blocks(&self) -> &PalettedContainer {
         &self.blocks
     }

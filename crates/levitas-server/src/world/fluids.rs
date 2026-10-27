@@ -32,7 +32,7 @@ pub struct FluidTicks {
 
 impl World {
     /// The block at `pos` if its chunk is loaded; never loads or generates chunks.
-    fn loaded_block(&self, pos: BlockPos) -> Option<u16> {
+    pub(super) fn loaded_block(&self, pos: BlockPos) -> Option<u16> {
         if !(MIN_Y..=MAX_Y).contains(&pos.y) {
             return None;
         }

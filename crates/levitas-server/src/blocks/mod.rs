@@ -6,6 +6,7 @@
 
 pub mod fluid;
 pub mod place;
+pub mod plants;
 
 use levitas_protocol::BlockPos;
 use levitas_registry::{block, block_has_tag, collision_boxes, face_sturdy, BlockInfo};
@@ -629,6 +630,10 @@ pub fn updated(state: u16, pos: BlockPos, get: &mut impl FnMut(BlockPos) -> u16)
         return block::AIR;
     }
     let state = concrete_hardens(state, pos, get);
+    if plants::is_leaves(state) {
+        let distance = plants::leaf_distance(Dir::ALL.map(|d| get(offset(pos, d))));
+        return with(state, "distance", &distance.to_string());
+    }
     connect(state, pos, get)
 }
 

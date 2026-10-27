@@ -13,6 +13,7 @@ mod fluids;
 mod items;
 mod mobs;
 mod monsters;
+mod nature;
 mod pathfinding;
 mod storage;
 mod survival;
@@ -974,6 +975,7 @@ impl World {
         }
         self.tick_scheduled();
         self.tick_fluids();
+        self.tick_random();
         self.tick_time();
         self.tick_falling_blocks();
         self.tick_mobs();
