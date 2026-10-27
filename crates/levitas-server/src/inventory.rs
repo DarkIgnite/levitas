@@ -116,15 +116,16 @@ pub fn write_stack(packet: Writer, stack: Stack) -> Writer {
         return packet.varint(0);
     }
     let packet = packet.varint(stack.count).varint(stack.item);
-    let packet = if stack.damage > 0 {
+    // Both counts come first (components to add, then to remove), then the components.
+    if stack.damage > 0 {
         packet
-            .varint(1) // components to add
+            .varint(1)
+            .varint(0)
             .varint(component::DAMAGE)
             .varint(stack.damage)
     } else {
-        packet.varint(0)
-    };
-    packet.varint(0) // components to remove
+        packet.varint(0).varint(0)
+    }
 }
 
 pub struct Inventory {
@@ -307,5 +308,30 @@ mod tests {
         let dirt = item("minecraft:dirt");
         assert!(Stack::new(dirt, 1).same_kind(&Stack::new(dirt, 5)));
         assert!(!pickaxe.same_kind(&Stack::new(pickaxe.item, 1)));
+    }
+
+    #[test]
+    fn slots_list_both_component_counts_before_the_components() {
+        let sword = item("minecraft:netherite_sword");
+        let mut stack = Stack::new(sword, 1);
+        stack.damage = 1;
+        let damaged = write_stack(Writer::packet(0), stack).into_frame();
+        let expected = Writer::packet(0)
+            .varint(1)
+            .varint(sword)
+            .varint(1) // components to add
+            .varint(0) // components to remove
+            .varint(component::DAMAGE)
+            .varint(1)
+            .into_frame();
+        assert_eq!(damaged, expected);
+        let fresh = write_stack(Writer::packet(0), Stack::new(sword, 1)).into_frame();
+        let expected = Writer::packet(0)
+            .varint(1)
+            .varint(sword)
+            .varint(0)
+            .varint(0)
+            .into_frame();
+        assert_eq!(fresh, expected);
     }
 }

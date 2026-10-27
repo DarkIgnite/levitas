@@ -911,7 +911,8 @@ async fn slot_with_damage(client: &mut TcpStream, slot: i16) -> (i32, i32, i32) 
         }
         let item = r.varint().unwrap();
         let mut damage = 0;
-        for _ in 0..r.varint().unwrap() {
+        let (added, _removed) = (r.varint().unwrap(), r.varint().unwrap());
+        for _ in 0..added {
             if r.varint().unwrap() == levitas_registry::component::DAMAGE {
                 damage = r.varint().unwrap();
             }
@@ -970,11 +971,11 @@ async fn mining_takes_time_and_wears_tools() {
         }
         let item = r.varint().unwrap();
         let mut damage = 0;
-        for _ in 0..r.varint().unwrap() {
+        let (added, _removed) = (r.varint().unwrap(), r.varint().unwrap());
+        for _ in 0..added {
             r.varint().unwrap(); // component type: only damage is ever sent
             damage = r.varint().unwrap();
         }
-        r.varint().unwrap(); // components removed
         slots.push((item, count, damage));
     }
     assert_eq!(slots[36], (0, 0, 0));

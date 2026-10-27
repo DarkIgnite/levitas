@@ -21,6 +21,8 @@ const CLIENT_COMMAND_RESPAWN: i32 = 0;
 /// Flag in the player input packet for the sneak key.
 const INPUT_SNEAK: u8 = 0x20;
 const PLAYER_COMMAND_LEAVE_BED: i32 = 0;
+/// Most components read from one creative-mode item.
+const MAX_COMPONENTS: i32 = 64;
 const INTERACT_USE: i32 = 0;
 const INTERACT_ATTACK: i32 = 1;
 const PLAYER_COMMAND_START_SPRINTING: i32 = 1;
@@ -163,11 +165,18 @@ fn decode(id: i32, packet: &[u8]) -> io::Result<Option<Event>> {
             let mut stack = Stack::EMPTY;
             if count > 0 {
                 stack = Stack::new(r.varint()?, count);
-                // Components the server tracks come first if present; the rest are
-                // skipped, since their encodings vary by type.
+                // Each component comes with its length, so ones Levitas does not track
+                // yet can be skipped.
                 let added = r.varint()?;
-                if added > 0 && r.varint()? == levitas_registry::component::DAMAGE {
-                    stack.damage = r.varint()?.max(0);
+                let _removed = r.varint()?;
+                for _ in 0..added.clamp(0, MAX_COMPONENTS) {
+                    let kind = r.varint()?;
+                    let length = usize::try_from(r.varint()?)
+                        .map_err(|_| invalid("negative component length".to_owned()))?;
+                    let data = r.bytes(length)?;
+                    if kind == levitas_registry::component::DAMAGE {
+                        stack.damage = Reader::new(data).varint()?.max(0);
+                    }
                 }
             }
             Event::CreativeSlot { id, slot, stack }
