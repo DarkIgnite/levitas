@@ -1,0 +1,95 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="400" viewBox="0 0 1280 400" role="img" aria-labelledby="title desc">
+  <title id="title">Levitas</title>
+  <desc id="desc">A floating block above a soft glow, next to the word Levitas: a lightweight survival game server written in Rust.</desc>
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0d1117"/>
+      <stop offset="0.55" stop-color="#161b2e"/>
+      <stop offset="1" stop-color="#2a1a14"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#f74c00" stop-opacity="0.55"/>
+      <stop offset="1" stop-color="#f74c00" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="halo" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#ffb37a" stop-opacity="0.25"/>
+      <stop offset="1" stop-color="#ffb37a" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="top" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffb070"/>
+      <stop offset="1" stop-color="#ff8a3d"/>
+    </linearGradient>
+    <linearGradient id="left" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#f26a1b"/>
+      <stop offset="1" stop-color="#c94a0c"/>
+    </linearGradient>
+    <linearGradient id="right" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#b63f08"/>
+      <stop offset="1" stop-color="#7d2a05"/>
+    </linearGradient>
+    <linearGradient id="word" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="1" stop-color="#ffd2b0"/>
+    </linearGradient>
+    <pattern id="grid" width="32" height="32" patternUnits="userSpaceOnUse">
+      <path d="M32 0H0V32" fill="none" stroke="#ffffff" stroke-opacity="0.035" stroke-width="1"/>
+    </pattern>
+  </defs>
+
+  <rect width="1280" height="400" fill="url(#sky)"/>
+  <rect width="1280" height="400" fill="url(#grid)"/>
+
+  <!-- Specks of light drifting upwards -->
+  <g fill="#ffb37a">
+    <rect x="148" y="300" width="6" height="6" opacity="0.5"/>
+    <rect x="388" y="250" width="5" height="5" opacity="0.35"/>
+    <rect x="212" y="96" width="4" height="4" opacity="0.4"/>
+    <rect x="342" y="132" width="6" height="6" opacity="0.25"/>
+    <rect x="96" y="176" width="4" height="4" opacity="0.3"/>
+    <rect x="1180" y="80" width="5" height="5" opacity="0.25"/>
+    <rect x="1120" y="320" width="4" height="4" opacity="0.3"/>
+    <rect x="1220" y="230" width="6" height="6" opacity="0.2"/>
+  </g>
+
+  <!-- The floating block -->
+  <g transform="translate(250 196)">
+    <ellipse cx="0" cy="130" rx="120" ry="22" fill="url(#glow)"/>
+    <ellipse cx="0" cy="-10" rx="190" ry="170" fill="url(#halo)"/>
+    <!-- lift lines under the block -->
+    <g stroke="#ff8a3d" stroke-linecap="round" fill="none">
+      <path d="M-46 92 v22" stroke-opacity="0.55" stroke-width="5"/>
+      <path d="M0 108 v28" stroke-opacity="0.7" stroke-width="5"/>
+      <path d="M46 92 v22" stroke-opacity="0.55" stroke-width="5"/>
+    </g>
+    <g transform="translate(0 -8)">
+      <!-- top, left and right faces of an isometric cube -->
+      <path d="M0 -104 L90 -52 L0 0 L-90 -52 Z" fill="url(#top)"/>
+      <path d="M-90 -52 L0 0 L0 104 L-90 52 Z" fill="url(#left)"/>
+      <path d="M90 -52 L0 0 L0 104 L90 52 Z" fill="url(#right)"/>
+      <!-- pixel texture on the faces -->
+      <g fill="#ffffff" opacity="0.18">
+        <path d="M-30 -86 L-15 -77 L-30 -68 L-45 -77 Z"/>
+        <path d="M30 -52 L45 -43 L30 -34 L15 -43 Z"/>
+        <path d="M0 -70 L15 -61 L0 -52 L-15 -61 Z"/>
+      </g>
+      <g fill="#000000" opacity="0.12">
+        <path d="M-60 -6 L-45 3 L-45 21 L-60 12 Z"/>
+        <path d="M-30 34 L-15 43 L-15 61 L-30 52 Z"/>
+        <path d="M30 8 L45 -1 L45 17 L30 26 Z"/>
+        <path d="M60 30 L75 21 L75 39 L60 48 Z"/>
+      </g>
+      <!-- crisp edges -->
+      <path d="M0 -104 L90 -52 L90 52 L0 104 L-90 52 L-90 -52 Z M0 0 L0 104 M0 0 L90 -52 M0 0 L-90 -52"
+            fill="none" stroke="#ffd2b0" stroke-opacity="0.55" stroke-width="2" stroke-linejoin="round"/>
+    </g>
+  </g>
+
+  <!-- Wordmark -->
+  <text x="480" y="208" fill="url(#word)" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif"
+        font-size="132" font-weight="800" letter-spacing="10">LEVITAS</text>
+  <rect x="486" y="236" width="96" height="6" rx="3" fill="#f74c00"/>
+  <text x="486" y="290" fill="#c9d1d9" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif"
+        font-size="30" font-weight="500">A lightweight survival game server, written in Rust</text>
+  <text x="486" y="330" fill="#8b949e" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif"
+        font-size="22" letter-spacing="2">JAVA EDITION 1.21.8  ·  VANILLA GAMEPLAY  ·  GPL-3.0</text>
+</svg>

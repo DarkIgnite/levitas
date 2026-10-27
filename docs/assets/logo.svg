@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256" role="img" aria-labelledby="title">
+  <title id="title">Levitas logo: a floating block</title>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#161b2e"/>
+      <stop offset="1" stop-color="#2a1a14"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#f74c00" stop-opacity="0.6"/>
+      <stop offset="1" stop-color="#f74c00" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="top" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffb070"/>
+      <stop offset="1" stop-color="#ff8a3d"/>
+    </linearGradient>
+    <linearGradient id="left" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#f26a1b"/>
+      <stop offset="1" stop-color="#c94a0c"/>
+    </linearGradient>
+    <linearGradient id="right" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#b63f08"/>
+      <stop offset="1" stop-color="#7d2a05"/>
+    </linearGradient>
+  </defs>
+  <rect width="256" height="256" rx="56" fill="url(#bg)"/>
+  <ellipse cx="128" cy="214" rx="70" ry="13" fill="url(#glow)"/>
+  <g stroke="#ff8a3d" stroke-linecap="round" fill="none" stroke-width="5">
+    <path d="M100 180 v14" stroke-opacity="0.55"/>
+    <path d="M128 190 v18" stroke-opacity="0.75"/>
+    <path d="M156 180 v14" stroke-opacity="0.55"/>
+  </g>
+  <g transform="translate(128 112)">
+    <path d="M0 -70 L60 -35 L0 0 L-60 -35 Z" fill="url(#top)"/>
+    <path d="M-60 -35 L0 0 L0 70 L-60 35 Z" fill="url(#left)"/>
+    <path d="M60 -35 L0 0 L0 70 L60 35 Z" fill="url(#right)"/>
+    <path d="M0 -70 L60 -35 L60 35 L0 70 L-60 35 L-60 -35 Z M0 0 L0 70 M0 0 L60 -35 M0 0 L-60 -35"
+          fill="none" stroke="#ffd2b0" stroke-opacity="0.55" stroke-width="2" stroke-linejoin="round"/>
+  </g>
+</svg>

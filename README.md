@@ -1,3 +1,14 @@
+<p align="center">
+  <img src="docs/assets/banner.svg" alt="Levitas: a lightweight survival game server, written in Rust" width="100%">
+</p>
+
+<p align="center">
+  <img alt="Java Edition 1.21.8" src="https://img.shields.io/badge/Java%20Edition-1.21.8-f74c00">
+  <img alt="Written in Rust" src="https://img.shields.io/badge/written%20in-Rust-b7410e?logo=rust">
+  <img alt="License: GPL-3.0-only" src="https://img.shields.io/badge/license-GPL--3.0--only-blue">
+  <img alt="Progress: about 36%" src="https://img.shields.io/badge/progress-~36%25-orange">
+</p>
+
 # Levitas
 
 *Latin: "lightness".*
