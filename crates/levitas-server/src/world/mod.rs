@@ -5,10 +5,12 @@
 mod building;
 mod commands;
 mod containers;
+mod explosion;
 mod falling;
 mod fluids;
 mod items;
 mod mobs;
+mod monsters;
 mod storage;
 mod survival;
 mod time;
@@ -69,6 +71,8 @@ const DIG_FINISH: i32 = 2;
 /// allows for network lag, as vanilla does.
 const DIG_TOLERANCE: f32 = 0.7;
 const ENTITY_EVENT_MAINHAND_BREAK: i8 = 47;
+/// Breaking sound and particles for a helmet; the other armor slots follow it.
+const ENTITY_EVENT_HEAD_BREAK: i8 = 49;
 const DROP_STACK: i32 = 3;
 const DROP_ITEM: i32 = 4;
 const RELEASE_USE_ITEM: i32 = 5;
@@ -950,6 +954,7 @@ impl World {
         self.tick_time();
         self.tick_falling_blocks();
         self.tick_mobs();
+        self.tick_monster_spawning();
         self.tick_survival();
         self.tick_items();
         self.tick_furnaces();

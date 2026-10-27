@@ -388,6 +388,7 @@ fn items_and_entities(data: &Path, block_defaults: &HashMap<String, u64>, out: &
             "minecraft:data_component_type",
             "Item data component type IDs.",
         ),
+        ("particle", "minecraft:particle_type", "Particle type IDs."),
         (
             "command_argument",
             "minecraft:command_argument_type",
@@ -470,15 +471,19 @@ fn items_and_entities(data: &Path, block_defaults: &HashMap<String, u64>, out: &
         let max_damage = c["minecraft:max_damage"].as_i64().unwrap_or(0);
         let equip_slot = c["minecraft:equippable"]["slot"].as_str();
         // Main-hand attack modifiers: a player's base damage is 1 and speed 4.
-        let modifier = |kind: &str| {
+        let modifier_in = |kind: &str, mainhand: bool| {
             c["minecraft:attribute_modifiers"]
                 .as_array()
                 .into_iter()
                 .flatten()
-                .filter(|m| m["type"] == kind && m["slot"] == "mainhand")
+                .filter(|m| m["type"] == kind && (m["slot"] == "mainhand") == mainhand)
                 .filter_map(|m| m["amount"].as_f64())
                 .sum::<f64>()
         };
+        let modifier = |kind: &str| modifier_in(kind, true);
+        // Armor counts while worn, in any slot but the hand.
+        let armor = modifier_in("minecraft:armor", false) as f32;
+        let toughness = modifier_in("minecraft:armor_toughness", false) as f32;
         // Rounded to f32 first so the generated literals carry no false precision.
         let attack_damage = (1.0 + modifier("minecraft:attack_damage")) as f32;
         let attack_speed = (4.0 + modifier("minecraft:attack_speed")) as f32;
@@ -486,7 +491,8 @@ fn items_and_entities(data: &Path, block_defaults: &HashMap<String, u64>, out: &
             out,
             "ItemInfo {{ name: {name:?}, max_stack: {max_stack}, block: {block}, food: {food}, \
              tool: {tool}, max_damage: {max_damage}, equip_slot: {equip_slot:?}, \
-             attack_damage: {attack_damage:?}f32, attack_speed: {attack_speed:?}f32 }},"
+             attack_damage: {attack_damage:?}f32, attack_speed: {attack_speed:?}f32, \
+             armor: {armor:?}f32, toughness: {toughness:?}f32 }},"
         )
         .unwrap();
     }

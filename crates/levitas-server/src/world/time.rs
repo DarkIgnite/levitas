@@ -230,6 +230,13 @@ impl World {
             );
             return true;
         }
+        if self.monsters_near(head) {
+            self.send(
+                id,
+                action_bar("You may not rest now; there are monsters nearby"),
+            );
+            return true;
+        }
         if prop(head_state, "occupied") == Some("true") {
             self.send(id, action_bar("This bed is occupied"));
             return true;

@@ -104,7 +104,9 @@ Known gaps are listed under each phase instead of being hidden.
 - [ ] Attacking players: damage, attack cooldown, critical hits, knockback, sweeping.
       Players attacking mobs works (held item's attack damage and speed from the data
       generator, charge, critical hits, knockback, weapon wear); PvP and sweeping do not.
-- [ ] Armor and armor toughness, shields, damage types and immunities
+- [ ] Armor and armor toughness, shields, damage types and immunities. Worn armor
+      reduces mob and explosion damage by the wiki's formula and wears down; no
+      shields, enchantments or other damage types yet.
 - [ ] Bows, crossbows, tridents, arrows, snowballs, eggs, ender pearls
 - [ ] Status effects (needed by food, potions and mobs)
 - [ ] Entity framework: tracking, physics, collisions, saving entities to disk.
@@ -112,13 +114,17 @@ Known gaps are listed under each phase instead of being hidden.
       with gravity and block collisions, and are saved in vanilla `entities/` region
       files. Items and falling blocks are not tracked per player yet.
 - [ ] Minecarts, boats, item frames, paintings, armor stands, experience orbs
-- [ ] TNT and explosions
+- [ ] TNT and explosions. Explosions (`world/explosion.rs`) cast rays like vanilla,
+      break blocks by blast resistance (dropping them 1 in `power` times, containers
+      spilling), and damage and push entities; creepers use them. TNT is still missing.
 
 ## Phase 5: Mobs
 
 - [ ] Natural spawning by light level, biome and time; despawning rules. Animals spawn
-      once when a chunk is generated, in groups from the biome's spawn list; there is
-      no spawning afterwards yet, and no hostile mobs.
+      once when a chunk is generated. Monsters spawn in groups from the biome's list
+      where block light is 0 and the night-dimmed sky light is low, 24+ blocks from
+      players, up to 70 per player, and despawn beyond 128 blocks (sometimes beyond 32).
+      Missing: animals respawning later, structure-specific spawns, spawners.
 - [ ] Pathfinding and AI goals
 - [ ] Passive mobs: cow, pig, sheep (shearing, dye), chicken, rabbit, horse family,
       wolf, cat, fox, parrot, turtle, fish, squid, axolotl, frog, bee, goat, ...
@@ -128,6 +134,10 @@ Known gaps are listed under each phase instead of being hidden.
       by food, dyeing, biome variants (all are temperate), and every other animal.
 - [ ] Hostile mobs: zombie variants, skeleton variants, creeper, spider, enderman,
       slime, witch, phantom, drowned, pillager, silverfish, ...
+      Done: zombies (burn in sunlight), spiders (climb walls, neutral in daylight),
+      creepers (hiss and explode). They chase the nearest survival player straight on
+      (no pathfinding yet), hit with knockback, and keep players from sleeping nearby.
+      Missing: skeletons (need arrows), baby/husk/drowned variants, and the rest.
 - [ ] Mob drops, experience, equipment, babies, riding. Drops come from the vanilla
       entity loot tables (sheep drop their colour's wool); no experience yet.
 - [ ] Breeding, taming, leashes, name tags

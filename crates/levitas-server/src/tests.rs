@@ -1667,3 +1667,73 @@ async fn generated_chunks_come_with_animals() {
     assert!(found.is_ok(), "no animals near spawn");
     let _ = std::fs::remove_dir_all(dir);
 }
+
+/// Reads health updates until the player's health drops below `below`.
+async fn health_below(client: &mut TcpStream, below: f32) -> f32 {
+    loop {
+        let body = read_until(client, play::clientbound::SET_HEALTH).await;
+        let health = Reader::new(&body).f32().unwrap();
+        if health < below {
+            return health;
+        }
+    }
+}
+
+#[tokio::test]
+async fn zombies_attack_players_at_night() {
+    let mut alice = join(server().await, "Alice", 1).await;
+    read_until(&mut alice, play::clientbound::PLAYER_POSITION).await;
+    command(&mut alice, "time set midnight").await;
+    command(&mut alice, "summon zombie").await;
+    // A zombie hits for 3 (it may strike in the very tick it appears).
+    let health = health_below(&mut alice, 20.0).await;
+    assert_eq!(health, 17.0);
+}
+
+#[tokio::test]
+async fn creepers_explode_next_to_players() {
+    let mut alice = join(server().await, "Alice", 1).await;
+    read_until(&mut alice, play::clientbound::PLAYER_POSITION).await;
+    command(&mut alice, "time set midnight").await;
+    command(&mut alice, "summon creeper").await;
+    spawned(&mut alice, entity_type::CREEPER).await;
+    // After hissing it blows the grass under the player away, hurts the player, and
+    // everyone near sees the explosion.
+    assert_eq!(
+        block_at(&mut alice, BlockPos::new(0, -61, 0)).await,
+        block::AIR
+    );
+    health_below(&mut alice, 20.0).await;
+    let body = read_until(&mut alice, play::clientbound::EXPLODE).await;
+    let mut r = Reader::new(&body);
+    let centre = (r.f64().unwrap(), r.f64().unwrap(), r.f64().unwrap());
+    assert!(
+        (centre.0 - 0.5).abs() < 3.0 && (centre.2 - 0.5).abs() < 3.0,
+        "{centre:?}"
+    );
+}
+
+#[tokio::test]
+async fn monsters_spawn_in_the_dark() {
+    let mut alice = join(server().await, "Alice", 1).await;
+    read_until(&mut alice, play::clientbound::PLAYER_POSITION).await;
+    command(&mut alice, "time set midnight").await;
+    let monsters = [
+        entity_type::ZOMBIE,
+        entity_type::SPIDER,
+        entity_type::CREEPER,
+    ];
+    let found = tokio::time::timeout(std::time::Duration::from_secs(30), async {
+        loop {
+            let body = read_until(&mut alice, play::clientbound::ADD_ENTITY).await;
+            let mut r = Reader::new(&body);
+            r.varint().unwrap();
+            r.uuid().unwrap();
+            if monsters.contains(&r.varint().unwrap()) {
+                break;
+            }
+        }
+    })
+    .await;
+    assert!(found.is_ok(), "no monsters spawned at midnight");
+}

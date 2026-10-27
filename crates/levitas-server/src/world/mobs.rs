@@ -1,4 +1,5 @@
-//! Mobs: for now the passive farm animals (cows, pigs, sheep and chickens).
+//! Mobs: the farm animals (cows, pigs, sheep, chickens) and the first monsters
+//! (zombies, spiders, creepers; their hunting lives in [`super::monsters`]).
 //!
 //! Behaviour follows the Minecraft Wiki: animals wander about, panic and run for a few
 //! seconds when hurt, chickens flutter down slowly and lay eggs, sheep can be sheared and
@@ -64,6 +65,9 @@ pub enum MobKind {
     Pig,
     Sheep,
     Chicken,
+    Zombie,
+    Spider,
+    Creeper,
 }
 
 impl MobKind {
@@ -73,6 +77,9 @@ impl MobKind {
             "minecraft:pig" => Some(MobKind::Pig),
             "minecraft:sheep" => Some(MobKind::Sheep),
             "minecraft:chicken" => Some(MobKind::Chicken),
+            "minecraft:zombie" => Some(MobKind::Zombie),
+            "minecraft:spider" => Some(MobKind::Spider),
+            "minecraft:creeper" => Some(MobKind::Creeper),
             _ => None,
         }
     }
@@ -83,7 +90,48 @@ impl MobKind {
             MobKind::Pig => "minecraft:pig",
             MobKind::Sheep => "minecraft:sheep",
             MobKind::Chicken => "minecraft:chicken",
+            MobKind::Zombie => "minecraft:zombie",
+            MobKind::Spider => "minecraft:spider",
+            MobKind::Creeper => "minecraft:creeper",
         }
+    }
+
+    /// The name in death messages.
+    pub fn display(self) -> &'static str {
+        match self {
+            MobKind::Cow => "Cow",
+            MobKind::Pig => "Pig",
+            MobKind::Sheep => "Sheep",
+            MobKind::Chicken => "Chicken",
+            MobKind::Zombie => "Zombie",
+            MobKind::Spider => "Spider",
+            MobKind::Creeper => "Creeper",
+        }
+    }
+
+    pub fn is_monster(self) -> bool {
+        matches!(self, MobKind::Zombie | MobKind::Spider | MobKind::Creeper)
+    }
+
+    /// Melee damage on Normal difficulty.
+    pub fn attack_damage(self) -> f32 {
+        match self {
+            MobKind::Zombie => 3.0,
+            MobKind::Spider => 2.0,
+            _ => 0.0,
+        }
+    }
+
+    /// How far away a monster notices players.
+    pub fn follow_range(self) -> f64 {
+        match self {
+            MobKind::Zombie => 35.0,
+            _ => 16.0,
+        }
+    }
+
+    pub fn burns_in_daylight(self) -> bool {
+        self == MobKind::Zombie
     }
 
     fn entity_type(self) -> i32 {
@@ -92,6 +140,9 @@ impl MobKind {
             MobKind::Pig => entity_type::PIG,
             MobKind::Sheep => entity_type::SHEEP,
             MobKind::Chicken => entity_type::CHICKEN,
+            MobKind::Zombie => entity_type::ZOMBIE,
+            MobKind::Spider => entity_type::SPIDER,
+            MobKind::Creeper => entity_type::CREEPER,
         }
     }
 
@@ -100,16 +151,21 @@ impl MobKind {
             MobKind::Cow | MobKind::Pig => 10.0,
             MobKind::Sheep => 8.0,
             MobKind::Chicken => 4.0,
+            MobKind::Zombie | MobKind::Creeper => 20.0,
+            MobKind::Spider => 16.0,
         }
     }
 
     /// Width and height of the hitbox.
-    fn size(self) -> (f64, f64) {
+    pub fn size(self) -> (f64, f64) {
         match self {
             MobKind::Cow => (0.9, 1.4),
             MobKind::Pig => (0.9, 0.9),
             MobKind::Sheep => (0.9, 1.3),
             MobKind::Chicken => (0.4, 0.7),
+            MobKind::Zombie => (0.6, 1.95),
+            MobKind::Spider => (1.4, 0.9),
+            MobKind::Creeper => (0.6, 1.7),
         }
     }
 
@@ -117,17 +173,23 @@ impl MobKind {
     fn speed(self) -> f64 {
         match self {
             MobKind::Chicken => 0.08,
+            MobKind::Zombie => 0.12,
+            MobKind::Spider => 0.15,
+            MobKind::Creeper => 0.11,
             _ => 0.1,
         }
     }
 
     /// The sound family, as in `minecraft:entity.<family>.hurt`.
-    fn sound(self) -> &'static str {
+    pub fn sound(self) -> &'static str {
         match self {
             MobKind::Cow => "cow",
             MobKind::Pig => "pig",
             MobKind::Sheep => "sheep",
             MobKind::Chicken => "chicken",
+            MobKind::Zombie => "zombie",
+            MobKind::Spider => "spider",
+            MobKind::Creeper => "creeper",
         }
     }
 }
@@ -138,7 +200,7 @@ pub struct Mob {
     pub pos: [f64; 3],
     vel: [f64; 3],
     yaw: f32,
-    head_yaw: f32,
+    pub head_yaw: f32,
     on_ground: bool,
     pub health: f32,
     fall_distance: f64,
@@ -147,7 +209,15 @@ pub struct Mob {
     dying: Option<u32>,
     panic: u32,
     /// Where the mob is walking to, and for how many more ticks it tries.
-    target: Option<([f64; 2], u32)>,
+    pub target: Option<([f64; 2], u32)>,
+    /// Monsters: the player being hunted, ticks until the next attack, ticks left on
+    /// fire, and how long a creeper has been hissing.
+    pub hunting: Option<i32>,
+    pub attack_cooldown: u32,
+    pub fire_ticks: u32,
+    pub fuse: Option<u32>,
+    /// Whether a player dealt the last hit (some loot needs it).
+    killed_by_player: bool,
     blocked: bool,
     ambient: i32,
     /// Sheep: wool colour (0-15) and whether sheared.
@@ -179,6 +249,11 @@ impl Mob {
             dying: None,
             panic: 0,
             target: None,
+            hunting: None,
+            attack_cooldown: 0,
+            fire_ticks: 0,
+            fuse: None,
+            killed_by_player: false,
             blocked: false,
             ambient: 0,
             color: if kind == MobKind::Sheep {
@@ -191,6 +266,17 @@ impl Mob {
             sent_pos: pos,
             sent_angles: (0, 0),
             viewers: HashSet::new(),
+        }
+    }
+
+    pub fn alive(&self) -> bool {
+        self.dying.is_none()
+    }
+
+    /// Adds to the mob's velocity (knockback).
+    pub fn push(&mut self, by: [f64; 3]) {
+        for (v, b) in self.vel.iter_mut().zip(by) {
+            *v += b;
         }
     }
 
@@ -237,6 +323,7 @@ impl Mob {
             on_fire: false,
             sheep_color: (self.kind == MobKind::Sheep).then(|| COLORS[usize::from(self.color)]),
             sheared: self.sheared,
+            killed_by_player: self.killed_by_player,
         }
     }
 
@@ -330,9 +417,55 @@ pub struct Spawner {
     max: u32,
 }
 
-/// The animals each biome spawns when its chunks are generated.
+/// What each biome spawns: animals once when its chunks are generated, monsters in
+/// the dark.
 pub struct BiomeSpawns {
-    by_biome: HashMap<String, (f64, Vec<Spawner>)>,
+    by_biome: HashMap<String, SpawnList>,
+}
+
+struct SpawnList {
+    creature_probability: f64,
+    creatures: Vec<Spawner>,
+    monsters: Vec<Spawner>,
+}
+
+/// Mobs `/summon` knows.
+pub const SUMMONABLE: [&str; 7] = [
+    "cow", "pig", "sheep", "chicken", "zombie", "spider", "creeper",
+];
+
+fn spawners(list: &Value) -> Vec<Spawner> {
+    list.as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|s| {
+            Some(Spawner {
+                kind: MobKind::from_name(s["type"].as_str()?)?,
+                weight: s["weight"].as_u64()? as u32,
+                min: s["minCount"].as_u64()? as u32,
+                max: s["maxCount"].as_u64()? as u32,
+            })
+        })
+        .collect()
+}
+
+/// A weighted pick from a spawn list, with a group size.
+fn pick(list: &[Spawner], rng: &mut Rng) -> Option<(MobKind, u32)> {
+    let total: u32 = list.iter().map(|s| s.weight).sum();
+    if total == 0 {
+        return None;
+    }
+    let mut roll = rng.below(total);
+    let spawner = list.iter().find(|s| {
+        if roll < s.weight {
+            true
+        } else {
+            roll -= s.weight;
+            false
+        }
+    })?;
+    let size = spawner.min + rng.below(spawner.max.saturating_sub(spawner.min) + 1);
+    Some((spawner.kind, size.min(4)))
 }
 
 impl BiomeSpawns {
@@ -342,26 +475,22 @@ impl BiomeSpawns {
         let by_biome = biomes
             .into_iter()
             .map(|(name, biome)| {
-                let probability = biome["creature_spawn_probability"]
-                    .as_f64()
-                    .unwrap_or(DEFAULT_CREATURE_PROBABILITY);
-                let spawners = biome["spawners"]["creature"]
-                    .as_array()
-                    .into_iter()
-                    .flatten()
-                    .filter_map(|s| {
-                        Some(Spawner {
-                            kind: MobKind::from_name(s["type"].as_str()?)?,
-                            weight: s["weight"].as_u64()? as u32,
-                            min: s["minCount"].as_u64()? as u32,
-                            max: s["maxCount"].as_u64()? as u32,
-                        })
-                    })
-                    .collect();
-                (name, (probability, spawners))
+                let list = SpawnList {
+                    creature_probability: biome["creature_spawn_probability"]
+                        .as_f64()
+                        .unwrap_or(DEFAULT_CREATURE_PROBABILITY),
+                    creatures: spawners(&biome["spawners"]["creature"]),
+                    monsters: spawners(&biome["spawners"]["monster"]),
+                };
+                (name, list)
             })
             .collect();
         BiomeSpawns { by_biome }
+    }
+
+    /// A monster group for a biome, among the monsters Levitas has.
+    pub fn pick_monster(&self, biome: &str, rng: &mut Rng) -> Option<(MobKind, u32)> {
+        pick(&self.by_biome.get(biome)?.monsters, rng)
     }
 }
 
@@ -376,30 +505,17 @@ impl World {
         let Some(biome) = self.biome_at(x, surface, z) else {
             return;
         };
-        let Some((probability, spawners)) = self.biome_spawns.by_biome.get(&biome) else {
+        let Some(list) = self.biome_spawns.by_biome.get(&biome) else {
             return;
         };
-        let total: u32 = spawners.iter().map(|s| s.weight).sum();
-        if total == 0 {
-            return;
-        }
-        let probability = *probability;
+        let probability = list.creature_probability;
         let mut groups = Vec::new();
         while self.rng.f64() < probability && groups.len() < 4 {
-            let mut pick = self.rng.below(total);
-            let spawner = spawners
-                .iter()
-                .find(|s| {
-                    if pick < s.weight {
-                        true
-                    } else {
-                        pick -= s.weight;
-                        false
-                    }
-                })
-                .expect("weights add up");
-            let size = spawner.min + self.rng.below(spawner.max - spawner.min + 1);
-            groups.push((spawner.kind, size));
+            let list = &self.biome_spawns.by_biome[&biome];
+            match pick(&list.creatures, &mut self.rng) {
+                Some(group) => groups.push(group),
+                None => break,
+            }
         }
         for (kind, size) in groups {
             let mut x = cx * 16 + self.rng.below(16) as i32;
@@ -439,7 +555,7 @@ impl World {
     }
 
     /// The biome at a block, like `minecraft:plains`.
-    fn biome_at(&self, x: i32, y: i32, z: i32) -> Option<String> {
+    pub(super) fn biome_at(&self, x: i32, y: i32, z: i32) -> Option<String> {
         let chunk = self.chunks.get(&(x.div_euclid(16), z.div_euclid(16)))?;
         let section = chunk.sections().get(((y - MIN_Y) / 16) as usize)?;
         let index =
@@ -472,8 +588,16 @@ impl World {
                 self.mobs.insert(id, mob);
                 continue;
             }
+            if self.despawns(&mob) {
+                self.send_to_viewers(&mob, items::remove_entity(id));
+                continue;
+            }
             self.think(&mut mob);
+            if mob.kind.is_monster() && self.hunt(id, &mut mob) {
+                continue; // exploded
+            }
             self.step(&mut mob);
+            self.burn_in_daylight(id, &mut mob);
             self.animal_chores(id, &mut mob);
             self.mobs.insert(id, mob);
         }
@@ -540,7 +664,9 @@ impl World {
                 mob.vel[2] = dz / distance * speed;
             }
             mob.yaw = yaw_towards(mob.pos, [target[0], mob.pos[1], target[1]]);
-            if mob.blocked && (mob.on_ground || in_water) {
+            if mob.blocked && mob.kind == MobKind::Spider {
+                mob.vel[1] = 0.2; // climbing
+            } else if mob.blocked && (mob.on_ground || in_water) {
                 mob.vel[1] = JUMP;
             }
         } else if mob.on_ground {
@@ -714,7 +840,7 @@ impl World {
         self.play_sound_at(name, mob.pos, 1.0, pitch, None);
     }
 
-    fn send_to_viewers(&mut self, mob: &Mob, packet: Writer) {
+    pub(super) fn send_to_viewers(&mut self, mob: &Mob, packet: Writer) {
         let frame = frame(packet);
         for id in &mob.viewers {
             if let Some(p) = self.players.get_mut(id) {
@@ -847,8 +973,13 @@ impl World {
         }
         mob.hurt_ticks = HURT_TICKS;
         mob.health -= dealt;
-        mob.panic = PANIC_TICKS;
-        mob.target = None;
+        mob.killed_by_player = true;
+        if mob.kind.is_monster() {
+            mob.hunting = Some(attacker);
+        } else {
+            mob.panic = PANIC_TICKS;
+            mob.target = None;
+        }
         // Knocked away from the attacker.
         let (kx, kz) = (-yaw.sin(), yaw.cos());
         mob.vel[0] = mob.vel[0] / 2.0 + kx * KNOCKBACK;
@@ -1030,7 +1161,7 @@ impl World {
             format!("minecraft:{name}")
         };
         let Some(kind) = MobKind::from_name(&full) else {
-            return format!("Cannot summon {full} yet: cow, pig, sheep and chicken work");
+            return format!("Cannot summon {full} yet: {}", SUMMONABLE.join(", "));
         };
         let Some(p) = self.players.get(&id) else {
             return String::new();
@@ -1038,7 +1169,7 @@ impl World {
         let pos = p.pos;
         let mob = Mob::new(kind, pos, &mut self.rng);
         self.mobs.insert(next_entity_id(), mob);
-        format!("Summoned new {}", kind.sound())
+        format!("Summoned new {}", kind.display())
     }
 }
 

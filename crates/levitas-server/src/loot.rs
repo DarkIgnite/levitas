@@ -34,6 +34,7 @@ pub struct EntityProps {
     /// A sheep's wool colour (`white`, `black`, ...) and whether it was sheared.
     pub sheep_color: Option<&'static str>,
     pub sheared: bool,
+    pub killed_by_player: bool,
 }
 
 impl LootTables {
@@ -189,6 +190,7 @@ fn conditions(holder: &Value, ctx: &mut LootContext) -> bool {
 fn condition(c: &Value, ctx: &mut LootContext) -> bool {
     match c["condition"].as_str().unwrap_or_default() {
         "minecraft:survives_explosion" => true,
+        "minecraft:killed_by_player" => ctx.entity.killed_by_player,
         "minecraft:match_tool" => match_tool(&c["predicate"], ctx.tool),
         "minecraft:random_chance" => ctx.rng.f64() < number(&c["chance"], ctx.rng),
         "minecraft:random_chance_with_enchanted_bonus" => {

@@ -47,7 +47,7 @@ impl World {
             },
             Some("summon") => match args.next() {
                 Some(mob) => self.summon(id, mob),
-                None => "Usage: /summon <cow|pig|sheep|chicken>".to_owned(),
+                None => format!("Usage: /summon <{}>", mobs::SUMMONABLE.join("|")),
             },
             Some("help") => HELP.to_owned(),
             _ => format!("Unknown command: /{command}. {HELP}"),
@@ -258,7 +258,7 @@ pub(super) fn command_tree() -> Writer {
 
     t.literal(root, "kill", true);
     let summon = t.literal(root, "summon", false);
-    for mob in ["cow", "pig", "sheep", "chicken"] {
+    for mob in mobs::SUMMONABLE {
         t.literal(summon, mob, true);
     }
     t.literal(root, "help", true);

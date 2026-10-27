@@ -175,6 +175,9 @@ pub struct ItemInfo {
     pub attack_damage: f32,
     /// Attacks per second at full strength when holding this item (4 for a fist).
     pub attack_speed: f32,
+    /// Armor points and armor toughness given while worn.
+    pub armor: f32,
+    pub toughness: f32,
 }
 
 impl ItemInfo {

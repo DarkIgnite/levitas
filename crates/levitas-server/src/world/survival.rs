@@ -49,6 +49,10 @@ pub enum Damage {
     #[allow(dead_code)]
     FallingBlock,
     FallingStalactite,
+    /// Hit by a mob, named as in death messages ("Zombie").
+    Mob(&'static str),
+    /// Caught in an explosion caused by what is named.
+    Explosion(&'static str),
 }
 
 impl Damage {
@@ -61,6 +65,8 @@ impl Damage {
             Damage::FallingAnvil => "minecraft:falling_anvil",
             Damage::FallingBlock => "minecraft:falling_block",
             Damage::FallingStalactite => "minecraft:falling_stalactite",
+            Damage::Mob(_) => "minecraft:mob_attack",
+            Damage::Explosion(_) => "minecraft:explosion",
         }
     }
 
@@ -73,12 +79,43 @@ impl Damage {
             Damage::FallingAnvil => format!("{name} was squashed by a falling anvil"),
             Damage::FallingBlock => format!("{name} was squashed by a falling block"),
             Damage::FallingStalactite => format!("{name} was skewered by a falling stalactite"),
+            Damage::Mob(mob) => format!("{name} was slain by {mob}"),
+            Damage::Explosion(by) => format!("{name} was blown up by {by}"),
         }
+    }
+
+    /// Whether worn armor softens this damage.
+    fn reduced_by_armor(self) -> bool {
+        matches!(self, Damage::Mob(_) | Damage::Explosion(_))
     }
 
     /// Whether this damage also hurts creative players.
     fn bypasses_creative(self) -> bool {
         matches!(self, Damage::Void | Damage::Kill)
+    }
+}
+
+/// Damage left after armor: each effective armor point takes off 4%, and hard hits
+/// lower the effective points unless the armor is tough.
+pub fn after_armor(amount: f32, armor: f32, toughness: f32) -> f32 {
+    let effective = (armor / 5.0)
+        .max(armor - amount / (2.0 + toughness / 4.0))
+        .min(20.0);
+    amount * (1.0 - effective / 25.0)
+}
+
+#[cfg(test)]
+mod armor_tests {
+    use super::after_armor;
+
+    #[test]
+    fn armor_softens_hits() {
+        assert_eq!(after_armor(5.0, 0.0, 0.0), 5.0);
+        // Full diamond (20 armor, 8 toughness) against a zombie's 3.
+        let hit = after_armor(3.0, 20.0, 8.0);
+        assert!((hit - 0.69).abs() < 0.01, "{hit}");
+        // Big hits get through more, unless the armor is tough.
+        assert!(after_armor(30.0, 20.0, 0.0) > after_armor(30.0, 20.0, 12.0));
     }
 }
 
@@ -91,12 +128,23 @@ pub fn health_packet(p: &Player) -> Writer {
 
 impl World {
     pub(super) fn damage(&mut self, id: i32, amount: f32, kind: Damage) {
-        let Some(p) = self.players.get_mut(&id) else {
+        self.damage_from(id, amount, kind, None);
+    }
+
+    /// Hurts a player; `source` is the entity that caused it, if any.
+    pub(super) fn damage_from(&mut self, id: i32, amount: f32, kind: Damage, source: Option<i32>) {
+        let Some(p) = self.players.get(&id) else {
             return;
         };
         if !p.alive || (!p.survival() && !kind.bypasses_creative()) {
             return;
         }
+        let amount = if kind.reduced_by_armor() {
+            self.through_armor(id, amount)
+        } else {
+            amount
+        };
+        let p = self.players.get_mut(&id).expect("player exists");
         p.health = (p.health - amount).max(0.0);
         p.exhaustion += 0.1;
         let dead = p.health <= 0.0;
@@ -106,12 +154,13 @@ impl World {
         let damage_type = SyncedRegistry::get("minecraft:damage_type")
             .and_then(|r| r.id_of(kind.type_name()))
             .unwrap_or(0);
+        let cause = source.map_or(0, |s| s + 1);
         self.broadcast(
             Writer::packet(clientbound::DAMAGE_EVENT)
                 .varint(id)
                 .varint(damage_type)
-                .varint(0) // no cause entity
-                .varint(0) // no direct entity
+                .varint(cause)
+                .varint(cause)
                 .bool(false), // no source position
             None,
         );
@@ -119,6 +168,32 @@ impl World {
         if dead {
             self.die(id, kind);
         }
+    }
+
+    /// What is left of `amount` after the player's armor, which wears down a little.
+    /// Follows the wiki's formula: each armor point takes 4% off, less against hard
+    /// hits unless the armor is tough.
+    fn through_armor(&mut self, id: i32, amount: f32) -> f32 {
+        const ARMOR_SLOTS: [usize; 4] = [5, 6, 7, 8];
+        let p = &self.players[&id];
+        let (armor, toughness) = ARMOR_SLOTS
+            .iter()
+            .filter_map(|&slot| ItemInfo::get(p.inventory.slots[slot].item))
+            .fold((0.0, 0.0), |(a, t), i| (a + i.armor, t + i.toughness));
+        if armor <= 0.0 {
+            return amount;
+        }
+        let wear = ((amount / 4.0).floor() as i32).max(1);
+        for slot in ARMOR_SLOTS {
+            let worn = ItemInfo::get(self.players[&id].inventory.slots[slot].item)
+                .is_some_and(|i| i.armor > 0.0);
+            if worn {
+                // Break events 49 to 52 are the head, chest, legs and feet slots.
+                let event = ENTITY_EVENT_HEAD_BREAK + (slot - 5) as i8;
+                self.damage_item(id, slot, wear, event);
+            }
+        }
+        after_armor(amount, armor, toughness)
     }
 
     fn die(&mut self, id: i32, kind: Damage) {
