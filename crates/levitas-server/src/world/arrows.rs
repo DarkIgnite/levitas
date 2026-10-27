@@ -203,7 +203,7 @@ impl World {
             }
         }
         for (&id, m) in &self.mobs {
-            let (width, height) = m.kind.size();
+            let (width, height) = m.size();
             if m.alive() && !(skip_shooter && id == arrow.shooter) && inside(m.pos, width, height) {
                 return Some(Hit::Mob(id));
             }

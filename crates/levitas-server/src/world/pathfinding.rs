@@ -150,7 +150,7 @@ impl World {
     /// Steers a mob along a path to `goal`, working the path out again now and then.
     /// Without a path it heads straight for the goal.
     pub(super) fn follow_path(&mut self, mob: &mut Mob, goal: BlockPos) {
-        let height = mob.kind.size().1.ceil() as i32;
+        let height = mob.size().1.ceil() as i32;
         let feet = BlockPos::new(
             mob.pos[0].floor() as i32,
             (mob.pos[1] + 0.01).floor() as i32,

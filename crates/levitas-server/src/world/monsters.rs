@@ -88,7 +88,7 @@ impl World {
         let range = mob.kind.follow_range();
         let head = BlockPos::new(
             mob.pos[0].floor() as i32,
-            (mob.pos[1] + mob.kind.size().1 * 0.85).floor() as i32,
+            (mob.pos[1] + mob.size().1 * 0.85).floor() as i32,
             mob.pos[2].floor() as i32,
         );
         let still_valid = mob
@@ -160,7 +160,7 @@ impl World {
             return false;
         }
 
-        let (width, _) = mob.kind.size();
+        let (width, _) = mob.size();
         let reach = ((width * 2.0).powi(2) + 0.6).sqrt();
         if distance <= reach && dy.abs() < 1.5 && mob.attack_cooldown == 0 {
             mob.attack_cooldown = ATTACK_TICKS;
@@ -183,11 +183,7 @@ impl World {
             mob.target = None; // stand and shoot
             mob.yaw = mob.head_yaw;
         }
-        let eye = [
-            mob.pos[0],
-            mob.pos[1] + mob.kind.size().1 * 0.85,
-            mob.pos[2],
-        ];
+        let eye = [mob.pos[0], mob.pos[1] + mob.size().1 * 0.85, mob.pos[2]];
         let chest = [target[0], target[1] + 0.6, target[2]];
         if distance > SKELETON_RANGE
             || mob.attack_cooldown > 0
@@ -256,7 +252,7 @@ impl World {
         } else if mob.kind.burns_in_daylight() && !self.weather.is_raining() {
             let head = BlockPos::new(
                 feet.x,
-                (mob.pos[1] + mob.kind.size().1 * 0.85).floor() as i32,
+                (mob.pos[1] + mob.size().1 * 0.85).floor() as i32,
                 feet.z,
             );
             let under_sky = self.light_at(head).is_some_and(|(sky, _)| sky == 15);

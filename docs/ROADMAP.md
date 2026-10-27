@@ -146,7 +146,10 @@ Known gaps are listed under each phase instead of being hidden.
       Missing: baby/husk/drowned/stray variants, and the rest.
 - [ ] Mob drops, experience, equipment, babies, riding. Drops come from the vanilla
       entity loot tables (sheep drop their colour's wool); no experience yet.
-- [ ] Breeding, taming, leashes, name tags
+- [ ] Breeding, taming, leashes, name tags. Breeding works (`world/breeding.rs`): food
+      puts adults in love, partners meet and make a baby that grows up in 20 minutes
+      (faster when fed), parents rest 5 minutes, breeding drops experience, and animals
+      follow players holding their food. Taming, leashes and name tags are missing.
 
 ## Phase 6: Farming, nature and time
 

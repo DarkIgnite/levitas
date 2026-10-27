@@ -1901,3 +1901,33 @@ async fn hoes_till_and_bone_meal_grows_crops() {
         .unwrap();
     assert!((2..=5).contains(&grown), "age {grown}");
 }
+
+#[tokio::test]
+async fn fed_animals_breed_babies() {
+    let mut alice = join(server().await, "Alice", 1).await;
+    read_until(&mut alice, play::clientbound::PLAYER_POSITION).await;
+    give(&mut alice, "wheat", 2).await;
+    command(&mut alice, "summon cow").await;
+    let first = spawned(&mut alice, entity_type::COW).await;
+    command(&mut alice, "summon cow").await;
+    let second = spawned(&mut alice, entity_type::COW).await;
+    send(&mut alice, interact(first, 0)).await;
+    send(&mut alice, interact(second, 0)).await;
+    // Side by side and in love, they breed: the experience drops at once, then the
+    // calf appears.
+    spawned(&mut alice, entity_type::EXPERIENCE_ORB).await;
+    let calf = loop {
+        let id = spawned(&mut alice, entity_type::COW).await;
+        if id != first && id != second {
+            break id;
+        }
+    };
+    loop {
+        let body = read_until(&mut alice, play::clientbound::SET_ENTITY_DATA).await;
+        let mut r = Reader::new(&body);
+        if r.varint().unwrap() == calf && (r.u8().unwrap(), r.varint().unwrap()) == (16, 8) {
+            assert!(r.bool().unwrap(), "the calf is a baby");
+            break;
+        }
+    }
+}

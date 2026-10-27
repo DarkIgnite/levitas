@@ -3,6 +3,7 @@
 //! packet frames, so world state needs no locks.
 
 mod arrows;
+mod breeding;
 mod building;
 mod commands;
 mod containers;

@@ -34,7 +34,7 @@ counts half. The roadmap lists exactly what is done and what is missing in each 
 | 2. Blocks behave correctly | 65% | `██████▌░░░` |
 | 3. Fluids, gravity and light | 67% | `██████▋░░░` |
 | 4. Combat and basic entities | 36% | `███▌░░░░░░` |
-| 5. Mobs | 42% | `████▏░░░░░` |
+| 5. Mobs | 50% | `█████░░░░░` |
 | 6. Farming, nature and time | 62% | `██████▏░░░` |
 | 7. Redstone | 0% | `░░░░░░░░░░` |
 | 8. Progression (enchanting, brewing, ...) | 17% | `█▋░░░░░░░░` |
@@ -61,7 +61,8 @@ counts half. The roadmap lists exactly what is done and what is missing in each 
   and lava, buckets, obsidian and cobblestone generators.
 - **Farming and nature:** crops, saplings that grow into trees, leaf decay, grass
   spreading, bone meal, hoes, sugar cane and cacti.
-- **Mobs:** cows, pigs, sheep and chickens (shearing, milking, eggs); zombies, spiders,
+- **Mobs:** cows, pigs, sheep and chickens (breeding and babies, shearing, milking,
+  eggs, following food); zombies, spiders,
   creepers and skeletons that spawn in the dark, find their way to you, burn in
   daylight, explode or shoot arrows; armor; bows.
 - **Saving:** everything is stored in the vanilla Anvil format (`region/`, `entities/`,

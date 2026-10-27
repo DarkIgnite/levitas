@@ -229,6 +229,10 @@ pub struct Mob {
     pub fuse: Option<u32>,
     /// Whether a player dealt the last hit (some loot needs it).
     killed_by_player: bool,
+    /// Negative while a baby (it grows up at 0), positive while resting after breeding.
+    pub age: i32,
+    /// Ticks of love mode left.
+    pub love: u32,
     /// The spots still to walk through towards a goal, and ticks until the path is
     /// worked out again.
     pub path: Vec<BlockPos>,
@@ -269,6 +273,8 @@ impl Mob {
             fire_ticks: 0,
             fuse: None,
             killed_by_player: false,
+            age: 0,
+            love: 0,
             path: Vec::new(),
             path_ticks: 0,
             blocked: false,
@@ -283,6 +289,16 @@ impl Mob {
             sent_pos: pos,
             sent_angles: (0, 0),
             viewers: HashSet::new(),
+        }
+    }
+
+    /// Hitbox width and height: babies are half size.
+    pub fn size(&self) -> (f64, f64) {
+        let (width, height) = self.kind.size();
+        if self.age < 0 {
+            (width / 2.0, height / 2.0)
+        } else {
+            (width, height)
         }
     }
 
@@ -321,6 +337,9 @@ impl Mob {
             .i16(0)];
         if self.kind == MobKind::Sheep {
             packets.push(self.wool_data(id));
+        }
+        if self.age < 0 {
+            packets.push(super::breeding::baby_data(id, true));
         }
         if self.kind == MobKind::Skeleton {
             // Skeletons hold a bow.
@@ -374,7 +393,8 @@ impl Mob {
             .with("Health", self.health)
             .with("OnGround", self.on_ground)
             .with("FallDistance", self.fall_distance)
-            .with("Age", 0);
+            .with("Age", self.age)
+            .with("InLove", self.love as i32);
         match self.kind {
             MobKind::Sheep => {
                 nbt.insert("Color", self.color as i8);
@@ -411,6 +431,8 @@ impl Mob {
             mob.color = nbt.int("Color").unwrap_or(0).clamp(0, 15) as u8;
             mob.sheared = nbt.int("Sheared").unwrap_or(0) != 0;
         }
+        mob.age = nbt.int("Age").unwrap_or(0) as i32;
+        mob.love = nbt.int("InLove").unwrap_or(0).max(0) as u32;
         if let Some(t) = nbt.int("EggLayTime") {
             mob.egg_ticks = t.max(0) as u32;
         }
@@ -620,6 +642,9 @@ impl World {
                 continue;
             }
             self.think(&mut mob);
+            if !mob.kind.is_monster() {
+                self.tick_breeding(id, &mut mob);
+            }
             if mob.kind.is_monster() && self.hunt(id, &mut mob) {
                 continue; // exploded
             }
@@ -645,6 +670,10 @@ impl World {
         if arrived {
             mob.target = None;
         }
+        // Food in a player's hand beats wandering; love sends them to their partner.
+        if !panicking && !mob.kind.is_monster() && mob.love == 0 && self.follow_temptation(mob) {
+            return;
+        }
         // Wandering starts now and then; panic keeps picking new spots nearby.
         let wants_target = if panicking {
             mob.target.is_none()
@@ -659,11 +688,7 @@ impl World {
         }
 
         // Look at a nearby player now and then.
-        let eyes = [
-            mob.pos[0],
-            mob.pos[1] + mob.kind.size().1 * 0.85,
-            mob.pos[2],
-        ];
+        let eyes = [mob.pos[0], mob.pos[1] + mob.size().1 * 0.85, mob.pos[2]];
         let watched = self
             .players
             .values()
@@ -701,7 +726,7 @@ impl World {
             mob.vel[2] *= 0.5;
         }
 
-        let (width, height) = mob.kind.size();
+        let (width, height) = mob.size();
         let half = width / 2.0;
         let mut pos = mob.pos;
         // Vertical first, then each horizontal axis, each as far as blocks allow.
@@ -1114,6 +1139,9 @@ impl World {
         self.send_to_viewers(mob, entity_event(id, ENTITY_EVENT_MOB_DEATH));
         let sound = format!("minecraft:entity.{}.death", mob.kind.sound());
         self.mob_sound(mob, &sound);
+        if mob.age < 0 {
+            return; // babies drop nothing
+        }
         let drops = self.loot.entity_drops(
             mob.kind.name(),
             &mut LootContext {
@@ -1144,6 +1172,10 @@ impl World {
         }
         let slot = p.hand_slot(hand);
         let held = ItemInfo::get(p.inventory.slots[slot].item).map_or("", |i| i.name);
+        if super::breeding::is_food(mob.kind, held) {
+            self.feed_animal(id, target, slot);
+            return;
+        }
         match (mob.kind, held) {
             (MobKind::Sheep, "minecraft:shears") if !mob.sheared => {
                 let mut mob = self.mobs.remove(&target).expect("checked");
@@ -1280,7 +1312,7 @@ fn yaw_towards(from: [f64; 3], to: [f64; 3]) -> f32 {
 
 fn within_reach(p: &Player, mob: &Mob) -> bool {
     let (eye, _, _) = p.eye_ray();
-    let height = mob.kind.size().1;
+    let height = mob.size().1;
     let centre = [mob.pos[0], mob.pos[1] + height / 2.0, mob.pos[2]];
     let d: f64 = (0..3).map(|i| (eye[i] - centre[i]).powi(2)).sum();
     d.sqrt() <= REACH
