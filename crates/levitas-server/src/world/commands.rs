@@ -8,7 +8,7 @@ use levitas_registry::command_argument;
 use super::*;
 
 const HELP: &str = "Commands: /gamemode <survival|creative>, /give <item> [count], /kill, \
-                    /time <set|add|query> ..., /weather <clear|rain|thunder> [seconds], /summon <mob>";
+                    /time <set|add|query> ..., /weather <clear|rain|thunder> [seconds], /summon <mob>, /xp <add|query> ...";
 
 impl World {
     pub(super) fn command(&mut self, id: i32, command: &str) {
@@ -49,10 +49,36 @@ impl World {
                 Some(mob) => self.summon(id, mob),
                 None => format!("Usage: /summon <{}>", mobs::SUMMONABLE.join("|")),
             },
+            Some("xp" | "experience") => self.xp_command(id, args.next(), args.next(), args.next()),
             Some("help") => HELP.to_owned(),
             _ => format!("Unknown command: /{command}. {HELP}"),
         };
         self.send(id, system_chat(&reply));
+    }
+
+    fn xp_command(
+        &mut self,
+        id: i32,
+        action: Option<&str>,
+        amount: Option<&str>,
+        unit: Option<&str>,
+    ) -> String {
+        const USAGE: &str = "Usage: /xp add <amount> [points|levels] or /xp query";
+        match (action, amount.and_then(|a| a.parse::<i32>().ok())) {
+            (Some("add"), Some(n)) if unit == Some("levels") => {
+                self.give_levels(id, n);
+                format!("Gave {n} experience levels")
+            }
+            (Some("add"), Some(n)) if n >= 0 => {
+                self.give_xp(id, n);
+                format!("Gave {n} experience points")
+            }
+            (Some("query"), _) => {
+                let p = &self.players[&id];
+                format!("You are level {} with {} points", p.xp_level, p.xp_points)
+            }
+            _ => USAGE.to_owned(),
+        }
     }
 
     fn time_command(&mut self, action: Option<&str>, value: Option<&str>) -> String {
@@ -274,6 +300,16 @@ pub(super) fn command_tree() -> Writer {
     let query = t.literal(time, "query", false);
     for name in ["daytime", "gametime", "day"] {
         t.literal(query, name, true);
+    }
+
+    for name in ["xp", "experience"] {
+        let xp = t.literal(root, name, false);
+        let add = t.literal(xp, "add", false);
+        let amount = t.argument(add, "amount", integer, at_least(0));
+        for unit in ["points", "levels"] {
+            t.literal(amount, unit, true);
+        }
+        t.literal(xp, "query", true);
     }
 
     let weather = t.literal(root, "weather", false);

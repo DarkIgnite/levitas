@@ -9,6 +9,7 @@
 
 use levitas_registry::collision_boxes;
 
+use super::arrows::Shot;
 use super::mobs::{Mob, MobKind};
 use super::*;
 use crate::blocks::fluid::{fluid_at, Fluid};
@@ -28,6 +29,13 @@ const FUSE_TICKS: u32 = 30;
 const FUSE_CANCEL_DISTANCE: f64 = 7.0;
 const CREEPER_POWER: f32 = 3.0;
 const KNOCKBACK: f64 = 0.4;
+/// Skeletons: how close they come, how far they shoot, ticks between shots, and how
+/// fast and how wildly (on Normal difficulty) their arrows fly.
+const SKELETON_KEEP_DISTANCE: f64 = 12.0;
+const SKELETON_RANGE: f64 = 15.0;
+const SKELETON_SHOT_TICKS: u32 = 40;
+const SKELETON_ARROW_SPEED: f64 = 1.6;
+const SKELETON_INACCURACY: f64 = 6.0;
 
 const DATA_FLAGS: u8 = 0;
 const ON_FIRE: u8 = 0x01;
@@ -113,8 +121,18 @@ impl World {
         let target = self.players[&pid].pos;
         let distance = horizontal_distance(target, mob.pos);
         let dy = target[1] - mob.pos[1];
-        mob.target = Some(([target[0], target[2]], 20));
         mob.head_yaw = yaw_towards(mob.pos, target);
+        if mob.kind == MobKind::Spider {
+            // Spiders climb over whatever is in the way.
+            mob.target = Some(([target[0], target[2]], 20));
+        } else {
+            let goal = BlockPos::new(
+                target[0].floor() as i32,
+                (target[1] + 0.01).floor() as i32,
+                target[2].floor() as i32,
+            );
+            self.follow_path(mob, goal);
+        }
 
         if mob.kind == MobKind::Creeper {
             if mob.fuse.is_none() && distance < 3.0 && dy.abs() < 2.0 {
@@ -137,6 +155,11 @@ impl World {
             return false;
         }
 
+        if mob.kind == MobKind::Skeleton {
+            self.shoot_at(id, mob, target, distance);
+            return false;
+        }
+
         let (width, _) = mob.kind.size();
         let reach = ((width * 2.0).powi(2) + 0.6).sqrt();
         if distance <= reach && dy.abs() < 1.5 && mob.attack_cooldown == 0 {
@@ -152,6 +175,52 @@ impl World {
             self.push_player(pid, [-yaw.sin() * KNOCKBACK, 0.36, yaw.cos() * KNOCKBACK]);
         }
         false
+    }
+
+    /// A skeleton keeps its distance and shoots when it can see its target.
+    fn shoot_at(&mut self, id: i32, mob: &mut Mob, target: [f64; 3], distance: f64) {
+        if distance <= SKELETON_KEEP_DISTANCE {
+            mob.target = None; // stand and shoot
+            mob.yaw = mob.head_yaw;
+        }
+        let eye = [
+            mob.pos[0],
+            mob.pos[1] + mob.kind.size().1 * 0.85,
+            mob.pos[2],
+        ];
+        let chest = [target[0], target[1] + 0.6, target[2]];
+        if distance > SKELETON_RANGE
+            || mob.attack_cooldown > 0
+            || !self.line_of_sight(eye, [target[0], target[1] + 1.62, target[2]])
+        {
+            return;
+        }
+        // Aimed a little high, more the farther the target, to make up for the drop.
+        let (dx, dy, dz) = (chest[0] - eye[0], chest[1] - eye[1], chest[2] - eye[2]);
+        let lift = dx.hypot(dz) * 0.2;
+        self.shoot_arrow(
+            id,
+            false,
+            Shot {
+                from: eye,
+                dir: [dx, dy + lift, dz],
+                speed: SKELETON_ARROW_SPEED,
+                inaccuracy: SKELETON_INACCURACY,
+                critical: false,
+            },
+        );
+        mob.attack_cooldown = SKELETON_SHOT_TICKS;
+    }
+
+    /// Whether nothing solid is between two points.
+    pub(super) fn line_of_sight(&self, from: [f64; 3], to: [f64; 3]) -> bool {
+        let d = [to[0] - from[0], to[1] - from[1], to[2] - from[2]];
+        let length = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt();
+        let steps = (length / 0.25).ceil() as usize;
+        (1..steps).all(|i| {
+            let t = i as f64 / steps as f64;
+            !self.point_in_block([from[0] + d[0] * t, from[1] + d[1] * t, from[2] + d[2] * t])
+        })
     }
 
     /// Gives a player a push (knockback); the client moves itself.

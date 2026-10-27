@@ -2,15 +2,18 @@
 //! loop. Connection tasks talk to it only through [`Event`]s and receive ready-to-write
 //! packet frames, so world state needs no locks.
 
+mod arrows;
 mod building;
 mod commands;
 mod containers;
+mod experience;
 mod explosion;
 mod falling;
 mod fluids;
 mod items;
 mod mobs;
 mod monsters;
+mod pathfinding;
 mod storage;
 mod survival;
 mod time;
@@ -262,6 +265,12 @@ struct Player {
     respawn: Option<BlockPos>,
     /// Tick the attack charge last started over (after an attack or switching items).
     attack_reset: u64,
+    /// Hand and start tick of a bow being drawn.
+    drawing: Option<(i32, u64)>,
+    /// Experience level, points towards the next level, and points collected in all.
+    xp_level: i32,
+    xp_points: i32,
+    xp_total: i32,
 }
 
 impl Player {
@@ -303,6 +312,10 @@ impl Player {
             sleep_ticks: 0,
             respawn: None,
             attack_reset: 0,
+            drawing: None,
+            xp_level: 0,
+            xp_points: 0,
+            xp_total: 0,
         }
     }
 
@@ -350,6 +363,8 @@ struct World {
     /// Mobs are saved apart from blocks, in `entities/` region files like vanilla.
     entity_storage: RegionStorage,
     mobs: HashMap<i32, mobs::Mob>,
+    arrows: HashMap<i32, arrows::Arrow>,
+    orbs: HashMap<i32, experience::XpOrb>,
     /// Loaded chunks that held mobs at the last save, so emptied ones are saved too.
     mob_chunks: HashSet<(i32, i32)>,
     biome_spawns: mobs::BiomeSpawns,
@@ -418,6 +433,8 @@ impl World {
             storage: RegionStorage::new(dir.join("region")),
             entity_storage: RegionStorage::new(dir.join("entities")),
             mobs: HashMap::new(),
+            arrows: HashMap::new(),
+            orbs: HashMap::new(),
             mob_chunks: HashSet::new(),
             biome_spawns: mobs::BiomeSpawns::load(),
             dir,
@@ -653,6 +670,8 @@ impl World {
         for (&falling_id, falling) in &self.falling_blocks {
             packets.push(falling::spawn_packet(falling_id, falling));
         }
+        packets.extend(self.arrow_packets());
+        packets.extend(self.orb_packets());
         for packet in packets {
             self.send(id, packet);
         }
@@ -665,9 +684,11 @@ impl World {
         };
         let health = survival::health_packet(p);
         let content = p.inventory.content_packet();
+        let xp = experience::xp_packet(p);
         p.health_dirty = false;
         self.send(id, health);
         self.send(id, content);
+        self.send(id, xp);
     }
 
     fn move_player(
@@ -808,6 +829,7 @@ impl World {
                 if let Some(p) = self.players.get_mut(&id) {
                     p.eating = None;
                 }
+                self.release_bow(id);
             }
             _ => {}
         }
@@ -841,6 +863,7 @@ impl World {
                 for (item, count) in drops {
                     self.drop_at_block(pos, Stack::new(item, count));
                 }
+                self.mined_xp(pos, state);
             }
             self.wear_tool(id, state);
         } else if let Some(other) = crate::blocks::other_part(state, pos) {
@@ -954,6 +977,8 @@ impl World {
         self.tick_time();
         self.tick_falling_blocks();
         self.tick_mobs();
+        self.tick_arrows();
+        self.tick_orbs();
         self.tick_monster_spawning();
         self.tick_survival();
         self.tick_items();

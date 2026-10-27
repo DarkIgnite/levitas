@@ -68,6 +68,7 @@ pub enum MobKind {
     Zombie,
     Spider,
     Creeper,
+    Skeleton,
 }
 
 impl MobKind {
@@ -80,6 +81,7 @@ impl MobKind {
             "minecraft:zombie" => Some(MobKind::Zombie),
             "minecraft:spider" => Some(MobKind::Spider),
             "minecraft:creeper" => Some(MobKind::Creeper),
+            "minecraft:skeleton" => Some(MobKind::Skeleton),
             _ => None,
         }
     }
@@ -93,6 +95,7 @@ impl MobKind {
             MobKind::Zombie => "minecraft:zombie",
             MobKind::Spider => "minecraft:spider",
             MobKind::Creeper => "minecraft:creeper",
+            MobKind::Skeleton => "minecraft:skeleton",
         }
     }
 
@@ -106,11 +109,15 @@ impl MobKind {
             MobKind::Zombie => "Zombie",
             MobKind::Spider => "Spider",
             MobKind::Creeper => "Creeper",
+            MobKind::Skeleton => "Skeleton",
         }
     }
 
     pub fn is_monster(self) -> bool {
-        matches!(self, MobKind::Zombie | MobKind::Spider | MobKind::Creeper)
+        matches!(
+            self,
+            MobKind::Zombie | MobKind::Spider | MobKind::Creeper | MobKind::Skeleton
+        )
     }
 
     /// Melee damage on Normal difficulty.
@@ -131,7 +138,7 @@ impl MobKind {
     }
 
     pub fn burns_in_daylight(self) -> bool {
-        self == MobKind::Zombie
+        matches!(self, MobKind::Zombie | MobKind::Skeleton)
     }
 
     fn entity_type(self) -> i32 {
@@ -143,6 +150,7 @@ impl MobKind {
             MobKind::Zombie => entity_type::ZOMBIE,
             MobKind::Spider => entity_type::SPIDER,
             MobKind::Creeper => entity_type::CREEPER,
+            MobKind::Skeleton => entity_type::SKELETON,
         }
     }
 
@@ -151,7 +159,7 @@ impl MobKind {
             MobKind::Cow | MobKind::Pig => 10.0,
             MobKind::Sheep => 8.0,
             MobKind::Chicken => 4.0,
-            MobKind::Zombie | MobKind::Creeper => 20.0,
+            MobKind::Zombie | MobKind::Creeper | MobKind::Skeleton => 20.0,
             MobKind::Spider => 16.0,
         }
     }
@@ -166,6 +174,7 @@ impl MobKind {
             MobKind::Zombie => (0.6, 1.95),
             MobKind::Spider => (1.4, 0.9),
             MobKind::Creeper => (0.6, 1.7),
+            MobKind::Skeleton => (0.6, 1.99),
         }
     }
 
@@ -176,6 +185,7 @@ impl MobKind {
             MobKind::Zombie => 0.12,
             MobKind::Spider => 0.15,
             MobKind::Creeper => 0.11,
+            MobKind::Skeleton => 0.12,
             _ => 0.1,
         }
     }
@@ -190,6 +200,7 @@ impl MobKind {
             MobKind::Zombie => "zombie",
             MobKind::Spider => "spider",
             MobKind::Creeper => "creeper",
+            MobKind::Skeleton => "skeleton",
         }
     }
 }
@@ -199,7 +210,7 @@ pub struct Mob {
     uuid: u128,
     pub pos: [f64; 3],
     vel: [f64; 3],
-    yaw: f32,
+    pub yaw: f32,
     pub head_yaw: f32,
     on_ground: bool,
     pub health: f32,
@@ -218,6 +229,10 @@ pub struct Mob {
     pub fuse: Option<u32>,
     /// Whether a player dealt the last hit (some loot needs it).
     killed_by_player: bool,
+    /// The spots still to walk through towards a goal, and ticks until the path is
+    /// worked out again.
+    pub path: Vec<BlockPos>,
+    pub path_ticks: u32,
     blocked: bool,
     ambient: i32,
     /// Sheep: wool colour (0-15) and whether sheared.
@@ -254,6 +269,8 @@ impl Mob {
             fire_ticks: 0,
             fuse: None,
             killed_by_player: false,
+            path: Vec::new(),
+            path_ticks: 0,
             blocked: false,
             ambient: 0,
             color: if kind == MobKind::Sheep {
@@ -304,6 +321,13 @@ impl Mob {
             .i16(0)];
         if self.kind == MobKind::Sheep {
             packets.push(self.wool_data(id));
+        }
+        if self.kind == MobKind::Skeleton {
+            // Skeletons hold a bow.
+            if let Some(bow) = ItemInfo::id_of("minecraft:bow") {
+                let packet = Writer::packet(clientbound::SET_EQUIPMENT).varint(id).u8(0); // main hand, the last entry
+                packets.push(crate::inventory::write_stack(packet, Stack::new(bow, 1)));
+            }
         }
         packets
     }
@@ -430,8 +454,8 @@ struct SpawnList {
 }
 
 /// Mobs `/summon` knows.
-pub const SUMMONABLE: [&str; 7] = [
-    "cow", "pig", "sheep", "chicken", "zombie", "spider", "creeper",
+pub const SUMMONABLE: [&str; 8] = [
+    "cow", "pig", "sheep", "chicken", "zombie", "spider", "creeper", "skeleton",
 ];
 
 fn spawners(list: &Value) -> Vec<Spawner> {
@@ -727,7 +751,14 @@ impl World {
     /// `delta` along `axis` before a block stops it. Only blocks ahead count: blocks the
     /// mob already overlaps (a spider in a gap narrower than itself) never push it.
     /// Blocks in chunks that are not loaded count as solid.
-    fn clip_move(&self, pos: [f64; 3], half: f64, height: f64, axis: usize, delta: f64) -> f64 {
+    pub(super) fn clip_move(
+        &self,
+        pos: [f64; 3],
+        half: f64,
+        height: f64,
+        axis: usize,
+        delta: f64,
+    ) -> f64 {
         if delta == 0.0 {
             return 0.0;
         }
@@ -813,7 +844,7 @@ impl World {
         true
     }
 
-    fn loaded_state(&self, pos: BlockPos) -> Option<u16> {
+    pub(super) fn loaded_state(&self, pos: BlockPos) -> Option<u16> {
         if !(MIN_Y..=MAX_Y).contains(&pos.y) {
             return Some(block::AIR);
         }
@@ -983,57 +1014,87 @@ impl World {
         p.attack_reset = self.tick;
         p.exhaustion += 0.1;
 
-        let mut mob = self.mobs.remove(&target).expect("checked");
-        // A mob still recovering from a hit only takes what a harder hit adds.
+        let away = [-yaw.sin(), yaw.cos()];
+        if !self.hit_mob(
+            target,
+            damage,
+            Some(attacker),
+            away,
+            "minecraft:player_attack",
+        ) {
+            return;
+        }
+        if critical {
+            if let Some(mob) = self.mobs.remove(&target) {
+                self.send_to_viewers(
+                    &mob,
+                    Writer::packet(clientbound::ANIMATE).varint(target).u8(4),
+                );
+                self.mobs.insert(target, mob);
+            }
+        }
+        if is_weapon {
+            self.damage_item(attacker, slot, 1, ENTITY_EVENT_MAINHAND_BREAK);
+        }
+    }
+
+    /// Hurts a mob: it flinches, is knocked back along `away` (a horizontal unit
+    /// vector), and panics or, for a monster hit by a player, hunts them. A mob still
+    /// recovering from a hit only takes what a harder hit adds. Returns whether the hit
+    /// did anything.
+    pub(super) fn hit_mob(
+        &mut self,
+        target: i32,
+        damage: f32,
+        by_player: Option<i32>,
+        away: [f64; 2],
+        damage_type: &str,
+    ) -> bool {
+        let Some(mut mob) = self.mobs.remove(&target) else {
+            return false;
+        };
         let dealt = if mob.hurt_ticks > 0 {
             damage - mob.last_damage
         } else {
             damage
         };
-        if dealt <= 0.0 {
+        if dealt <= 0.0 || mob.dying.is_some() {
             self.mobs.insert(target, mob);
-            return;
+            return false;
         }
         if mob.hurt_ticks == 0 {
             mob.last_damage = damage;
         }
         mob.hurt_ticks = HURT_TICKS;
         mob.health -= dealt;
-        mob.killed_by_player = true;
-        if mob.kind.is_monster() {
-            mob.hunting = Some(attacker);
-        } else {
+        if let Some(attacker) = by_player {
+            mob.killed_by_player = true;
+            if mob.kind.is_monster() {
+                mob.hunting = Some(attacker);
+            }
+        }
+        if !mob.kind.is_monster() {
             mob.panic = PANIC_TICKS;
             mob.target = None;
         }
-        // Knocked away from the attacker.
-        let (kx, kz) = (-yaw.sin(), yaw.cos());
-        mob.vel[0] = mob.vel[0] / 2.0 + kx * KNOCKBACK;
-        mob.vel[2] = mob.vel[2] / 2.0 + kz * KNOCKBACK;
+        mob.vel[0] = mob.vel[0] / 2.0 + away[0] * KNOCKBACK;
+        mob.vel[2] = mob.vel[2] / 2.0 + away[1] * KNOCKBACK;
         if mob.on_ground {
             mob.vel[1] = (mob.vel[1] / 2.0 + KNOCKBACK).min(KNOCKBACK);
         }
-        let damage_type = SyncedRegistry::get("minecraft:damage_type")
-            .and_then(|r| r.id_of("minecraft:player_attack"))
+        let kind = SyncedRegistry::get("minecraft:damage_type")
+            .and_then(|r| r.id_of(damage_type))
             .unwrap_or(0);
+        let cause = by_player.map_or(0, |p| p + 1);
         self.send_to_viewers(
             &mob,
             Writer::packet(clientbound::DAMAGE_EVENT)
                 .varint(target)
-                .varint(damage_type)
-                .varint(attacker + 1)
-                .varint(attacker + 1)
+                .varint(kind)
+                .varint(cause)
+                .varint(cause)
                 .bool(false),
         );
-        if critical {
-            self.send_to_viewers(
-                &mob,
-                Writer::packet(clientbound::ANIMATE).varint(target).u8(4),
-            );
-        }
-        if is_weapon {
-            self.damage_item(attacker, slot, 1, ENTITY_EVENT_MAINHAND_BREAK);
-        }
         if mob.health <= 0.0 {
             self.kill_mob(target, &mut mob);
         } else {
@@ -1041,6 +1102,7 @@ impl World {
             self.mob_sound(&mob, &sound);
         }
         self.mobs.insert(target, mob);
+        true
     }
 
     fn kill_mob(&mut self, id: i32, mob: &mut Mob) {
@@ -1063,6 +1125,9 @@ impl World {
         );
         for (item, count) in drops {
             self.scatter_item(mob.pos, Stack::new(item, count));
+        }
+        if mob.killed_by_player {
+            self.mob_xp(mob.pos, mob.kind.is_monster());
         }
     }
 
@@ -1299,5 +1364,72 @@ mod tests {
             "a cow should hop a 1-block step, at x {}",
             cow.pos[0]
         );
+    }
+}
+
+#[cfg(test)]
+mod path_tests {
+    use super::*;
+
+    fn flat_world() -> World {
+        let dir = std::env::temp_dir().join(format!(
+            "levitas-path-{}-{}",
+            std::process::id(),
+            next_entity_id()
+        ));
+        let (mut world, _) = World::new(
+            dir,
+            NewWorld {
+                kind: WorldKind::Flat,
+                seed: Some(0),
+            },
+        );
+        for cx in -2..=2 {
+            for cz in -2..=2 {
+                world.chunk(cx, cz);
+            }
+        }
+        world
+    }
+
+    #[test]
+    fn zombies_walk_around_walls_too_high_to_jump() {
+        let mut world = flat_world();
+        // A wall three blocks high and seven wide between the zombie and its goal.
+        for z in -3..=3 {
+            for y in -60..-57 {
+                world.set_block(BlockPos::new(3, y, z), block::STONE);
+            }
+        }
+        let goal = BlockPos::new(6, -60, 0);
+        let path = world
+            .find_path(BlockPos::new(1, -60, 0), goal, 2)
+            .expect("a way around");
+        assert_eq!(path.last(), Some(&goal));
+        assert!(path.iter().all(|p| p.x != 3 || p.z.abs() > 3), "{path:?}");
+
+        let mut zombie = Mob::new(MobKind::Zombie, [1.5, -60.0, 0.5], &mut world.rng);
+        for _ in 0..400 {
+            world.follow_path(&mut zombie, goal);
+            world.step(&mut zombie);
+        }
+        assert!(zombie.pos[0] > 5.0, "stuck at {:?}", zombie.pos);
+    }
+
+    #[test]
+    fn paths_climb_steps_and_drop_down() {
+        let mut world = flat_world();
+        // A one-block step up, then a two-block drop into a pit.
+        for z in -3..=3 {
+            world.set_block(BlockPos::new(3, -60, z), block::STONE);
+            world.set_block(BlockPos::new(4, -61, z), block::AIR);
+            world.set_block(BlockPos::new(4, -62, z), block::AIR);
+        }
+        let goal = BlockPos::new(4, -62, 0);
+        let path = world
+            .find_path(BlockPos::new(1, -60, 0), goal, 2)
+            .expect("a way");
+        assert!(path.contains(&BlockPos::new(3, -59, 0)), "{path:?}");
+        assert_eq!(path.last(), Some(&goal));
     }
 }

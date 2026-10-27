@@ -107,7 +107,9 @@ Known gaps are listed under each phase instead of being hidden.
 - [ ] Armor and armor toughness, shields, damage types and immunities. Worn armor
       reduces mob and explosion damage by the wiki's formula and wears down; no
       shields, enchantments or other damage types yet.
-- [ ] Bows, crossbows, tridents, arrows, snowballs, eggs, ender pearls
+- [ ] Bows, crossbows, tridents, arrows, snowballs, eggs, ender pearls. Bows and arrows
+      work (`world/arrows.rs`): draw strength, gravity and drag, damage from speed,
+      critical shots, sticking in blocks, pickup. The rest is missing.
 - [ ] Status effects (needed by food, potions and mobs)
 - [ ] Entity framework: tracking, physics, collisions, saving entities to disk.
       Mobs (`world/mobs.rs`) are shown to players who have their chunk loaded, move
@@ -125,7 +127,10 @@ Known gaps are listed under each phase instead of being hidden.
       where block light is 0 and the night-dimmed sky light is low, 24+ blocks from
       players, up to 70 per player, and despawn beyond 128 blocks (sometimes beyond 32).
       Missing: animals respawning later, structure-specific spawns, spawners.
-- [ ] Pathfinding and AI goals
+- [ ] Pathfinding and AI goals. A* over walkable blocks (`world/pathfinding.rs`):
+      walking, one-block jumps, drops of up to three blocks, avoiding lava; monsters
+      (except climbing spiders) follow paths to their target. Animals still wander
+      straight, and there are no other AI goals (doors, avoiding water, ...).
 - [ ] Passive mobs: cow, pig, sheep (shearing, dye), chicken, rabbit, horse family,
       wolf, cat, fox, parrot, turtle, fish, squid, axolotl, frog, bee, goat, ...
       Done: cows (milking), pigs, sheep (natural wool colours, shearing, regrowing wool
@@ -137,7 +142,8 @@ Known gaps are listed under each phase instead of being hidden.
       Done: zombies (burn in sunlight), spiders (climb walls, neutral in daylight),
       creepers (hiss and explode). They chase the nearest survival player straight on
       (no pathfinding yet), hit with knockback, and keep players from sleeping nearby.
-      Missing: skeletons (need arrows), baby/husk/drowned variants, and the rest.
+      Skeletons keep their distance and shoot arrows when they can see their target.
+      Missing: baby/husk/drowned/stray variants, and the rest.
 - [ ] Mob drops, experience, equipment, babies, riding. Drops come from the vanilla
       entity loot tables (sheep drop their colour's wool); no experience yet.
 - [ ] Breeding, taming, leashes, name tags
@@ -167,7 +173,11 @@ Known gaps are listed under each phase instead of being hidden.
 
 ## Phase 8: Progression
 
-- [ ] Experience: orbs, levels, sources
+- [x] Experience: orbs, levels, sources. Orbs (`world/experience.rs`) drift to players
+      within 8 blocks; mobs killed by players (1-3 for animals, 5 for monsters) and ores
+      mined without silk touch give experience; levels follow the wiki's costs, are
+      saved, and dying drops 7 per level (at most 100). `/xp add|query`. Missing:
+      experience from smelting, breeding, fishing and trading.
 - [ ] Enchanting table and bookshelves, enchantment effects
 - [ ] Anvil (repair, rename, combine), grindstone
 - [ ] Brewing stand, potions, splash and lingering potions, tipped arrows

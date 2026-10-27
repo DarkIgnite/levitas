@@ -274,8 +274,12 @@ impl Player {
                 equipment.insert(name, stack.to_nbt());
             }
         }
+        let needed = super::experience::points_for_level(self.xp_level);
         let nbt = Compound::new()
             .with("DataVersion", DATA_VERSION)
+            .with("XpLevel", self.xp_level)
+            .with("XpP", self.xp_points as f32 / needed as f32)
+            .with("XpTotal", self.xp_total)
             .with(
                 "Pos",
                 self.pos.iter().map(|&v| Tag::Double(v)).collect::<Vec<_>>(),
@@ -329,6 +333,11 @@ impl Player {
             }
         }
         self.held = nbt.int("SelectedItemSlot").unwrap_or(0).clamp(0, 8) as usize;
+        self.xp_level = nbt.int("XpLevel").unwrap_or(0).clamp(0, 1_000_000) as i32;
+        let needed = super::experience::points_for_level(self.xp_level);
+        let progress = nbt.float("XpP").unwrap_or(0.0).clamp(0.0, 1.0);
+        self.xp_points = ((progress * f64::from(needed)) as i32).min(needed - 1);
+        self.xp_total = nbt.int("XpTotal").unwrap_or(0).max(0) as i32;
         self.respawn = nbt
             .compound("respawn")
             .filter(|r| {

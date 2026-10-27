@@ -1548,7 +1548,18 @@ async fn joining_players_get_the_command_tree() {
     top.sort_unstable();
     assert_eq!(
         top,
-        ["gamemode", "give", "gm", "help", "kill", "summon", "time", "weather"]
+        [
+            "experience",
+            "gamemode",
+            "give",
+            "gm",
+            "help",
+            "kill",
+            "summon",
+            "time",
+            "weather",
+            "xp"
+        ]
     );
 }
 
@@ -1736,4 +1747,124 @@ async fn monsters_spawn_in_the_dark() {
     })
     .await;
     assert!(found.is_ok(), "no monsters spawned at midnight");
+}
+
+/// Reads damage events until one for entity `target`.
+async fn damaged(client: &mut TcpStream, target: i32) {
+    loop {
+        let body = read_until(client, play::clientbound::DAMAGE_EVENT).await;
+        if Reader::new(&body).varint().unwrap() == target {
+            return;
+        }
+    }
+}
+
+#[tokio::test]
+async fn bows_shoot_arrows_that_hurt_mobs() {
+    let mut alice = join(server().await, "Alice", 1).await;
+    read_until(&mut alice, play::clientbound::PLAYER_POSITION).await;
+    give(&mut alice, "bow", 1).await;
+    give(&mut alice, "arrow", 4).await;
+    command(&mut alice, "summon cow").await;
+    let cow = spawned(&mut alice, entity_type::COW).await;
+    // Step back six blocks and aim slightly down at the cow.
+    send(
+        &mut alice,
+        Writer::packet(play::serverbound::MOVE_PLAYER_POS_ROT)
+            .f64(0.5)
+            .f64(-60.0)
+            .f64(-5.5)
+            .f32(0.0)
+            .f32(8.0)
+            .u8(1),
+    )
+    .await;
+    // Arrows spread a little, like vanilla, so allow a few shots.
+    for sequence in 1..=4 {
+        send(&mut alice, use_item(sequence)).await;
+        tokio::time::sleep(std::time::Duration::from_millis(1100)).await;
+        send(
+            &mut alice,
+            Writer::packet(play::serverbound::PLAYER_ACTION)
+                .varint(5) // release the item in use
+                .position(BlockPos::new(0, 0, 0))
+                .u8(0)
+                .varint(sequence),
+        )
+        .await;
+        spawned(&mut alice, entity_type::ARROW).await;
+        let hit =
+            tokio::time::timeout(std::time::Duration::from_secs(2), damaged(&mut alice, cow)).await;
+        if hit.is_ok() {
+            return;
+        }
+    }
+    panic!("four arrows missed the cow");
+}
+
+#[tokio::test]
+async fn skeletons_shoot_players() {
+    let mut alice = join(server().await, "Alice", 1).await;
+    read_until(&mut alice, play::clientbound::PLAYER_POSITION).await;
+    command(&mut alice, "time set midnight").await;
+    command(&mut alice, "summon skeleton").await;
+    send(
+        &mut alice,
+        Writer::packet(play::serverbound::MOVE_PLAYER_POS)
+            .f64(0.5)
+            .f64(-60.0)
+            .f64(8.5)
+            .u8(1),
+    )
+    .await;
+    spawned(&mut alice, entity_type::ARROW).await;
+    health_below(&mut alice, 20.0).await;
+}
+
+/// Reads experience updates until one accepted by `want`: (bar, level, total).
+async fn experience_until(client: &mut TcpStream, want: impl Fn(f32, i32, i32) -> bool) {
+    loop {
+        let body = read_until(client, play::clientbound::SET_EXPERIENCE).await;
+        let mut r = Reader::new(&body);
+        let (bar, level, total) = (r.f32().unwrap(), r.varint().unwrap(), r.varint().unwrap());
+        if want(bar, level, total) {
+            return;
+        }
+    }
+}
+
+#[tokio::test]
+async fn killing_mobs_gives_experience() {
+    let mut alice = join(server().await, "Alice", 1).await;
+    read_until(&mut alice, play::clientbound::PLAYER_POSITION).await;
+    give(&mut alice, "diamond_sword", 1).await;
+    command(&mut alice, "summon cow").await;
+    let cow = spawned(&mut alice, entity_type::COW).await;
+    for _ in 0..2 {
+        tokio::time::sleep(std::time::Duration::from_millis(700)).await;
+        send(&mut alice, interact(cow, 1)).await;
+    }
+    spawned(&mut alice, entity_type::EXPERIENCE_ORB).await;
+    // The orb drops right next to the player, who absorbs it.
+    experience_until(&mut alice, |_, _, total| (1..=3).contains(&total)).await;
+}
+
+#[tokio::test]
+async fn experience_levels_and_survives_a_restart() {
+    let dir = temp_world();
+    let (addr, world) = server_in(dir.clone()).await;
+    let mut alice = join(addr, "Alice", 1).await;
+    read_until(&mut alice, play::clientbound::PLAYER_POSITION).await;
+    command(&mut alice, "xp add 10").await;
+    // 7 points make level 1; 3 of the 9 for level 2 remain.
+    experience_until(&mut alice, |bar, level, total| {
+        level == 1 && total == 10 && (bar - 3.0 / 9.0).abs() < 1e-4
+    })
+    .await;
+    shutdown(&world).await;
+
+    let (addr, _world) = server_in(dir.clone()).await;
+    let mut alice = join(addr, "Alice", 1).await;
+    experience_until(&mut alice, |_, level, total| level == 1 && total == 10).await;
+    let _ = std::fs::remove_dir_all(dir);
 }

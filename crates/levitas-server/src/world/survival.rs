@@ -53,6 +53,8 @@ pub enum Damage {
     Mob(&'static str),
     /// Caught in an explosion caused by what is named.
     Explosion(&'static str),
+    /// Shot by an arrow from what is named.
+    Arrow(&'static str),
 }
 
 impl Damage {
@@ -67,6 +69,7 @@ impl Damage {
             Damage::FallingStalactite => "minecraft:falling_stalactite",
             Damage::Mob(_) => "minecraft:mob_attack",
             Damage::Explosion(_) => "minecraft:explosion",
+            Damage::Arrow(_) => "minecraft:arrow",
         }
     }
 
@@ -81,12 +84,16 @@ impl Damage {
             Damage::FallingStalactite => format!("{name} was skewered by a falling stalactite"),
             Damage::Mob(mob) => format!("{name} was slain by {mob}"),
             Damage::Explosion(by) => format!("{name} was blown up by {by}"),
+            Damage::Arrow(by) => format!("{name} was shot by {by}"),
         }
     }
 
     /// Whether worn armor softens this damage.
     fn reduced_by_armor(self) -> bool {
-        matches!(self, Damage::Mob(_) | Damage::Explosion(_))
+        matches!(
+            self,
+            Damage::Mob(_) | Damage::Explosion(_) | Damage::Arrow(_)
+        )
     }
 
     /// Whether this damage also hurts creative players.
@@ -198,6 +205,7 @@ impl World {
 
     fn die(&mut self, id: i32, kind: Damage) {
         self.wake_up(id);
+        self.drop_xp_on_death(id);
         self.close_container(id);
         let p = self.players.get_mut(&id).expect("player exists");
         p.alive = false;
@@ -276,7 +284,7 @@ impl World {
 
     pub(super) fn use_item(&mut self, id: i32, hand: i32, sequence: i32) {
         self.ack(id, sequence);
-        if self.use_bucket(id, hand) {
+        if self.use_bucket(id, hand) || self.start_drawing(id, hand) {
             return;
         }
         let tick = self.tick;

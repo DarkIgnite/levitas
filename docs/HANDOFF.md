@@ -148,8 +148,11 @@ Phase 0–1 and most of Phase 2, plus parts of 3 and 12 (details in ROADMAP.md):
   and stalactite damage/drops.
 - **Heightmaps** in chunk packets (the client needs them for rain, snow and their sounds).
 - **Tab completion** for every command.
-- **Monsters**: zombies, spiders and creepers spawn in the dark, hunt players, burn
-  in daylight (zombies) or explode (creepers); armor softens their hits.
+- **Monsters**: zombies, spiders, creepers and skeletons spawn in the dark, path to
+  players, burn in daylight, explode (creepers) or shoot arrows (skeletons); armor
+  softens their hits.
+- **Bows and experience**: players draw bows and shoot arrows; experience orbs from
+  mobs and ores raise levels (saved, dropped on death).
 - **Animals**: cows, pigs, sheep and chickens spawn with new chunks, wander, panic,
   can be killed for vanilla loot, sheared, milked, and are saved; `/summon`.
 - **Day/night and weather**: time sync every second, rain/thunder cycle with fading,
@@ -165,10 +168,11 @@ agreed next steps were **falling blocks (done), day/night (done), then mobs**.
    spawning from biome spawn lists, player attacks with charge/crits/knockback, loot.
    `world/monsters.rs` adds zombies, spiders and creepers: dark spawning by the
    vanilla light rules, despawning, chasing, melee with armor, sun burning, creeper
-   explosions (`world/explosion.rs`). Next: skeletons with arrows (a projectile
-   entity), real pathfinding (A* over walkable blocks; mobs walk straight today),
-   experience orbs, breeding/babies/temptation, more mobs, and TNT (reuses
-   `explode`). Add new kinds to `MobKind` (entity type, size, health,
+   explosions (`world/explosion.rs`), skeletons with bows (`world/arrows.rs`), A*
+   pathfinding (`world/pathfinding.rs`) and experience (`world/experience.rs`).
+   Damage to mobs goes through `hit_mob`. Next: breeding/babies/temptation, more mobs
+   (husk/stray/drowned/enderman/witch...), TNT (reuses `explode`), enchanting (uses
+   the experience levels), and smelting experience. Add new kinds to `MobKind` (entity type, size, health,
    speed, sound family) and to `/summon` in `command_tree()`.
 2. **Structure loot** (Phase 12): `ProtoChunk::pending_block_entities` from Pumpkin
    holds chest NBT with `LootTable` keys and spawners; convert them into Levitas block
