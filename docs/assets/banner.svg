@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1280" height="400" viewBox="0 0 1280 400" role="img" aria-labelledby="title desc">
   <title id="title">Levitas</title>
-  <desc id="desc">A floating block above a soft glow, next to the word Levitas: a lightweight survival game server written in Rust.</desc>
+  <desc id="desc">A floating block above a soft glow, next to the word Levitas: a lightweight, extensible, open-source survival game server written in Rust.</desc>
   <defs>
     <linearGradient id="sky" x1="0" y1="0" x2="1" y2="1">
       <stop offset="0" stop-color="#0d1117"/>
@@ -91,5 +91,5 @@
   <text x="486" y="290" fill="#c9d1d9" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif"
         font-size="30" font-weight="500">A lightweight survival game server, written in Rust</text>
   <text x="486" y="330" fill="#8b949e" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif"
-        font-size="22" letter-spacing="2">JAVA EDITION 1.21.8  ·  VANILLA GAMEPLAY  ·  GPL-3.0</text>
+        font-size="22" letter-spacing="2">FAST  ·  EXTENSIBLE  ·  OPEN SOURCE</text>
 </svg>
