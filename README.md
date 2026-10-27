@@ -1,6 +1,11 @@
 <p align="center">
-  <img src="docs/assets/banner.svg" alt="Levitas: a lightweight survival game server, written in Rust" width="100%">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/logo-dark.svg">
+    <img src="docs/assets/logo-light.svg" alt="Levitas" width="440">
+  </picture>
 </p>
+
+<p align="center"><b>A lightweight, extensible survival game server, written in Rust.</b></p>
 
 <p align="center">
   <img alt="Java Edition 1.21.8" src="https://img.shields.io/badge/Java%20Edition-1.21.8-f74c00">
