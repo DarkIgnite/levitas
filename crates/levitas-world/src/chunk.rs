@@ -125,6 +125,47 @@ impl Chunk {
     }
 }
 
+impl Chunk {
+    /// A heightmap: for each column (index `z * 16 + x`), how many blocks above the
+    /// bottom of the world the first block from the top accepted by `counts` ends, or
+    /// 0 if the column has none.
+    pub fn heightmap(&self, counts: impl Fn(u16) -> bool) -> [u16; 256] {
+        let mut heights = [0u16; 256];
+        let mut missing = 256;
+        for (s, section) in self.sections.iter().enumerate().rev() {
+            if section.block_count == 0 {
+                continue;
+            }
+            for (i, height) in heights.iter_mut().enumerate() {
+                if *height != 0 {
+                    continue;
+                }
+                let (x, z) = (i % 16, i / 16);
+                if let Some(y) = (0..16).rev().find(|&y| counts(section.get(x, y, z))) {
+                    *height = (s * 16 + y + 1) as u16;
+                    missing -= 1;
+                }
+            }
+            if missing == 0 {
+                break;
+            }
+        }
+        heights
+    }
+}
+
+/// Packs a heightmap into longs as the protocol and Anvil store it: 9 bits per column
+/// (enough for the 385 possible heights), 7 per long, none split across longs.
+pub fn pack_heightmap(heights: &[u16; 256]) -> Vec<i64> {
+    const BITS: usize = 9;
+    const PER_LONG: usize = 64 / BITS;
+    let mut longs = vec![0i64; heights.len().div_ceil(PER_LONG)];
+    for (i, &h) in heights.iter().enumerate() {
+        longs[i / PER_LONG] |= (i64::from(h) & ((1 << BITS) - 1)) << ((i % PER_LONG) * BITS);
+    }
+    longs
+}
+
 fn section_of(y: i32) -> Option<(usize, usize)> {
     if !(MIN_Y..=MAX_Y).contains(&y) {
         return None;
@@ -150,6 +191,20 @@ mod tests {
         assert_eq!(c.get(15, MAX_Y, 15), block::DIRT);
         assert_eq!(c.get(0, 0, 0), block::AIR);
         assert_eq!(c.set(0, MAX_Y + 1, 0, block::STONE), block::AIR);
+    }
+
+    #[test]
+    fn heightmaps_find_the_top_block() {
+        let mut c = chunk();
+        c.set(0, MIN_Y, 0, block::BEDROCK);
+        c.set(0, 70, 0, block::STONE);
+        c.set(5, 100, 2, block::GLASS);
+        let heights = c.heightmap(|s| s != block::AIR && s != block::GLASS);
+        assert_eq!(heights[0], (70 - MIN_Y + 1) as u16);
+        assert_eq!(heights[2 * 16 + 5], 0);
+        let packed = pack_heightmap(&heights);
+        assert_eq!(packed.len(), 37);
+        assert_eq!(packed[0] & 0x1FF, i64::from(heights[0]));
     }
 
     #[test]

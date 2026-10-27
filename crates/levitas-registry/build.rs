@@ -102,7 +102,7 @@ fn read_json(path: &Path) -> Value {
 /// `minecraft:level_chunk_with_light` -> `LEVEL_CHUNK_WITH_LIGHT`
 fn const_name(id: &str) -> String {
     let name = id.strip_prefix("minecraft:").unwrap_or(id).to_uppercase();
-    let name = name.replace(['/', '.', '-'], "_");
+    let name = name.replace(['/', '.', '-', ':'], "_");
     if name.starts_with(|c: char| c.is_ascii_digit()) {
         format!("_{name}")
     } else {
@@ -371,6 +371,11 @@ fn items_and_entities(data: &Path, block_defaults: &HashMap<String, u64>, out: &
             "component",
             "minecraft:data_component_type",
             "Item data component type IDs.",
+        ),
+        (
+            "command_argument",
+            "minecraft:command_argument_type",
+            "Command argument parser IDs (`BRIGADIER_INTEGER`, `ITEM_STACK`, ...).",
         ),
     ] {
         writeln!(out, "/// {doc}\npub mod {module} {{").unwrap();

@@ -1,4 +1,9 @@
 //! Chat commands. A small built-in set until there is a command framework and plugins.
+//!
+//! The client learns the commands' syntax from a Brigadier command tree sent when a
+//! player joins ([`command_tree`]); it uses it for tab completion and highlighting.
+
+use levitas_registry::command_argument;
 
 use super::*;
 
@@ -64,7 +69,12 @@ impl World {
             }
             (Some("add"), Some(ticks)) => self.day_time += ticks,
             (Some("query"), _) => {
-                return format!("The time is {}", self.day_time.rem_euclid(time::DAY_TICKS));
+                let value = match value {
+                    Some("gametime") => self.tick as i64,
+                    Some("day") => self.day_time.div_euclid(time::DAY_TICKS),
+                    _ => self.day_time.rem_euclid(time::DAY_TICKS),
+                };
+                return format!("The time is {value}");
             }
             _ => return USAGE.to_owned(),
         }
@@ -127,4 +137,141 @@ impl World {
         }
         format!("Gave {} [{name}]", count - left)
     }
+}
+
+/// One node of a Brigadier command tree.
+enum Node {
+    Root,
+    Literal(&'static str),
+    /// An argument: its name, parser ID and parser properties.
+    Argument(&'static str, i32, Vec<u8>),
+}
+
+struct TreeNode {
+    node: Node,
+    executable: bool,
+    children: Vec<usize>,
+    redirect: Option<usize>,
+}
+
+/// Builds a command tree, nodes listed parents first.
+#[derive(Default)]
+struct Tree {
+    nodes: Vec<TreeNode>,
+}
+
+impl Tree {
+    fn add(&mut self, parent: Option<usize>, node: Node, executable: bool) -> usize {
+        let index = self.nodes.len();
+        self.nodes.push(TreeNode {
+            node,
+            executable,
+            children: Vec::new(),
+            redirect: None,
+        });
+        if let Some(parent) = parent {
+            self.nodes[parent].children.push(index);
+        }
+        index
+    }
+
+    fn literal(&mut self, parent: usize, name: &'static str, executable: bool) -> usize {
+        self.add(Some(parent), Node::Literal(name), executable)
+    }
+
+    fn argument(
+        &mut self,
+        parent: usize,
+        name: &'static str,
+        parser: i32,
+        props: Vec<u8>,
+    ) -> usize {
+        self.add(Some(parent), Node::Argument(name, parser, props), true)
+    }
+
+    fn packet(&self) -> Writer {
+        const ROOT: u8 = 0;
+        const LITERAL: u8 = 1;
+        const ARGUMENT: u8 = 2;
+        const EXECUTABLE: u8 = 0x04;
+        const REDIRECT: u8 = 0x08;
+        let mut packet = Writer::packet(clientbound::COMMANDS).varint(self.nodes.len() as i32);
+        for n in &self.nodes {
+            let kind = match n.node {
+                Node::Root => ROOT,
+                Node::Literal(_) => LITERAL,
+                Node::Argument(..) => ARGUMENT,
+            };
+            let mut flags = kind;
+            if n.executable {
+                flags |= EXECUTABLE;
+            }
+            if n.redirect.is_some() {
+                flags |= REDIRECT;
+            }
+            packet = packet.u8(flags).varint(n.children.len() as i32);
+            for &child in &n.children {
+                packet = packet.varint(child as i32);
+            }
+            if let Some(target) = n.redirect {
+                packet = packet.varint(target as i32);
+            }
+            packet = match &n.node {
+                Node::Root => packet,
+                Node::Literal(name) => packet.string(name),
+                Node::Argument(name, parser, props) => {
+                    packet.string(name).varint(*parser).bytes(props)
+                }
+            };
+        }
+        packet.varint(0) // the root is node 0
+    }
+}
+
+/// Properties of a `brigadier:integer` argument with a minimum.
+fn at_least(min: i32) -> Vec<u8> {
+    let mut props = vec![0x01];
+    props.extend_from_slice(&min.to_be_bytes());
+    props
+}
+
+/// The syntax of every command, for the client's tab completion.
+pub(super) fn command_tree() -> Writer {
+    let integer = command_argument::BRIGADIER_INTEGER;
+    let mut t = Tree::default();
+    let root = t.add(None, Node::Root, false);
+
+    let gamemode = t.literal(root, "gamemode", false);
+    for mode in ["survival", "creative"] {
+        t.literal(gamemode, mode, true);
+    }
+    let gm = t.literal(root, "gm", false);
+    t.nodes[gm].redirect = Some(gamemode);
+
+    let give = t.literal(root, "give", false);
+    let item = t.argument(give, "item", command_argument::ITEM_STACK, Vec::new());
+    t.argument(item, "count", integer, at_least(1));
+
+    t.literal(root, "kill", true);
+    t.literal(root, "help", true);
+
+    let time = t.literal(root, "time", false);
+    let set = t.literal(time, "set", false);
+    for name in ["day", "noon", "night", "midnight"] {
+        t.literal(set, name, true);
+    }
+    t.argument(set, "time", integer, at_least(0));
+    let add = t.literal(time, "add", false);
+    t.argument(add, "time", integer, at_least(0));
+    let query = t.literal(time, "query", false);
+    for name in ["daytime", "gametime", "day"] {
+        t.literal(query, name, true);
+    }
+
+    let weather = t.literal(root, "weather", false);
+    for kind in ["clear", "rain", "thunder"] {
+        let node = t.literal(weather, kind, true);
+        t.argument(node, "duration", integer, at_least(0));
+    }
+    t.packet()
 }

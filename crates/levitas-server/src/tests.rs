@@ -1484,3 +1484,64 @@ async fn sleeping_through_the_night_and_respawning_at_the_bed() {
         "respawned at {x} {y} {z}"
     );
 }
+
+#[tokio::test]
+async fn chunks_carry_heightmaps_for_rain() {
+    let mut alice = join(server().await, "Alice", 1).await;
+    let body = read_until(&mut alice, play::clientbound::LEVEL_CHUNK_WITH_LIGHT).await;
+    let mut r = Reader::new(&body);
+    r.i32().unwrap();
+    r.i32().unwrap();
+    let mut kinds = Vec::new();
+    for _ in 0..r.varint().unwrap() {
+        let kind = r.varint().unwrap();
+        let longs: Vec<i64> = (0..r.varint().unwrap()).map(|_| r.i64().unwrap()).collect();
+        // The flat world's grass at y = -61 is 4 blocks above the bottom of the world.
+        assert_eq!(longs[0] & 0x1FF, 4, "heightmap {kind}");
+        kinds.push(kind);
+    }
+    assert_eq!(kinds, [1, 4, 5]);
+}
+
+#[tokio::test]
+async fn joining_players_get_the_command_tree() {
+    let mut alice = join(server().await, "Alice", 1).await;
+    let body = read_until(&mut alice, play::clientbound::COMMANDS).await;
+    let mut r = Reader::new(&body);
+    let count = r.varint().unwrap() as usize;
+    let mut names = Vec::new();
+    let mut root_children = Vec::new();
+    for i in 0..count {
+        let flags = r.u8().unwrap();
+        let children: Vec<usize> = (0..r.varint().unwrap())
+            .map(|_| r.varint().unwrap() as usize)
+            .collect();
+        assert!(children.iter().all(|&c| c < count), "node {i} points outside");
+        if flags & 0x08 != 0 {
+            assert!((r.varint().unwrap() as usize) < count);
+        }
+        let name = match flags & 0x03 {
+            0 => {
+                root_children = children;
+                String::new()
+            }
+            1 => r.string(32767).unwrap().to_owned(),
+            _ => {
+                let name = r.string(32767).unwrap().to_owned();
+                if r.varint().unwrap() == levitas_registry::command_argument::BRIGADIER_INTEGER {
+                    let limits = r.u8().unwrap();
+                    for _ in 0..(limits & 1) + (limits >> 1 & 1) {
+                        r.i32().unwrap();
+                    }
+                }
+                name
+            }
+        };
+        names.push(name);
+    }
+    assert_eq!(r.varint().unwrap(), 0, "root index");
+    assert_eq!(r.remaining(), 0);
+    let mut top: Vec<&str> = root_children.iter().map(|&c| names[c].as_str()).collect();
+    top.sort_unstable();
+    assert_eq!(top, ["gamemode", "give", "gm", "help", "kill", "time", "weather"]);
+}

@@ -111,7 +111,9 @@ Workspace crates in `crates/`:
 - `world/containers.rs` – chests (incl. double), furnaces, crafting tables, block entities.
 - `world/items.rs` – dropped item entities and pickup.
 - `world/storage.rs` – level.dat, playerdata, chunk load/save, autosave, unloading.
-- `world/commands.rs` – `/gamemode`, `/give`, `/kill`, ...
+- `world/commands.rs` – `/gamemode`, `/give`, `/kill`, `/time`, `/weather`, and the
+  Brigadier tree sent on join for tab completion: **add every new command to
+  `command_tree()` too**, or the client shows it as unknown.
 - `blocks/` – pure block rules: placement orientation (`place.rs`), support/survival,
   connections (fences, walls, stairs), `fluid.rs` (fluid states and rules).
 - `click.rs` – server-side container click simulation (compared with the client).
@@ -144,6 +146,8 @@ Phase 0–1 and most of Phase 2, plus parts of 3 and 12 (details in ROADMAP.md):
 - **Falling blocks** (sand, gravel, concrete powder, anvils, pointed dripstone) with 2-tick
   scheduled ticks, entity gravity/drag, concrete hardening, anvil damage/crushing/degradation,
   and stalactite damage/drops.
+- **Heightmaps** in chunk packets (the client needs them for rain, snow and their sounds).
+- **Tab completion** for every command.
 - **Day/night and weather**: time sync every second, rain/thunder cycle with fading,
   `/time`, `/weather`, sleeping skips the night, beds are respawn points.
 

@@ -21,6 +21,7 @@ use std::time::Duration;
 use levitas_protocol::{angle, varint, BlockPos, Writer};
 use levitas_registry::packet::play::clientbound;
 use levitas_registry::{block, block_has_tag, entity_type, BlockInfo, ItemInfo, SyncedRegistry};
+use levitas_world::chunk::pack_heightmap;
 use levitas_world::{is_air, Chunk, LightEngine, RegionStorage, MAX_Y, MIN_Y};
 use tokio::sync::{mpsc, oneshot};
 use tracing::info;
@@ -51,6 +52,10 @@ const TICK: Duration = Duration::from_millis(50);
 pub const GAME_MODE_SURVIVAL: u8 = 0;
 pub const GAME_MODE_CREATIVE: u8 = 1;
 const GAME_EVENT_CHANGE_GAME_MODE: u8 = 3;
+/// Heightmap kinds in the chunk packet.
+const HEIGHTMAP_WORLD_SURFACE: i32 = 1;
+const HEIGHTMAP_MOTION_BLOCKING: i32 = 4;
+const HEIGHTMAP_MOTION_BLOCKING_NO_LEAVES: i32 = 5;
 const GAME_EVENT_START_WAITING_FOR_CHUNKS: u8 = 13;
 /// Player info actions: add player, update game mode, update listed, update latency.
 const PLAYER_INFO_ACTIONS: u8 = 0x01 | 0x04 | 0x08 | 0x10;
@@ -566,6 +571,7 @@ impl World {
         self.send(id, position);
         self.send_status(id);
         self.send_time_and_weather(id);
+        self.send(id, commands::command_tree());
         self.send(
             id,
             system_chat(&format!(
@@ -1082,7 +1088,30 @@ impl World {
 
     fn chunk_frame(&mut self, x: i32, z: i32) -> Frame {
         let mut body = Vec::new();
-        varint::write(&mut body, 0); // heightmaps: none, the client computes them
+        // The client places rain, snow and their sounds by these heightmaps, and does
+        // not compute them itself.
+        let chunk = self.chunk(x, z);
+        let motion_blocking = |s: u16| {
+            !levitas_registry::collision_boxes(s).is_empty()
+                || crate::blocks::fluid::fluid_at(s).is_some()
+        };
+        let heightmaps = [
+            (HEIGHTMAP_WORLD_SURFACE, chunk.heightmap(|s| !is_air(s))),
+            (HEIGHTMAP_MOTION_BLOCKING, chunk.heightmap(motion_blocking)),
+            (
+                HEIGHTMAP_MOTION_BLOCKING_NO_LEAVES,
+                chunk.heightmap(|s| motion_blocking(s) && !block_has_tag(s, "minecraft:leaves")),
+            ),
+        ];
+        varint::write(&mut body, heightmaps.len() as i32);
+        for (kind, heights) in heightmaps {
+            varint::write(&mut body, kind);
+            let longs = pack_heightmap(&heights);
+            varint::write(&mut body, longs.len() as i32);
+            for long in longs {
+                body.extend_from_slice(&long.to_be_bytes());
+            }
+        }
         self.chunk(x, z).encode_sections(&mut body);
         let entities = self.block_entities_in(x, z);
         varint::write(&mut body, entities.len() as i32);

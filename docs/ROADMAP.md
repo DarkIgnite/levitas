@@ -169,7 +169,9 @@ Known gaps are listed under each phase instead of being hidden.
 ## Phase 11: Everything else
 
 - [ ] Advancements and statistics
-- [ ] Brigadier command tree with suggestions; console commands
+- [ ] Brigadier command tree with suggestions; console commands. The built-in commands
+      are declared to the client (`commands::command_tree`) for tab completion; there is
+      no command framework or console input yet.
 - [ ] Vanilla commands: /tp, /time, /weather, /gamerule, /give with components,
       /effect, /enchant, /summon, /setblock, /fill, /kill, /clear, /spawnpoint, ...
 - [ ] Game rules and difficulty
