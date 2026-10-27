@@ -8,6 +8,7 @@ mod containers;
 mod falling;
 mod fluids;
 mod items;
+mod mobs;
 mod storage;
 mod survival;
 mod time;
@@ -151,6 +152,17 @@ pub enum Event {
     LeaveBed {
         id: i32,
     },
+    /// The player attacked an entity.
+    Attack {
+        id: i32,
+        target: i32,
+    },
+    /// The player used the item in `hand` on an entity.
+    UseEntity {
+        id: i32,
+        target: i32,
+        hand: i32,
+    },
     Sprint {
         id: i32,
         sprinting: bool,
@@ -244,6 +256,8 @@ struct Player {
     sleep_ticks: u32,
     /// The bed the player respawns at.
     respawn: Option<BlockPos>,
+    /// Tick the attack charge last started over (after an attack or switching items).
+    attack_reset: u64,
 }
 
 impl Player {
@@ -284,6 +298,7 @@ impl Player {
             sleeping: None,
             sleep_ticks: 0,
             respawn: None,
+            attack_reset: 0,
         }
     }
 
@@ -328,6 +343,12 @@ struct World {
     /// The world folder: level.dat, region/ and playerdata/.
     dir: PathBuf,
     storage: RegionStorage,
+    /// Mobs are saved apart from blocks, in `entities/` region files like vanilla.
+    entity_storage: RegionStorage,
+    mobs: HashMap<i32, mobs::Mob>,
+    /// Loaded chunks that held mobs at the last save, so emptied ones are saved too.
+    mob_chunks: HashSet<(i32, i32)>,
+    biome_spawns: mobs::BiomeSpawns,
     chunks: HashMap<(i32, i32), Chunk>,
     /// Chunks changed since they were last saved.
     dirty: HashSet<(i32, i32)>,
@@ -391,6 +412,10 @@ impl World {
         };
         let world = Self {
             storage: RegionStorage::new(dir.join("region")),
+            entity_storage: RegionStorage::new(dir.join("entities")),
+            mobs: HashMap::new(),
+            mob_chunks: HashSet::new(),
+            biome_spawns: mobs::BiomeSpawns::load(),
             dir,
             chunks: HashMap::new(),
             dirty: HashSet::new(),
@@ -490,6 +515,7 @@ impl World {
                     if slot < 9 {
                         p.held = slot;
                         p.eating = None;
+                        p.attack_reset = self.tick;
                     }
                 }
             }
@@ -501,6 +527,8 @@ impl World {
                 self.broadcast(packet, Some(id));
             }
             Event::LeaveBed { id } => self.wake_up(id),
+            Event::Attack { id, target } => self.attack_mob(id, target),
+            Event::UseEntity { id, target, hand } => self.use_on_mob(id, target, hand),
             Event::Sprint { id, sprinting } => {
                 if let Some(p) = self.players.get_mut(&id) {
                     p.sprinting = sprinting;
@@ -804,6 +832,7 @@ impl World {
                     state,
                     tool,
                     rng: &mut self.rng,
+                    entity: Default::default(),
                 });
                 for (item, count) in drops {
                     self.drop_at_block(pos, Stack::new(item, count));
@@ -920,6 +949,7 @@ impl World {
         self.tick_fluids();
         self.tick_time();
         self.tick_falling_blocks();
+        self.tick_mobs();
         self.tick_survival();
         self.tick_items();
         self.tick_furnaces();
@@ -987,9 +1017,12 @@ impl World {
             match self.load_chunk(x, z) {
                 Some(chunk) => {
                     self.chunks.insert((x, z), chunk);
+                    self.load_mobs(x, z);
                 }
                 None if self.terrain.is_cheap() => {
+                    // Cheap terrain is only saved once changed, but its mobs always are.
                     self.chunks.insert((x, z), self.terrain.generate(x, z));
+                    self.load_mobs(x, z);
                 }
                 None => {
                     // Real terrain comes a whole area at a time; keep all of it.
@@ -1012,6 +1045,7 @@ impl World {
         }
         if let Some(chunk) = self.load_chunk(x, z) {
             self.chunks.insert((x, z), chunk);
+            self.load_mobs(x, z);
             return true;
         }
         match &self.generation {
@@ -1039,6 +1073,7 @@ impl World {
                 .remove(&(x.div_euclid(size), z.div_euclid(size)));
         }
         let mut new = Vec::with_capacity(area.len());
+        let mut fresh = Vec::new();
         for (pos, chunk) in area {
             // Chunks generated on the spot meanwhile, or saved before, stay as they are.
             if self.chunks.contains_key(&pos) {
@@ -1047,13 +1082,18 @@ impl World {
             match self.load_chunk(pos.0, pos.1) {
                 Some(saved) => {
                     self.chunks.insert(pos, saved);
+                    self.load_mobs(pos.0, pos.1);
                 }
                 None => {
                     self.chunks.insert(pos, chunk);
                     self.dirty.insert(pos);
+                    fresh.push(pos);
                 }
             }
             new.push(pos);
+        }
+        for (x, z) in fresh {
+            self.spawn_animals_in_chunk(x, z);
         }
         let ids: Vec<i32> = self.players.keys().copied().collect();
         for id in ids {

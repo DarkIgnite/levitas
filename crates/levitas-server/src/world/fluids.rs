@@ -381,7 +381,7 @@ impl World {
 
     /// Swaps one of the items in `slot` for one `result` (a bucket filled or emptied).
     /// Creative players keep what they had.
-    fn exchange_held(&mut self, id: i32, slot: usize, result: &str) {
+    pub(super) fn exchange_held(&mut self, id: i32, slot: usize, result: &str) {
         let Some(item) = ItemInfo::id_of(result) else {
             return;
         };

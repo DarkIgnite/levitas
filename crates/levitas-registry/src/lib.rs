@@ -171,6 +171,10 @@ pub struct ItemInfo {
     pub max_damage: i32,
     /// The equipment slot the item is worn in (`head`, `chest`, `legs`, `feet`, ...).
     pub equip_slot: Option<&'static str>,
+    /// Attack damage of a player holding this item (1 for a fist).
+    pub attack_damage: f32,
+    /// Attacks per second at full strength when holding this item (4 for a fist).
+    pub attack_speed: f32,
 }
 
 impl ItemInfo {

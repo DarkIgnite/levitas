@@ -465,6 +465,7 @@ impl World {
         for (x, z) in &dirty {
             self.save_chunk(*x, *z);
         }
+        self.save_mobs();
         let ids: Vec<i32> = self.players.keys().copied().collect();
         for id in ids {
             self.save_player(id);
@@ -501,6 +502,7 @@ impl World {
             .filter(|c| !seen.contains(c))
             .collect();
         for (x, z) in unseen {
+            self.unload_mobs(x, z);
             if self.dirty.contains(&(x, z)) {
                 self.save_chunk(x, z);
             }

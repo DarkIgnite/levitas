@@ -163,6 +163,7 @@ impl World {
                     state: falling.state,
                     tool: 0,
                     rng: &mut self.rng,
+                    entity: Default::default(),
                 });
                 for (item, count) in drops {
                     self.drop_at_block(landing_pos, Stack::new(item, count));
@@ -211,6 +212,7 @@ impl World {
                 state: falling.state,
                 tool: 0,
                 rng: &mut self.rng,
+                entity: Default::default(),
             });
             for (item, count) in drops {
                 self.drop_at_block(landing_pos, Stack::new(item, count));

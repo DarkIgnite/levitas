@@ -1516,7 +1516,10 @@ async fn joining_players_get_the_command_tree() {
         let children: Vec<usize> = (0..r.varint().unwrap())
             .map(|_| r.varint().unwrap() as usize)
             .collect();
-        assert!(children.iter().all(|&c| c < count), "node {i} points outside");
+        assert!(
+            children.iter().all(|&c| c < count),
+            "node {i} points outside"
+        );
         if flags & 0x08 != 0 {
             assert!((r.varint().unwrap() as usize) < count);
         }
@@ -1543,5 +1546,124 @@ async fn joining_players_get_the_command_tree() {
     assert_eq!(r.remaining(), 0);
     let mut top: Vec<&str> = root_children.iter().map(|&c| names[c].as_str()).collect();
     top.sort_unstable();
-    assert_eq!(top, ["gamemode", "give", "gm", "help", "kill", "time", "weather"]);
+    assert_eq!(
+        top,
+        ["gamemode", "give", "gm", "help", "kill", "summon", "time", "weather"]
+    );
+}
+
+/// Reads entity spawns until a mob of type `kind` appears; returns its entity ID.
+async fn spawned(client: &mut TcpStream, kind: i32) -> i32 {
+    loop {
+        let body = read_until(client, play::clientbound::ADD_ENTITY).await;
+        let mut r = Reader::new(&body);
+        let id = r.varint().unwrap();
+        r.uuid().unwrap();
+        if r.varint().unwrap() == kind {
+            return id;
+        }
+    }
+}
+
+fn interact(target: i32, kind: i32) -> Writer {
+    let packet = Writer::packet(play::serverbound::INTERACT)
+        .varint(target)
+        .varint(kind);
+    if kind == 0 { packet.varint(0) } else { packet }.bool(false)
+}
+
+/// Reads dropped item data until an item accepted by `want` shows up.
+async fn dropped_item(client: &mut TcpStream, want: impl Fn(&str) -> bool) -> (i32, i32) {
+    loop {
+        let body = read_until(client, play::clientbound::SET_ENTITY_DATA).await;
+        let mut r = Reader::new(&body);
+        r.varint().unwrap();
+        if (r.u8().unwrap(), r.varint().unwrap()) != (8, 7) {
+            continue; // not an item entity's stack
+        }
+        let count = r.varint().unwrap();
+        let item = r.varint().unwrap();
+        if want(ItemInfo::get(item).unwrap().name) {
+            return (item, count);
+        }
+    }
+}
+
+#[tokio::test]
+async fn cows_can_be_killed_for_beef() {
+    let mut alice = join(server().await, "Alice", 1).await;
+    read_until(&mut alice, play::clientbound::PLAYER_POSITION).await;
+    give(&mut alice, "diamond_sword", 1).await;
+    command(&mut alice, "summon cow").await;
+    let cow = spawned(&mut alice, entity_type::COW).await;
+    // A diamond sword deals 7 at full charge; a cow has 10 health.
+    for _ in 0..2 {
+        tokio::time::sleep(std::time::Duration::from_millis(700)).await;
+        send(&mut alice, interact(cow, 1)).await;
+    }
+    loop {
+        let body = read_until(&mut alice, play::clientbound::ENTITY_EVENT).await;
+        let mut r = Reader::new(&body);
+        if (r.i32().unwrap(), r.u8().unwrap()) == (cow, 3) {
+            break; // dying
+        }
+    }
+    let (_, count) = dropped_item(&mut alice, |name| name == "minecraft:beef").await;
+    assert!((1..=3).contains(&count));
+}
+
+#[tokio::test]
+async fn sheep_can_be_sheared() {
+    let mut alice = join(server().await, "Alice", 1).await;
+    read_until(&mut alice, play::clientbound::PLAYER_POSITION).await;
+    give(&mut alice, "shears", 1).await;
+    command(&mut alice, "summon sheep").await;
+    let sheep = spawned(&mut alice, entity_type::SHEEP).await;
+    send(&mut alice, interact(sheep, 0)).await;
+    let (_, count) = dropped_item(&mut alice, |name| name.ends_with("_wool")).await;
+    assert!((1..=3).contains(&count));
+}
+
+#[tokio::test]
+async fn animals_are_saved_with_the_world() {
+    let dir = temp_world();
+    let (addr, world) = server_in(dir.clone()).await;
+    let mut alice = join(addr, "Alice", 1).await;
+    read_until(&mut alice, play::clientbound::PLAYER_POSITION).await;
+    command(&mut alice, "summon pig").await;
+    spawned(&mut alice, entity_type::PIG).await;
+    shutdown(&world).await;
+    assert!(dir.join("entities").is_dir());
+
+    let (addr, _world) = server_in(dir.clone()).await;
+    let mut alice = join(addr, "Alice", 1).await;
+    spawned(&mut alice, entity_type::PIG).await;
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[tokio::test]
+async fn generated_chunks_come_with_animals() {
+    let dir = temp_world();
+    let (addr, _world) = server_with(dir.clone(), world::WorldKind::Noise).await;
+    let mut alice = join(addr, "Alice", 1).await;
+    let animals = [
+        entity_type::COW,
+        entity_type::PIG,
+        entity_type::SHEEP,
+        entity_type::CHICKEN,
+    ];
+    let found = tokio::time::timeout(std::time::Duration::from_secs(60), async {
+        loop {
+            let body = read_until(&mut alice, play::clientbound::ADD_ENTITY).await;
+            let mut r = Reader::new(&body);
+            r.varint().unwrap();
+            r.uuid().unwrap();
+            if animals.contains(&r.varint().unwrap()) {
+                break;
+            }
+        }
+    })
+    .await;
+    assert!(found.is_ok(), "no animals near spawn");
+    let _ = std::fs::remove_dir_all(dir);
 }

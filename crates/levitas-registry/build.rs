@@ -86,6 +86,22 @@ fn main() {
     embed_json_dir(
         &data,
         &out_dir,
+        "loot_table/entities",
+        "ENTITY_LOOT_JSON",
+        "Entity loot tables as JSON: an object mapping `minecraft:<entity>` to loot tables.",
+        &mut out,
+    );
+    embed_json_dir(
+        &data,
+        &out_dir,
+        "worldgen/biome",
+        "BIOMES_JSON",
+        "Biome definitions as JSON (spawners, spawn probabilities, climate, ...).",
+        &mut out,
+    );
+    embed_json_dir(
+        &data,
+        &out_dir,
         "recipe",
         "RECIPES_JSON",
         "Recipes as JSON: an object mapping recipe names to recipes.",
@@ -453,10 +469,24 @@ fn items_and_entities(data: &Path, block_defaults: &HashMap<String, u64>, out: &
         };
         let max_damage = c["minecraft:max_damage"].as_i64().unwrap_or(0);
         let equip_slot = c["minecraft:equippable"]["slot"].as_str();
+        // Main-hand attack modifiers: a player's base damage is 1 and speed 4.
+        let modifier = |kind: &str| {
+            c["minecraft:attribute_modifiers"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter(|m| m["type"] == kind && m["slot"] == "mainhand")
+                .filter_map(|m| m["amount"].as_f64())
+                .sum::<f64>()
+        };
+        // Rounded to f32 first so the generated literals carry no false precision.
+        let attack_damage = (1.0 + modifier("minecraft:attack_damage")) as f32;
+        let attack_speed = (4.0 + modifier("minecraft:attack_speed")) as f32;
         writeln!(
             out,
             "ItemInfo {{ name: {name:?}, max_stack: {max_stack}, block: {block}, food: {food}, \
-             tool: {tool}, max_damage: {max_damage}, equip_slot: {equip_slot:?} }},"
+             tool: {tool}, max_damage: {max_damage}, equip_slot: {equip_slot:?}, \
+             attack_damage: {attack_damage:?}f32, attack_speed: {attack_speed:?}f32 }},"
         )
         .unwrap();
     }

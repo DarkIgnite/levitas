@@ -254,6 +254,7 @@ impl World {
             state,
             tool: 0,
             rng: &mut self.rng,
+            entity: Default::default(),
         });
         for (item, count) in drops {
             self.drop_at_block(pos, Stack::new(item, count));

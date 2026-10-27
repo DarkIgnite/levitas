@@ -148,6 +148,8 @@ Phase 0–1 and most of Phase 2, plus parts of 3 and 12 (details in ROADMAP.md):
   and stalactite damage/drops.
 - **Heightmaps** in chunk packets (the client needs them for rain, snow and their sounds).
 - **Tab completion** for every command.
+- **Animals**: cows, pigs, sheep and chickens spawn with new chunks, wander, panic,
+  can be killed for vanilla loot, sheared, milked, and are saved; `/summon`.
 - **Day/night and weather**: time sync every second, rain/thunder cycle with fading,
   `/time`, `/weather`, sleeping skips the night, beds are respawn points.
 
@@ -156,12 +158,14 @@ Phase 0–1 and most of Phase 2, plus parts of 3 and 12 (details in ROADMAP.md):
 The owner's last request was: keep going until the world is playable like vanilla. The
 agreed next steps were **falling blocks (done), day/night (done), then mobs**.
 
-1. **Mobs** (Phase 4–5), the biggest gap for "normal survival": entity framework
-   (IDs, tracking per player view, movement packets, physics, collisions, saving
-   entities to `entities/` region files), then passive mobs (cow, pig, sheep, chicken
-   for food), natural spawning by light/biome/time, simple AI (wander, panic, follow
-   food), drops; then hostiles (zombie, skeleton, creeper, spider) with melee and
-   pathfinding; player combat (attack damage, cooldown, knockback, armor).
+1. **Mobs, continued** (Phase 4–5). `world/mobs.rs` has the base: `Mob` with
+   physics/collisions, per-player tracking, saving to `entities/`, chunk-generation
+   spawning from biome spawn lists, player attacks with charge/crits/knockback, loot.
+   Next: hostile mobs (zombie, skeleton, creeper, spider) with natural spawning at
+   night and in the dark (light level 0), despawning, simple pathfinding and melee
+   that damages players (with armor); then breeding/babies/temptation, experience
+   orbs, and more animals. Add new kinds to `MobKind` (entity type, size, health,
+   speed, sound family) and to `/summon` in `command_tree()`.
 2. **Structure loot** (Phase 12): `ProtoChunk::pending_block_entities` from Pumpkin
    holds chest NBT with `LootTable` keys and spawners; convert them into Levitas block
    entities in `levitas-pumpkin` (return them alongside each chunk) and fill chests from

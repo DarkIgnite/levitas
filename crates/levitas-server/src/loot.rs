@@ -1,16 +1,19 @@
-//! Block loot tables: what a broken block drops. Tables are the vanilla JSON from the data
-//! generator, evaluated with the context Levitas tracks so far: the block state and the
-//! tool item. Enchantments are not tracked yet, so silk touch and fortune never apply.
+//! Loot tables: what a broken block or a killed mob drops. Tables are the vanilla JSON
+//! from the data generator, evaluated with the context Levitas tracks so far: the block
+//! state, the tool item and a few mob properties. Enchantments are not tracked yet, so
+//! silk touch, fortune and looting never apply.
 
 use std::collections::HashMap;
 
-use levitas_registry::{BlockInfo, ItemInfo, TagRegistry, BLOCK_LOOT_JSON};
+use levitas_registry::{BlockInfo, ItemInfo, TagRegistry, BLOCK_LOOT_JSON, ENTITY_LOOT_JSON};
 use serde_json::Value;
 
 use crate::rng::Rng;
 
 pub struct LootTables {
     blocks: HashMap<String, Value>,
+    /// Entity tables, keyed `minecraft:<entity>` (and `minecraft:sheep/<color>`).
+    entities: HashMap<String, Value>,
     item_ids: HashMap<&'static str, i32>,
 }
 
@@ -20,12 +23,25 @@ pub struct LootContext<'a> {
     /// Item ID of the tool used, 0 for an empty hand.
     pub tool: i32,
     pub rng: &'a mut Rng,
+    /// The mob whose loot is rolled, for `entity_properties` conditions.
+    pub entity: EntityProps,
+}
+
+/// What loot conditions may ask about the mob that died.
+#[derive(Debug, Clone, Default)]
+pub struct EntityProps {
+    pub on_fire: bool,
+    /// A sheep's wool colour (`white`, `black`, ...) and whether it was sheared.
+    pub sheep_color: Option<&'static str>,
+    pub sheared: bool,
 }
 
 impl LootTables {
     pub fn load() -> Self {
         let blocks: serde_json::Map<String, Value> =
             serde_json::from_str(BLOCK_LOOT_JSON).expect("block loot tables are valid JSON");
+        let entities: serde_json::Map<String, Value> =
+            serde_json::from_str(ENTITY_LOOT_JSON).expect("entity loot tables are valid JSON");
         let item_ids = levitas_registry::ITEMS
             .iter()
             .enumerate()
@@ -33,6 +49,7 @@ impl LootTables {
             .collect();
         Self {
             blocks: blocks.into_iter().collect(),
+            entities: entities.into_iter().collect(),
             item_ids,
         }
     }
@@ -49,6 +66,30 @@ impl LootTables {
             return Vec::new();
         };
         let mut drops = Vec::new();
+        self.roll(table, ctx, &mut drops);
+        drops
+    }
+
+    /// Items dropped by a mob of `entity` type (e.g. `minecraft:cow`) when it dies.
+    pub fn entity_drops(&self, entity: &str, ctx: &mut LootContext) -> Vec<(i32, i32)> {
+        let mut drops = Vec::new();
+        if let Some(table) = self.entities.get(entity) {
+            self.roll(table, ctx, &mut drops);
+        }
+        drops
+    }
+
+    /// The table a `minecraft:loot_table` entry refers to.
+    fn table(&self, name: &str) -> Option<&Value> {
+        let path = name.strip_prefix("minecraft:").unwrap_or(name);
+        if let Some(entity) = path.strip_prefix("entities/") {
+            return self.entities.get(&format!("minecraft:{entity}"));
+        }
+        let block = path.strip_prefix("blocks/")?;
+        self.blocks.get(&format!("minecraft:{block}"))
+    }
+
+    fn roll(&self, table: &Value, ctx: &mut LootContext, drops: &mut Vec<(i32, i32)>) {
         for pool in array(&table["pools"]) {
             if !conditions(pool, ctx) {
                 continue;
@@ -73,6 +114,12 @@ impl LootTables {
                     }
                 });
                 let Some((entry, _)) = chosen else { continue };
+                if entry["type"] == "minecraft:loot_table" {
+                    if let Some(nested) = entry["value"].as_str().and_then(|n| self.table(n)) {
+                        self.roll(nested, ctx, drops);
+                    }
+                    continue;
+                }
                 if entry["type"] != "minecraft:item" {
                     continue; // empty, or a kind of entry not supported yet
                 }
@@ -94,7 +141,6 @@ impl LootTables {
                 }
             }
         }
-        drops
     }
 }
 
@@ -154,6 +200,9 @@ fn condition(c: &Value, ctx: &mut LootContext) -> bool {
             ctx.rng.f64() < chance
         }
         "minecraft:block_state_property" => block_state_matches(&c["properties"], ctx.state),
+        "minecraft:entity_properties" if c["entity"] == "this" => {
+            entity_matches(&c["predicate"], &ctx.entity)
+        }
         "minecraft:inverted" => !condition(&c["term"], ctx),
         "minecraft:any_of" => array(&c["terms"]).iter().any(|t| condition(t, ctx)),
         "minecraft:all_of" => array(&c["terms"]).iter().all(|t| condition(t, ctx)),
@@ -181,6 +230,33 @@ fn match_tool(predicate: &Value, tool: i32) -> bool {
         Value::Array(list) => list.iter().filter_map(Value::as_str).any(matches),
         _ => false,
     }
+}
+
+/// Matches the parts of an entity predicate Levitas knows; anything else fails.
+fn entity_matches(predicate: &Value, entity: &EntityProps) -> bool {
+    let Some(fields) = predicate.as_object() else {
+        return false;
+    };
+    fields.iter().all(|(key, wanted)| match key.as_str() {
+        "flags" => wanted.as_object().is_some_and(|flags| {
+            flags.iter().all(|(flag, value)| match flag.as_str() {
+                "is_on_fire" => value.as_bool() == Some(entity.on_fire),
+                _ => false,
+            })
+        }),
+        "components" => wanted.as_object().is_some_and(|components| {
+            components.iter().all(|(name, value)| {
+                name == "minecraft:sheep/color" && value.as_str() == entity.sheep_color
+            })
+        }),
+        "type_specific" => {
+            wanted["type"] == "minecraft:sheep"
+                && wanted
+                    .get("sheared")
+                    .is_none_or(|s| s.as_bool() == Some(entity.sheared))
+        }
+        _ => false,
+    })
 }
 
 fn block_state_matches(properties: &Value, state: u16) -> bool {
@@ -268,6 +344,7 @@ mod tests {
             state,
             tool,
             rng: &mut rng,
+            entity: Default::default(),
         })
     }
 
@@ -324,5 +401,58 @@ mod tests {
             .any(|&(i, _)| i == item("minecraft:wheat_seeds")));
         let young = drops(wheat.first_state, "minecraft:air");
         assert!(!young.iter().any(|&(i, _)| i == item("minecraft:wheat")));
+    }
+
+    fn mob_drops(entity: &str, props: EntityProps, seed: u64) -> Vec<(i32, i32)> {
+        let tables = LootTables::load();
+        let mut rng = Rng::new(seed);
+        tables.entity_drops(
+            entity,
+            &mut LootContext {
+                state: block::AIR,
+                tool: 0,
+                rng: &mut rng,
+                entity: props,
+            },
+        )
+    }
+
+    #[test]
+    fn cows_drop_raw_beef_and_sometimes_leather() {
+        for seed in 0..20 {
+            let drops = mob_drops("minecraft:cow", EntityProps::default(), seed);
+            let beef: i32 = drops
+                .iter()
+                .filter(|(i, _)| *i == item("minecraft:beef"))
+                .map(|(_, n)| n)
+                .sum();
+            // Not cooked: the cow was not on fire.
+            assert!((1..=3).contains(&beef), "{drops:?}");
+            assert!(drops
+                .iter()
+                .all(|(i, n)| *i != item("minecraft:leather") || *n <= 2));
+        }
+    }
+
+    #[test]
+    fn sheep_drop_wool_of_their_colour_unless_sheared() {
+        let black = EntityProps {
+            sheep_color: Some("black"),
+            ..Default::default()
+        };
+        let drops = mob_drops("minecraft:sheep", black.clone(), 3);
+        assert!(
+            drops.contains(&(item("minecraft:black_wool"), 1)),
+            "{drops:?}"
+        );
+        assert!(drops.iter().any(|(i, _)| *i == item("minecraft:mutton")));
+        let sheared = EntityProps {
+            sheared: true,
+            ..black
+        };
+        let drops = mob_drops("minecraft:sheep", sheared, 3);
+        assert!(!drops
+            .iter()
+            .any(|(i, _)| *i == item("minecraft:black_wool")));
     }
 }

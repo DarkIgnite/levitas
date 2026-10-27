@@ -8,7 +8,7 @@ use levitas_registry::command_argument;
 use super::*;
 
 const HELP: &str = "Commands: /gamemode <survival|creative>, /give <item> [count], /kill, \
-                    /time <set|add|query> ..., /weather <clear|rain|thunder> [seconds]";
+                    /time <set|add|query> ..., /weather <clear|rain|thunder> [seconds], /summon <mob>";
 
 impl World {
     pub(super) fn command(&mut self, id: i32, command: &str) {
@@ -44,6 +44,10 @@ impl World {
                     }
                 }
                 None => "Usage: /weather <clear|rain|thunder> [seconds]".to_owned(),
+            },
+            Some("summon") => match args.next() {
+                Some(mob) => self.summon(id, mob),
+                None => "Usage: /summon <cow|pig|sheep|chicken>".to_owned(),
             },
             Some("help") => HELP.to_owned(),
             _ => format!("Unknown command: /{command}. {HELP}"),
@@ -253,6 +257,10 @@ pub(super) fn command_tree() -> Writer {
     t.argument(item, "count", integer, at_least(1));
 
     t.literal(root, "kill", true);
+    let summon = t.literal(root, "summon", false);
+    for mob in ["cow", "pig", "sheep", "chicken"] {
+        t.literal(summon, mob, true);
+    }
     t.literal(root, "help", true);
 
     let time = t.literal(root, "time", false);

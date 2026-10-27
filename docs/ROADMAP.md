@@ -101,23 +101,35 @@ Known gaps are listed under each phase instead of being hidden.
 
 ## Phase 4: Combat and basic entities
 
-- [ ] Attacking players: damage, attack cooldown, critical hits, knockback, sweeping
+- [ ] Attacking players: damage, attack cooldown, critical hits, knockback, sweeping.
+      Players attacking mobs works (held item's attack damage and speed from the data
+      generator, charge, critical hits, knockback, weapon wear); PvP and sweeping do not.
 - [ ] Armor and armor toughness, shields, damage types and immunities
 - [ ] Bows, crossbows, tridents, arrows, snowballs, eggs, ender pearls
 - [ ] Status effects (needed by food, potions and mobs)
-- [ ] Entity framework: tracking, physics, collisions, saving entities to disk
+- [ ] Entity framework: tracking, physics, collisions, saving entities to disk.
+      Mobs (`world/mobs.rs`) are shown to players who have their chunk loaded, move
+      with gravity and block collisions, and are saved in vanilla `entities/` region
+      files. Items and falling blocks are not tracked per player yet.
 - [ ] Minecarts, boats, item frames, paintings, armor stands, experience orbs
 - [ ] TNT and explosions
 
 ## Phase 5: Mobs
 
-- [ ] Natural spawning by light level, biome and time; despawning rules
+- [ ] Natural spawning by light level, biome and time; despawning rules. Animals spawn
+      once when a chunk is generated, in groups from the biome's spawn list; there is
+      no spawning afterwards yet, and no hostile mobs.
 - [ ] Pathfinding and AI goals
 - [ ] Passive mobs: cow, pig, sheep (shearing, dye), chicken, rabbit, horse family,
       wolf, cat, fox, parrot, turtle, fish, squid, axolotl, frog, bee, goat, ...
+      Done: cows (milking), pigs, sheep (natural wool colours, shearing, regrowing wool
+      by eating grass), chickens (eggs, slow falling). They wander, panic when hit,
+      swim, look at players and make their sounds. Missing: breeding, babies, temptation
+      by food, dyeing, biome variants (all are temperate), and every other animal.
 - [ ] Hostile mobs: zombie variants, skeleton variants, creeper, spider, enderman,
       slime, witch, phantom, drowned, pillager, silverfish, ...
-- [ ] Mob drops, experience, equipment, babies, riding
+- [ ] Mob drops, experience, equipment, babies, riding. Drops come from the vanilla
+      entity loot tables (sheep drop their colour's wool); no experience yet.
 - [ ] Breeding, taming, leashes, name tags
 
 ## Phase 6: Farming, nature and time

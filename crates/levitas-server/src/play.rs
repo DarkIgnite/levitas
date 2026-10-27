@@ -21,6 +21,8 @@ const CLIENT_COMMAND_RESPAWN: i32 = 0;
 /// Flag in the player input packet for the sneak key.
 const INPUT_SNEAK: u8 = 0x20;
 const PLAYER_COMMAND_LEAVE_BED: i32 = 0;
+const INTERACT_USE: i32 = 0;
+const INTERACT_ATTACK: i32 = 1;
 const PLAYER_COMMAND_START_SPRINTING: i32 = 1;
 const PLAYER_COMMAND_STOP_SPRINTING: i32 = 2;
 
@@ -212,6 +214,19 @@ fn decode(id: i32, packet: &[u8]) -> io::Result<Option<Event>> {
             CLIENT_COMMAND_RESPAWN => Event::Respawn { id },
             _ => return Ok(None),
         },
+        serverbound::INTERACT => {
+            let target = r.varint()?;
+            match r.varint()? {
+                INTERACT_ATTACK => Event::Attack { id, target },
+                INTERACT_USE => Event::UseEntity {
+                    id,
+                    target,
+                    hand: r.varint()?,
+                },
+                // "Interact at" comes along with "interact" and is not needed.
+                _ => return Ok(None),
+            }
+        }
         serverbound::PLAYER_COMMAND => {
             let _entity = r.varint()?;
             match r.varint()? {
