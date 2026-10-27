@@ -526,6 +526,9 @@ impl World {
                 z = (z + self.rng.below(11) as i32 - 5).clamp(cz * 16, cz * 16 + 15);
                 if let Some(y) = self.animal_spawn_height(x, z) {
                     let pos = [f64::from(x) + 0.5, f64::from(y), f64::from(z) + 0.5];
+                    if !self.mob_fits(kind, pos) {
+                        continue;
+                    }
                     let mob = Mob::new(kind, pos, &mut self.rng);
                     self.mobs.insert(next_entity_id(), mob);
                 }
@@ -659,10 +662,10 @@ impl World {
             let (dx, dz) = (target[0] - mob.pos[0], target[1] - mob.pos[2]);
             let distance = dx.hypot(dz).max(1e-6);
             let speed = mob.kind.speed() * if mob.panic > 0 { 2.0 } else { 1.0 };
-            if mob.on_ground || in_water {
-                mob.vel[0] = dx / distance * speed;
-                mob.vel[2] = dz / distance * speed;
-            }
+            // Mobs keep heading for their target in the air too (over a step they
+            // jumped, or up a wall a spider climbs).
+            mob.vel[0] = dx / distance * speed;
+            mob.vel[2] = dz / distance * speed;
             mob.yaw = yaw_towards(mob.pos, [target[0], mob.pos[1], target[1]]);
             if mob.blocked && mob.kind == MobKind::Spider {
                 mob.vel[1] = 0.2; // climbing
@@ -674,41 +677,35 @@ impl World {
             mob.vel[2] *= 0.5;
         }
 
+        let (width, height) = mob.kind.size();
+        let half = width / 2.0;
+        let mut pos = mob.pos;
+        // Vertical first, then each horizontal axis, each as far as blocks allow.
+        let dy = self.clip_move(pos, half, height, 1, mob.vel[1]);
+        pos[1] += dy;
+        let stopped = (dy - mob.vel[1]).abs() > 1e-9;
+        mob.on_ground = stopped && mob.vel[1] < 0.0;
+        if stopped {
+            mob.vel[1] = 0.0;
+        }
+        mob.blocked = false;
+        for axis in [0, 2] {
+            let d = self.clip_move(pos, half, height, axis, mob.vel[axis]);
+            pos[axis] += d;
+            if (d - mob.vel[axis]).abs() > 1e-9 {
+                mob.blocked = true;
+                mob.vel[axis] = 0.0;
+            }
+        }
+        // Like vanilla, the mob moves first and gravity then slows the next move, so a
+        // jump's full 0.42 counts and lifts it over a block.
         if in_water {
-            // Animals swim up and float at the surface.
+            // Swimming up to float at the surface.
             mob.vel[1] = (mob.vel[1] * 0.8 + 0.04).min(0.1);
         } else {
             mob.vel[1] = (mob.vel[1] - GRAVITY) * AIR_DRAG;
             if mob.kind == MobKind::Chicken && mob.vel[1] < 0.0 {
                 mob.vel[1] *= 0.6; // flapping
-            }
-        }
-
-        let (width, height) = mob.kind.size();
-        let half = width / 2.0;
-        let mut pos = mob.pos;
-        // Vertical first, then each horizontal axis, stopping at blocks.
-        let new_y = pos[1] + mob.vel[1];
-        let falling = mob.vel[1] < 0.0;
-        match self.first_hit(pos, half, height, 1, new_y) {
-            Some(stop) => {
-                pos[1] = stop;
-                mob.on_ground = falling;
-                mob.vel[1] = 0.0;
-            }
-            None => {
-                pos[1] = new_y;
-                mob.on_ground = false;
-            }
-        }
-        mob.blocked = false;
-        for axis in [0, 2] {
-            let moved = pos[axis] + mob.vel[axis];
-            if self.first_hit(pos, half, height, axis, moved).is_some() {
-                mob.blocked = true;
-                mob.vel[axis] = 0.0;
-            } else {
-                pos[axis] = moved;
             }
         }
 
@@ -726,65 +723,94 @@ impl World {
         }
     }
 
-    /// Where movement along `axis` towards `to` is stopped by a block, if it is: the
-    /// coordinate the mob ends at instead. Blocks in unloaded chunks count as solid.
-    fn first_hit(
-        &self,
-        pos: [f64; 3],
-        half: f64,
-        height: f64,
-        axis: usize,
-        to: f64,
-    ) -> Option<f64> {
-        let mut min = [pos[0] - half, pos[1], pos[2] - half];
-        let mut max = [pos[0] + half, pos[1] + height, pos[2] + half];
-        let delta = to - pos[axis];
-        min[axis] += delta;
-        max[axis] += delta;
+    /// How far a mob of half-width `half` and `height` standing at `pos` can move by
+    /// `delta` along `axis` before a block stops it. Only blocks ahead count: blocks the
+    /// mob already overlaps (a spider in a gap narrower than itself) never push it.
+    /// Blocks in chunks that are not loaded count as solid.
+    fn clip_move(&self, pos: [f64; 3], half: f64, height: f64, axis: usize, delta: f64) -> f64 {
+        if delta == 0.0 {
+            return 0.0;
+        }
         let eps = 1e-7;
-        let mut stop: Option<f64> = None;
-        for bx in (min[0] + eps).floor() as i32..=(max[0] - eps).floor() as i32 {
-            for by in (min[1] + eps).floor() as i32 - 1..=(max[1] - eps).floor() as i32 {
-                for bz in (min[2] + eps).floor() as i32..=(max[2] - eps).floor() as i32 {
+        let min = [pos[0] - half, pos[1], pos[2] - half];
+        let max = [pos[0] + half, pos[1] + height, pos[2] + half];
+        // The region swept by the move.
+        let mut lo_region = min;
+        let mut hi_region = max;
+        if delta > 0.0 {
+            hi_region[axis] += delta;
+        } else {
+            lo_region[axis] += delta;
+        }
+        let mut allowed = delta;
+        let range = |i: usize, below: i32| {
+            (lo_region[i] + eps).floor() as i32 - below..=(hi_region[i] - eps).floor() as i32
+        };
+        for bx in range(0, 0) {
+            // One block lower too: fences and walls stick up above their block.
+            for by in range(1, 1) {
+                for bz in range(2, 0) {
                     let block = BlockPos::new(bx, by, bz);
                     let boxes: &[[f32; 6]] = match self.loaded_state(block) {
                         Some(state) => collision_boxes(state),
                         None if (MIN_Y..=MAX_Y).contains(&by) => &[[0.0, 0.0, 0.0, 1.0, 1.0, 1.0]],
                         None => &[],
                     };
+                    let origin = [f64::from(bx), f64::from(by), f64::from(bz)];
                     for b in boxes {
-                        let lo = [
-                            f64::from(bx) + f64::from(b[0]),
-                            f64::from(by) + f64::from(b[1]),
-                            f64::from(bz) + f64::from(b[2]),
-                        ];
-                        let hi = [
-                            f64::from(bx) + f64::from(b[3]),
-                            f64::from(by) + f64::from(b[4]),
-                            f64::from(bz) + f64::from(b[5]),
-                        ];
-                        let overlaps = (0..3).all(|i| min[i] < hi[i] - eps && max[i] > lo[i] + eps);
-                        if !overlaps {
+                        let lo = [0, 1, 2].map(|i| origin[i] + f64::from(b[i]));
+                        let hi = [0, 1, 2].map(|i| origin[i] + f64::from(b[i + 3]));
+                        // It must be beside the mob on the other two axes...
+                        let beside = (0..3)
+                            .filter(|&i| i != axis)
+                            .all(|i| min[i] < hi[i] - eps && max[i] > lo[i] + eps);
+                        if !beside {
                             continue;
                         }
-                        // Stop against the face the mob moves into.
-                        let end = if delta > 0.0 {
-                            lo[axis] - (max[axis] - min[axis]) + if axis == 1 { 0.0 } else { half }
-                        } else if axis == 1 {
-                            hi[1]
-                        } else {
-                            hi[axis] + half
-                        };
-                        stop = Some(match stop {
-                            Some(s) if delta > 0.0 => s.min(end),
-                            Some(s) => s.max(end),
-                            None => end,
-                        });
+                        // ...and ahead of it on this one.
+                        if delta > 0.0 && lo[axis] >= max[axis] - eps {
+                            allowed = allowed.min(lo[axis] - max[axis]);
+                        } else if delta < 0.0 && hi[axis] <= min[axis] + eps {
+                            allowed = allowed.max(hi[axis] - min[axis]);
+                        }
                     }
                 }
             }
         }
-        stop
+        if delta > 0.0 {
+            allowed.max(0.0)
+        } else {
+            allowed.min(0.0)
+        }
+    }
+
+    /// Whether a mob of `kind` at `pos` would be inside a block.
+    pub(super) fn mob_fits(&self, kind: MobKind, pos: [f64; 3]) -> bool {
+        let (width, height) = kind.size();
+        let half = width / 2.0;
+        let eps = 1e-7;
+        let min = [pos[0] - half, pos[1], pos[2] - half];
+        let max = [pos[0] + half, pos[1] + height, pos[2] + half];
+        for bx in (min[0] + eps).floor() as i32..=(max[0] - eps).floor() as i32 {
+            for by in (min[1] + eps).floor() as i32 - 1..=(max[1] - eps).floor() as i32 {
+                for bz in (min[2] + eps).floor() as i32..=(max[2] - eps).floor() as i32 {
+                    let Some(state) = self.loaded_state(BlockPos::new(bx, by, bz)) else {
+                        return false;
+                    };
+                    let origin = [f64::from(bx), f64::from(by), f64::from(bz)];
+                    let inside = collision_boxes(state).iter().any(|b| {
+                        (0..3).all(|i| {
+                            min[i] < origin[i] + f64::from(b[i + 3]) - eps
+                                && max[i] > origin[i] + f64::from(b[i]) + eps
+                        })
+                    });
+                    if inside {
+                        return false;
+                    }
+                }
+            }
+        }
+        true
     }
 
     fn loaded_state(&self, pos: BlockPos) -> Option<u16> {
@@ -1193,4 +1219,85 @@ fn within_reach(p: &Player, mob: &Mob) -> bool {
     let centre = [mob.pos[0], mob.pos[1] + height / 2.0, mob.pos[2]];
     let d: f64 = (0..3).map(|i| (eye[i] - centre[i]).powi(2)).sum();
     d.sqrt() <= REACH
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A flat world (grass on top at y = -61, standing height -60) with the chunks
+    /// around the origin loaded.
+    fn flat_world() -> World {
+        let dir = std::env::temp_dir().join(format!(
+            "levitas-mobs-{}-{}",
+            std::process::id(),
+            next_entity_id()
+        ));
+        let (mut world, _) = World::new(
+            dir,
+            NewWorld {
+                kind: WorldKind::Flat,
+                seed: Some(0),
+            },
+        );
+        for cx in -1..=1 {
+            for cz in -1..=1 {
+                world.chunk(cx, cz);
+            }
+        }
+        world
+    }
+
+    fn wall(world: &mut World, x: i32, heights: std::ops::Range<i32>) {
+        for z in -3..=3 {
+            for y in heights.clone() {
+                world.set_block(BlockPos::new(x, y, z), block::STONE);
+            }
+        }
+    }
+
+    #[test]
+    fn wide_mobs_stay_on_the_floor_of_a_narrow_gap() {
+        let mut world = flat_world();
+        // A 1-wide gap between two 2-high walls; a spider is 1.4 wide.
+        wall(&mut world, 0, -60..-58);
+        wall(&mut world, 2, -60..-58);
+        let mut spider = Mob::new(MobKind::Spider, [1.5, -60.0, 0.5], &mut world.rng);
+        for _ in 0..40 {
+            world.step(&mut spider);
+            assert!(spider.pos[1] < -59.9, "lifted to y {}", spider.pos[1]);
+        }
+    }
+
+    #[test]
+    fn spiders_climb_walls() {
+        let mut world = flat_world();
+        // A wall 4 blocks high between the spider and where it wants to go.
+        wall(&mut world, 3, -60..-56);
+        let mut spider = Mob::new(MobKind::Spider, [1.5, -60.0, 0.5], &mut world.rng);
+        let mut highest = spider.pos[1];
+        for _ in 0..200 {
+            spider.target = Some(([8.5, 0.5], 20));
+            world.step(&mut spider);
+            highest = highest.max(spider.pos[1]);
+        }
+        assert!(highest >= -56.0, "climbed only to y {highest}");
+        assert!(spider.pos[0] > 4.0, "still at x {}", spider.pos[0]);
+    }
+
+    #[test]
+    fn walkers_hop_up_one_block_steps() {
+        let mut world = flat_world();
+        wall(&mut world, 3, -60..-59);
+        let mut cow = Mob::new(MobKind::Cow, [1.5, -60.0, 0.5], &mut world.rng);
+        for _ in 0..100 {
+            cow.target = Some(([8.5, 0.5], 20));
+            world.step(&mut cow);
+        }
+        assert!(
+            cow.pos[0] > 4.0,
+            "a cow should hop a 1-block step, at x {}",
+            cow.pos[0]
+        );
+    }
 }

@@ -310,8 +310,9 @@ impl World {
             gx += self.rng.below(11) as i32 - 5;
             gz += self.rng.below(11) as i32 - 5;
             let pos = BlockPos::new(gx, y, gz);
-            if self.monster_can_spawn(pos) {
-                let at = [f64::from(gx) + 0.5, f64::from(y), f64::from(gz) + 0.5];
+            let at = [f64::from(gx) + 0.5, f64::from(y), f64::from(gz) + 0.5];
+            // A spider needs more room than the two blocks a zombie needs.
+            if self.monster_can_spawn(pos) && self.mob_fits(kind, at) {
                 let mob = Mob::new(kind, at, &mut self.rng);
                 self.mobs.insert(next_entity_id(), mob);
             }
