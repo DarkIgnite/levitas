@@ -31,12 +31,19 @@ pub enum BlockEntity {
     Campfire(super::campfire::Campfire),
 }
 
+/// Plain storage: chests, barrels, hoppers, droppers and dispensers.
 pub struct Chest {
-    /// Block entity type: chests and barrels share this storage.
-    kind: i32,
-    items: Box<[Stack; CHEST_SLOTS]>,
+    /// Block entity type: these blocks share this storage.
+    pub kind: i32,
+    pub items: Box<[Stack]>,
     viewers: HashSet<i32>,
+    /// Ticks until a hopper moves its next item.
+    pub cooldown: u32,
 }
+
+/// Slots of a hopper, and of a dropper or dispenser.
+pub const HOPPER_SLOTS: usize = 5;
+pub const DISPENSER_SLOTS: usize = 9;
 
 #[derive(Default)]
 pub struct Furnace {
@@ -59,6 +66,15 @@ impl BlockEntity {
             }
             BlockEntity::Chest(c) if c.kind == block_entity_type::TRAPPED_CHEST => {
                 ("minecraft:trapped_chest", &c.items[..])
+            }
+            BlockEntity::Chest(c) if c.kind == block_entity_type::HOPPER => {
+                ("minecraft:hopper", &c.items[..])
+            }
+            BlockEntity::Chest(c) if c.kind == block_entity_type::DROPPER => {
+                ("minecraft:dropper", &c.items[..])
+            }
+            BlockEntity::Chest(c) if c.kind == block_entity_type::DISPENSER => {
+                ("minecraft:dispenser", &c.items[..])
             }
             BlockEntity::Chest(c) => ("minecraft:chest", &c.items[..]),
             BlockEntity::Furnace(f) => (cooker_id(f.kind), &f.items[..]),
@@ -104,6 +120,9 @@ impl BlockEntity {
             "minecraft:chest" => Self::for_block(block::CHEST)?,
             "minecraft:trapped_chest" => Self::for_block(block::TRAPPED_CHEST)?,
             "minecraft:barrel" => Self::for_block(block::BARREL)?,
+            "minecraft:hopper" => Self::for_block(block::HOPPER)?,
+            "minecraft:dropper" => Self::for_block(block::DROPPER)?,
+            "minecraft:dispenser" => Self::for_block(block::DISPENSER)?,
             "minecraft:furnace" => Self::for_block(block::FURNACE)?,
             "minecraft:smoker" => Self::for_block(block::SMOKER)?,
             "minecraft:blast_furnace" => Self::for_block(block::BLAST_FURNACE)?,
@@ -134,17 +153,22 @@ impl BlockEntity {
 
     /// The block entity a newly placed block needs, if any.
     pub fn for_block(state: u16) -> Option<Self> {
-        let chest = |kind| {
+        let store = |kind, slots| {
             Some(BlockEntity::Chest(Chest {
                 kind,
-                items: Box::new([Stack::EMPTY; CHEST_SLOTS]),
+                items: vec![Stack::EMPTY; slots].into_boxed_slice(),
                 viewers: HashSet::new(),
+                cooldown: 0,
             }))
         };
+        let chest = |kind| store(kind, CHEST_SLOTS);
         match BlockInfo::of(state).name {
             "minecraft:chest" => chest(block_entity_type::CHEST),
             "minecraft:trapped_chest" => chest(block_entity_type::TRAPPED_CHEST),
             "minecraft:barrel" => chest(block_entity_type::BARREL),
+            "minecraft:hopper" => store(block_entity_type::HOPPER, HOPPER_SLOTS),
+            "minecraft:dropper" => store(block_entity_type::DROPPER, DISPENSER_SLOTS),
+            "minecraft:dispenser" => store(block_entity_type::DISPENSER, DISPENSER_SLOTS),
             "minecraft:furnace" => Some(BlockEntity::Furnace(Furnace::default())),
             "minecraft:smoker" => Some(BlockEntity::Furnace(Furnace {
                 kind: Cooker::Smoker,
@@ -182,7 +206,6 @@ impl BlockEntity {
         self.items()
     }
 
-    #[cfg(test)]
     pub fn stacks_mut(&mut self) -> &mut [Stack] {
         self.items_mut()
     }
@@ -219,7 +242,8 @@ pub enum View {
     Inventory,
     Crafting,
     Furnace(BlockPos, Cooker),
-    Chest(BlockPos),
+    /// Plain storage with this many slots.
+    Chest(BlockPos, usize),
     /// Both halves of a double chest: the right half's 27 slots, then the left half's.
     DoubleChest(BlockPos, BlockPos),
     /// An enchanting table; its two slots live in the window, like a crafting grid.
@@ -237,7 +261,7 @@ impl View {
             View::Inventory => 0,
             View::Crafting => 10,
             View::Furnace(..) => 3,
-            View::Chest(_) => CHEST_SLOTS,
+            View::Chest(_, slots) => slots,
             View::DoubleChest(..) => 2 * CHEST_SLOTS,
             View::Enchanting(_) => 2,
             View::Anvil(_) | View::Grindstone(_) => 3,
@@ -248,7 +272,7 @@ impl View {
     /// The block entities shown in the window, each with its first window slot.
     fn parts(self) -> Vec<(BlockPos, usize)> {
         match self {
-            View::Chest(pos) | View::Furnace(pos, _) => vec![(pos, 0)],
+            View::Chest(pos, _) | View::Furnace(pos, _) => vec![(pos, 0)],
             View::DoubleChest(first, second) => vec![(first, 0), (second, CHEST_SLOTS)],
             View::Inventory
             | View::Crafting
@@ -265,7 +289,7 @@ impl View {
             View::Inventory => click::Layout::Inventory,
             View::Crafting => click::Layout::Crafting,
             View::Furnace(_, kind) => click::Layout::Furnace(kind),
-            View::Chest(_) | View::DoubleChest(..) => click::Layout::Chest(self.container_len()),
+            View::Chest(..) | View::DoubleChest(..) => click::Layout::Chest(self.container_len()),
             View::Enchanting(_) => click::Layout::Enchanting,
             View::Anvil(_) => click::Layout::Anvil,
             View::Grindstone(_) => click::Layout::Grindstone,
@@ -312,10 +336,21 @@ impl World {
                         (View::DoubleChest(pos, q), menu::GENERIC_9X6, "Large Chest")
                     }
                     Some(q) => (View::DoubleChest(q, pos), menu::GENERIC_9X6, "Large Chest"),
-                    None => (View::Chest(pos), menu::GENERIC_9X3, "Chest"),
+                    None => (View::Chest(pos, CHEST_SLOTS), menu::GENERIC_9X3, "Chest"),
                 }
             }
-            "minecraft:barrel" => (View::Chest(pos), menu::GENERIC_9X3, "Barrel"),
+            "minecraft:barrel" => (View::Chest(pos, CHEST_SLOTS), menu::GENERIC_9X3, "Barrel"),
+            "minecraft:hopper" => (View::Chest(pos, HOPPER_SLOTS), menu::HOPPER, "Item Hopper"),
+            "minecraft:dropper" => (
+                View::Chest(pos, DISPENSER_SLOTS),
+                menu::GENERIC_3X3,
+                "Dropper",
+            ),
+            "minecraft:dispenser" => (
+                View::Chest(pos, DISPENSER_SLOTS),
+                menu::GENERIC_3X3,
+                "Dispenser",
+            ),
             "minecraft:furnace" => (
                 View::Furnace(pos, Cooker::Furnace),
                 menu::FURNACE,
@@ -363,7 +398,7 @@ impl World {
         );
         self.resync_window(id, window, view);
         match view {
-            View::Chest(pos) => self.chest_viewers_changed(pos),
+            View::Chest(pos, _) => self.chest_viewers_changed(pos),
             View::DoubleChest(first, second) => {
                 self.chest_viewers_changed(first);
                 self.chest_viewers_changed(second);
@@ -410,7 +445,7 @@ impl World {
                 let open = p.open.as_ref().expect("window is open");
                 open.grid[..2].to_vec()
             }
-            View::Chest(_) | View::Furnace(..) | View::DoubleChest(..) => {
+            View::Chest(..) | View::Furnace(..) | View::DoubleChest(..) => {
                 let mut slots = vec![Stack::EMPTY; view.container_len()];
                 for (part, first) in view.parts() {
                     if let Some(entity) = self.block_entities.get(&part) {
@@ -459,7 +494,7 @@ impl World {
                 let open = p.open.as_mut().expect("window is open");
                 open.grid[..2].copy_from_slice(&slots[..2]);
             }
-            View::Chest(_) | View::Furnace(..) | View::DoubleChest(..) => {
+            View::Chest(..) | View::Furnace(..) | View::DoubleChest(..) => {
                 for (part, first) in view.parts() {
                     if let Some(entity) = self.block_entities.get_mut(&part) {
                         let items = entity.items_mut();
@@ -593,7 +628,7 @@ impl World {
     }
 
     /// Sends changed container slots to everyone (but `except`) viewing the container.
-    fn notify_viewers(&mut self, pos: BlockPos, slots: &[usize], except: Option<i32>) {
+    pub(super) fn notify_viewers(&mut self, pos: BlockPos, slots: &[usize], except: Option<i32>) {
         let Some(entity) = self.block_entities.get_mut(&pos) else {
             return;
         };
@@ -791,7 +826,7 @@ impl World {
             View::Enchanting(_) => returned.extend(&open.grid[..2]),
             View::Anvil(_) | View::Grindstone(_) => returned.extend(&open.grid[..2]),
             View::Stonecutter(_) => returned.push(open.grid[0]),
-            View::Chest(_) | View::Furnace(..) | View::DoubleChest(..) => {
+            View::Chest(..) | View::Furnace(..) | View::DoubleChest(..) => {
                 let mut last_viewer = false;
                 for (part, _) in open.view.parts() {
                     if let Some(entity) = self.block_entities.get_mut(&part) {

@@ -139,6 +139,45 @@ impl World {
         self.spawn_item(stack, at, vel, PICKUP_DELAY_BROKEN);
     }
 
+    /// An item fired out of a dropper or dispenser.
+    pub(super) fn spawn_dropped(&mut self, stack: Stack, at: [f64; 3], vel: [f64; 3]) {
+        self.spawn_item(stack, at, vel, PICKUP_DELAY_BROKEN);
+    }
+
+    /// A hopper takes in items lying on top of it. Returns whether it took any.
+    pub(super) fn hopper_pickup(&mut self, pos: BlockPos) -> bool {
+        let x = f64::from(pos.x);
+        let z = f64::from(pos.z);
+        let y = f64::from(pos.y);
+        let on_top: Vec<i32> = self
+            .items
+            .iter()
+            .filter(|(_, i)| {
+                (x..x + 1.0).contains(&i.pos[0])
+                    && (z..z + 1.0).contains(&i.pos[2])
+                    && (y + 0.5..y + 2.0).contains(&i.pos[1])
+            })
+            .map(|(&id, _)| id)
+            .collect();
+        let mut took = false;
+        for id in on_top {
+            let stack = self.items[&id].stack;
+            let rest = self.insert_stack(pos, crate::blocks::Dir::Up, stack);
+            if rest == stack {
+                continue;
+            }
+            took = true;
+            if rest.is_empty() {
+                self.items.remove(&id);
+                self.broadcast(remove_entity(id), None);
+            } else {
+                self.items.get_mut(&id).expect("listed").stack = rest;
+                self.broadcast(item_data(id, rest), None);
+            }
+        }
+        took
+    }
+
     /// Scatters an item in a random direction, as a dying player's inventory does.
     pub(super) fn scatter_item(&mut self, pos: [f64; 3], stack: Stack) {
         let speed = self.rng.f64() * 0.5;

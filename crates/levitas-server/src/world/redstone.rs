@@ -227,6 +227,10 @@ impl World {
         let n = blocks::name(state);
         if crate::blocks::piston::is_piston(state) {
             self.react_piston(pos, state);
+        } else if n == "minecraft:hopper" {
+            self.react_hopper(pos, state);
+        } else if n == "minecraft:dropper" || n == "minecraft:dispenser" {
+            self.react_dispenser(pos, state);
         } else if blocks::is_door(state) {
             if prop(state, "half") == Some("upper") {
                 return; // the lower half decides for both
@@ -432,6 +436,8 @@ impl World {
             } else if output != before {
                 self.redstone_changed(pos);
             }
+        } else if n == "minecraft:dropper" || n == "minecraft:dispenser" {
+            self.dispense(pos, state);
         } else if is_observer(state) {
             if prop(state, "powered") == Some("true") {
                 self.set_block(pos, with_bool(state, "powered", false));

@@ -1613,7 +1613,8 @@ async fn cows_can_be_killed_for_beef() {
     command(&mut alice, "summon cow").await;
     let cow = spawned(&mut alice, entity_type::COW).await;
     // A diamond sword deals 7 at full charge; a cow has 10 health.
-    for _ in 0..2 {
+    // Knocked back, the cow runs; a few swings make sure two land.
+    for _ in 0..4 {
         tokio::time::sleep(std::time::Duration::from_millis(700)).await;
         send(&mut alice, interact(cow, 1)).await;
     }
@@ -1845,7 +1846,8 @@ async fn killing_mobs_gives_experience() {
     give(&mut alice, "diamond_sword", 1).await;
     command(&mut alice, "summon cow").await;
     let cow = spawned(&mut alice, entity_type::COW).await;
-    for _ in 0..2 {
+    // Knocked back, the cow runs; a few swings make sure two land.
+    for _ in 0..4 {
         tokio::time::sleep(std::time::Duration::from_millis(700)).await;
         send(&mut alice, interact(cow, 1)).await;
     }

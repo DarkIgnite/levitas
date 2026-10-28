@@ -289,6 +289,10 @@ pub fn reacts(state: u16) -> bool {
         || is_torch(state)
         || is_diode(state)
         || super::piston::is_piston(state)
+        || matches!(
+            n,
+            "minecraft:hopper" | "minecraft:dropper" | "minecraft:dispenser"
+        )
 }
 
 /// The repeater's delay in game ticks (one to four redstone ticks).

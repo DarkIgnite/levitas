@@ -318,6 +318,22 @@ impl World {
 
     /// Bone meal on a block: crops jump ahead, saplings may grow at once, grass sprouts
     /// plants around it. Returns whether it had any effect.
+    /// Bone meal from a dispenser. Returns whether it did anything.
+    pub(super) fn fertilize_from_dispenser(&mut self, pos: BlockPos, state: u16) -> bool {
+        if !self.fertilize(pos, state) {
+            return false;
+        }
+        self.broadcast(
+            Writer::packet(clientbound::LEVEL_EVENT)
+                .i32(LEVEL_EVENT_BONE_MEAL)
+                .position(pos)
+                .i32(15)
+                .bool(false),
+            None,
+        );
+        true
+    }
+
     fn fertilize(&mut self, pos: BlockPos, state: u16) -> bool {
         if let Some(max) = crop_max_age(state) {
             if age(state) >= max {

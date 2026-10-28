@@ -17,6 +17,7 @@ mod falling;
 mod fire;
 mod fluids;
 mod hazards;
+mod hoppers;
 mod items;
 mod mobs;
 mod monsters;
@@ -1089,6 +1090,7 @@ impl World {
         self.tick_items();
         self.tick_furnaces();
         self.tick_campfires();
+        self.tick_hoppers();
         if self.tick.is_multiple_of(AUTOSAVE_TICKS) {
             self.save_all();
         }

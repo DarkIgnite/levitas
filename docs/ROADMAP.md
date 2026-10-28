@@ -214,7 +214,12 @@ Known gaps are listed under each phase instead of being hidden.
       unbreakable blocks and blocks holding things, answer quasi-connectivity, and
       sticky ones pull a block back; clients animate the move. Missing: moving
       entities, slime and honey blocks, zero-tick behaviour.
-- [ ] Hoppers, droppers, dispensers (with their item behaviours), crafters
+- [ ] Hoppers, droppers, dispensers (with their item behaviours), crafters. Hoppers
+      (`world/hoppers.rs`) move an item every 8 ticks between containers (furnaces by
+      side), pick up items on top and lock when powered. Droppers fill containers or
+      drop; dispensers shoot arrows, pour and scoop fluids, use bone meal, flint and
+      steel and TNT, and drop the rest. Missing: crafters, minecart hoppers, other
+      dispenser items (armor, shulker boxes, spawn eggs, boats, ...).
 - [ ] Rails: powered, detector, activator
 - [ ] Doors, trapdoors, lamps, TNT, note blocks and bells powered by redstone. Doors
       (iron ones too), trapdoors, fence gates, lamps and TNT answer power; note blocks
