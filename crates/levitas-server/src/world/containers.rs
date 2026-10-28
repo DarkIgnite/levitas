@@ -184,6 +184,9 @@ pub enum View {
     DoubleChest(BlockPos, BlockPos),
     /// An enchanting table; its two slots live in the window, like a crafting grid.
     Enchanting(BlockPos),
+    /// An anvil or a grindstone: two inputs and a result, living in the window.
+    Anvil(BlockPos),
+    Grindstone(BlockPos),
 }
 
 impl View {
@@ -196,6 +199,7 @@ impl View {
             View::Chest(_) => CHEST_SLOTS,
             View::DoubleChest(..) => 2 * CHEST_SLOTS,
             View::Enchanting(_) => 2,
+            View::Anvil(_) | View::Grindstone(_) => 3,
         }
     }
 
@@ -204,7 +208,11 @@ impl View {
         match self {
             View::Chest(pos) | View::Furnace(pos, _) => vec![(pos, 0)],
             View::DoubleChest(first, second) => vec![(first, 0), (second, CHEST_SLOTS)],
-            View::Inventory | View::Crafting | View::Enchanting(_) => Vec::new(),
+            View::Inventory
+            | View::Crafting
+            | View::Enchanting(_)
+            | View::Anvil(_)
+            | View::Grindstone(_) => Vec::new(),
         }
     }
 
@@ -216,6 +224,8 @@ impl View {
             View::Furnace(_, kind) => click::Layout::Furnace(kind),
             View::Chest(_) | View::DoubleChest(..) => click::Layout::Chest(self.container_len()),
             View::Enchanting(_) => click::Layout::Enchanting,
+            View::Anvil(_) => click::Layout::Anvil,
+            View::Grindstone(_) => click::Layout::Grindstone,
         }
     }
 }
@@ -238,6 +248,14 @@ impl World {
         let (view, menu, title) = match BlockInfo::of(state).name {
             "minecraft:crafting_table" => (View::Crafting, menu::CRAFTING, "Crafting"),
             "minecraft:enchanting_table" => (View::Enchanting(pos), menu::ENCHANTMENT, "Enchant"),
+            "minecraft:anvil" | "minecraft:chipped_anvil" | "minecraft:damaged_anvil" => {
+                (View::Anvil(pos), menu::ANVIL, "Repair & Name")
+            }
+            "minecraft:grindstone" => (
+                View::Grindstone(pos),
+                menu::GRINDSTONE,
+                "Repair & Disenchant",
+            ),
             "minecraft:chest" | "minecraft:trapped_chest" => {
                 let partner = blocks::chest_partner(state, pos)
                     .filter(|&q| blocks::same_block(self.block(q), state));
@@ -303,6 +321,7 @@ impl World {
                 self.chest_viewers_changed(second);
             }
             View::Enchanting(_) => self.refresh_offers(id),
+            View::Anvil(_) => self.send_anvil_cost(id),
             View::Furnace(pos, _) => {
                 if let Some(BlockEntity::Furnace(f)) = self.block_entities.get(&pos) {
                     let data = furnace_data(window, f);
@@ -334,6 +353,10 @@ impl World {
             View::Enchanting(_) => {
                 let open = p.open.as_ref().expect("enchanting window is open");
                 open.grid[..2].to_vec()
+            }
+            View::Anvil(_) | View::Grindstone(_) => {
+                let open = p.open.as_ref().expect("window is open");
+                open.grid[..3].to_vec()
             }
             View::Chest(_) | View::Furnace(..) | View::DoubleChest(..) => {
                 let mut slots = vec![Stack::EMPTY; view.container_len()];
@@ -373,6 +396,11 @@ impl World {
                 let p = self.players.get_mut(&id).expect("player exists");
                 let open = p.open.as_mut().expect("enchanting window is open");
                 open.grid[..2].copy_from_slice(&slots[..2]);
+            }
+            View::Anvil(_) | View::Grindstone(_) => {
+                let p = self.players.get_mut(&id).expect("player exists");
+                let open = p.open.as_mut().expect("window is open");
+                open.grid[..3].copy_from_slice(&slots[..3]);
             }
             View::Chest(_) | View::Furnace(..) | View::DoubleChest(..) => {
                 for (part, first) in view.parts() {
@@ -422,18 +450,19 @@ impl World {
         let mut cursor = p.inventory.carried;
         let mut offhand = p.inventory.slots[OFFHAND];
         let mut drag = std::mem::take(&mut p.drag);
-        let thrown = click::click(
-            &mut click::Window {
-                layout,
-                slots: &mut slots,
-                carried: &mut cursor,
-                offhand: &mut offhand,
-                drag: &mut drag,
-                creative: p.mode == GAME_MODE_CREATIVE,
-                recipes: &self.recipes,
-            },
-            click::Click { slot, button, mode },
-        );
+        let mut w = click::Window {
+            layout,
+            slots: &mut slots,
+            carried: &mut cursor,
+            offhand: &mut offhand,
+            drag: &mut drag,
+            creative: p.mode == GAME_MODE_CREATIVE,
+            recipes: &self.recipes,
+            xp_level: p.xp_level,
+            used: None,
+        };
+        let thrown = click::click(&mut w, click::Click { slot, button, mode });
+        let used = w.used;
         p.drag = drag;
         p.inventory.carried = cursor;
         if view != View::Inventory {
@@ -467,6 +496,16 @@ impl World {
         }
         if matches!(view, View::Enchanting(_)) {
             self.refresh_offers(id);
+        }
+        match (view, used) {
+            (View::Anvil(pos), Some(click::Used::Levels(cost))) => self.anvil_used(id, pos, cost),
+            (View::Grindstone(pos), Some(click::Used::Experience(xp))) => {
+                self.grindstone_used(pos, xp)
+            }
+            _ => {}
+        }
+        if let View::Anvil(_) = view {
+            self.send_anvil_cost(id);
         }
         let parts = view.parts();
         for (i, &(part, first)) in parts.iter().enumerate() {
@@ -565,6 +604,60 @@ impl World {
         );
     }
 
+    /// Tells the player what the anvil's result costs.
+    fn send_anvil_cost(&mut self, id: i32) {
+        let Some(open) = self.players.get(&id).and_then(|p| p.open.as_ref()) else {
+            return;
+        };
+        let cost = click::anvil_cost(&open.grid[..3]);
+        let packet = Writer::packet(clientbound::CONTAINER_SET_DATA)
+            .varint(open.window)
+            .i16(0)
+            .i16(cost.min(i32::from(i16::MAX)) as i16);
+        self.send(id, packet);
+    }
+
+    /// The player paid for an anvil's work. The anvil wears: 12% of uses chip it a
+    /// stage, and a damaged anvil breaks.
+    fn anvil_used(&mut self, id: i32, pos: BlockPos, cost: i32) {
+        if self.players.get(&id).is_some_and(|p| p.survival()) {
+            self.give_levels(id, -cost);
+            if self.rng.f64() < 0.12 {
+                let state = self.block(pos);
+                let next = match blocks::name(state) {
+                    "minecraft:anvil" => Some("minecraft:chipped_anvil"),
+                    "minecraft:chipped_anvil" => Some("minecraft:damaged_anvil"),
+                    _ => None,
+                };
+                match next.and_then(BlockInfo::by_name) {
+                    Some(info) => {
+                        let facing = blocks::prop(state, "facing").unwrap_or("north");
+                        let worn = blocks::with(info.default_state, "facing", facing);
+                        self.set_block(pos, worn);
+                    }
+                    None => {
+                        self.set_block_updating(pos, block::AIR);
+                        self.close_container(id);
+                        self.play_sound("minecraft:block.anvil.destroy", pos, None);
+                        return;
+                    }
+                }
+            }
+        }
+        self.play_sound("minecraft:block.anvil.use", pos, None);
+    }
+
+    /// A grindstone gave its result: some experience comes back, at the grindstone.
+    fn grindstone_used(&mut self, pos: BlockPos, base: i32) {
+        let half = (base + 1) / 2;
+        let xp = half + self.rng.below(half.max(0) as u32 + 1) as i32;
+        if xp > 0 {
+            let centre = [pos.x, pos.y, pos.z].map(|v| f64::from(v) + 0.5);
+            self.spawn_xp(centre, xp);
+        }
+        self.play_sound("minecraft:block.grindstone.use", pos, None);
+    }
+
     /// Handles the client closing a window.
     pub(super) fn container_closed(&mut self, id: i32, window: i32) {
         if window == 0 {
@@ -597,6 +690,7 @@ impl World {
         match open.view {
             View::Crafting => returned.extend(open.grid),
             View::Enchanting(_) => returned.extend(&open.grid[..2]),
+            View::Anvil(_) | View::Grindstone(_) => returned.extend(&open.grid[..2]),
             View::Chest(_) | View::Furnace(..) | View::DoubleChest(..) => {
                 let mut last_viewer = false;
                 for (part, _) in open.view.parts() {

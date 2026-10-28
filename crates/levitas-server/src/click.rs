@@ -11,6 +11,7 @@ use levitas_registry::ItemInfo;
 
 use crate::inventory::Stack;
 use crate::recipes::{fuel_ticks, Cooker, Recipes};
+use crate::repair;
 
 /// Click modes as numbered by the protocol.
 const PICKUP: i32 = 0;
@@ -40,6 +41,19 @@ pub enum Layout {
     Chest(usize),
     /// An enchanting table: the item, the lapis, then main inventory and hotbar.
     Enchanting,
+    /// An anvil: left and right inputs, the result, then main inventory and hotbar.
+    Anvil,
+    /// A grindstone: two inputs, the result, then main inventory and hotbar.
+    Grindstone,
+}
+
+/// What taking a result costs or gives, settled by the world after the click.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Used {
+    /// Levels paid at an anvil.
+    Levels(i32),
+    /// Experience a grindstone gives back, before its random part.
+    Experience(i32),
 }
 
 impl Layout {
@@ -50,6 +64,7 @@ impl Layout {
             Layout::Furnace(_) => 3,
             Layout::Chest(n) => n,
             Layout::Enchanting => 2,
+            Layout::Anvil | Layout::Grindstone => 3,
         }
     }
 
@@ -72,7 +87,11 @@ impl Layout {
     }
 
     pub fn result_slot(self) -> Option<usize> {
-        matches!(self, Layout::Inventory | Layout::Crafting).then_some(0)
+        match self {
+            Layout::Inventory | Layout::Crafting => Some(0),
+            Layout::Anvil | Layout::Grindstone => Some(2),
+            _ => None,
+        }
     }
 
     /// The crafting grid's slots and side length.
@@ -170,6 +189,10 @@ pub struct Window<'a> {
     pub drag: &'a mut Drag,
     pub creative: bool,
     pub recipes: &'a Recipes,
+    /// The player's experience level, for paying at an anvil.
+    pub xp_level: i32,
+    /// Set when taking a result cost levels or gave experience.
+    pub used: Option<Used>,
 }
 
 /// Applies one click. Returns the stacks the player threw out.
@@ -223,15 +246,64 @@ pub fn click(w: &mut Window, c: Click) -> Vec<Stack> {
     thrown
 }
 
-/// Recomputes the crafting result from the grid.
+/// Recomputes the result from the inputs: a crafting grid's, or an anvil's or
+/// grindstone's. An anvil shows nothing the player cannot pay for.
 fn refresh_result(w: &mut Window) {
-    if let Some((grid, size)) = w.layout.grid() {
-        w.slots[0] = w.recipes.craft(&w.slots[grid], size);
+    match w.layout {
+        Layout::Anvil => {
+            let affordable = |r: &repair::AnvilResult| {
+                w.creative || (r.cost < repair::TOO_EXPENSIVE && r.cost <= w.xp_level)
+            };
+            w.slots[2] = repair::anvil(w.slots[0], w.slots[1])
+                .filter(affordable)
+                .map_or(Stack::EMPTY, |r| r.result);
+        }
+        Layout::Grindstone => {
+            w.slots[2] = repair::grindstone(w.slots[0], w.slots[1]).map_or(Stack::EMPTY, |r| r.0);
+        }
+        _ => {
+            if let Some((grid, size)) = w.layout.grid() {
+                w.slots[0] = w.recipes.craft(&w.slots[grid], size);
+            }
+        }
     }
 }
 
-/// Takes one craft's result, using up one of each ingredient.
+/// The level cost of the anvil's current result, for showing on the screen.
+pub fn anvil_cost(slots: &[Stack]) -> i32 {
+    repair::anvil(slots[0], slots[1]).map_or(0, |r| r.cost)
+}
+
+/// Takes the result: one craft, using up one of each ingredient, or an anvil's or
+/// grindstone's work, using up their inputs.
 fn take_result(w: &mut Window) -> Stack {
+    match w.layout {
+        Layout::Anvil => {
+            let Some(r) = repair::anvil(w.slots[0], w.slots[1]) else {
+                return Stack::EMPTY;
+            };
+            if w.slots[2].is_empty() {
+                return Stack::EMPTY;
+            }
+            w.slots[0] = w.slots[0].with_count(w.slots[0].count - 1);
+            w.slots[1] = w.slots[1].with_count(w.slots[1].count - r.uses);
+            w.used = Some(Used::Levels(r.cost));
+            refresh_result(w);
+            return r.result;
+        }
+        Layout::Grindstone => {
+            let Some((result, xp)) = repair::grindstone(w.slots[0], w.slots[1]) else {
+                return Stack::EMPTY;
+            };
+            for s in 0..2 {
+                w.slots[s] = w.slots[s].with_count(w.slots[s].count - 1);
+            }
+            w.used = Some(Used::Experience(xp));
+            refresh_result(w);
+            return result;
+        }
+        _ => {}
+    }
     let Some((grid, _)) = w.layout.grid() else {
         return Stack::EMPTY;
     };
@@ -256,7 +328,7 @@ fn take_result(w: &mut Window) -> Stack {
 fn pickup(w: &mut Window, s: usize, left: bool) {
     let layout = w.layout;
     if Some(s) == layout.result_slot() {
-        let result = w.slots[0];
+        let result = w.slots[s];
         let fits = w.carried.is_empty()
             || (w.carried.same_kind(&result)
                 && w.carried.count + result.count <= w.carried.max_stack());
@@ -348,7 +420,7 @@ fn quick_move(w: &mut Window, s: usize) {
     if Some(s) == layout.result_slot() {
         // Craft again and again while the whole result fits in the inventory.
         for _ in 0..MAX_CRAFTS {
-            let result = w.slots[0];
+            let result = w.slots[s];
             if result.is_empty() {
                 break;
             }
@@ -358,7 +430,7 @@ fn quick_move(w: &mut Window, s: usize) {
                 break;
             }
             take_result(w);
-            if !w.slots[0].same_kind(&result) {
+            if !w.slots[s].same_kind(&result) {
                 break;
             }
         }
@@ -419,6 +491,20 @@ fn quick_move(w: &mut Window, s: usize) {
                 move_into(w, stack, 0..n, false)
             } else {
                 move_into(w, stack, player, true)
+            }
+        }
+        Layout::Anvil | Layout::Grindstone => {
+            if !in_player {
+                move_into(w, stack, player, true)
+            } else {
+                let rest = move_into(w, stack, 0..2, false);
+                if rest != stack {
+                    rest
+                } else if main.contains(&s) {
+                    move_into(w, stack, hotbar, false)
+                } else {
+                    move_into(w, stack, main, false)
+                }
             }
         }
         Layout::Enchanting => {

@@ -23,6 +23,8 @@ struct Test {
     offhand: Stack,
     drag: Drag,
     creative: bool,
+    xp_level: i32,
+    used: Option<Used>,
 }
 
 impl Test {
@@ -34,6 +36,8 @@ impl Test {
             offhand: Stack::EMPTY,
             drag: Drag::default(),
             creative: false,
+            xp_level: 0,
+            used: None,
         }
     }
 
@@ -46,8 +50,12 @@ impl Test {
             drag: &mut self.drag,
             creative: self.creative,
             recipes: recipes(),
+            xp_level: self.xp_level,
+            used: None,
         };
-        click(&mut w, Click { slot, button, mode })
+        let thrown = click(&mut w, Click { slot, button, mode });
+        self.used = w.used;
+        thrown
     }
 }
 
@@ -233,4 +241,43 @@ fn throwing_and_cloning() {
     t.creative = true;
     t.click(1, 2, CLONE);
     assert_eq!(t.carried, stack("stone", 64));
+}
+
+#[test]
+fn anvils_take_levels_and_use_up_their_inputs() {
+    let sharpness = crate::enchanting::enchantment_id("minecraft:sharpness").unwrap();
+    let mut book = stack("enchanted_book", 1);
+    book.enchants.set(sharpness, 1);
+    let mut t = Test::new(Layout::Anvil);
+    t.slots[3] = stack("iron_sword", 1);
+    t.slots[4] = book;
+    t.click(3, 0, QUICK_MOVE);
+    t.click(4, 0, QUICK_MOVE);
+    assert_eq!(t.slots[0].item, item("iron_sword"));
+    assert_eq!(t.slots[1], book);
+    assert!(t.slots[2].is_empty(), "no levels, no result");
+
+    t.xp_level = 5;
+    t.click(1, 0, PICKUP); // pick the book up and put it back to refresh
+    t.click(1, 0, PICKUP);
+    assert_eq!(t.slots[2].enchants.level(sharpness), 1);
+    t.click(2, 0, PICKUP);
+    assert_eq!(t.carried.enchants.level(sharpness), 1);
+    assert!(t.slots[0].is_empty() && t.slots[1].is_empty());
+    assert!(matches!(t.used, Some(Used::Levels(c)) if c > 0));
+}
+
+#[test]
+fn grindstones_give_back_experience() {
+    let sharpness = crate::enchanting::enchantment_id("minecraft:sharpness").unwrap();
+    let mut sword = stack("iron_sword", 1);
+    sword.enchants.set(sharpness, 3);
+    let mut t = Test::new(Layout::Grindstone);
+    t.slots[0] = sword;
+    t.click(OUTSIDE, 0, PICKUP); // any click refreshes the result
+    assert!(t.slots[2].enchants.is_empty());
+    t.click(2, 0, QUICK_MOVE);
+    assert!(t.slots[0].is_empty());
+    assert!(matches!(t.used, Some(Used::Experience(xp)) if xp > 0));
+    assert!(t.slots[3..].iter().any(|s| s.item == item("iron_sword")));
 }

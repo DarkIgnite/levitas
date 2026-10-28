@@ -538,6 +538,7 @@ pub static NAMES: &[&str] = &[{}];",
             None => "None".to_owned(),
         };
         let enchantability = c["minecraft:enchantable"]["value"].as_u64().unwrap_or(0);
+        let repair_with = c["minecraft:repairable"]["items"].as_str();
         let tool = match c.get("minecraft:tool") {
             Some(tool) => {
                 let rules: Vec<String> = tool["rules"]
@@ -585,7 +586,7 @@ pub static NAMES: &[&str] = &[{}];",
         writeln!(
             out,
             "ItemInfo {{ name: {name:?}, max_stack: {max_stack}, block: {block}, food: {food}, \
-             consumable: {consumable}, enchantability: {enchantability}, \
+             consumable: {consumable}, enchantability: {enchantability}, repair_with: {repair_with:?}, \
              tool: {tool}, max_damage: {max_damage}, equip_slot: {equip_slot:?}, \
              attack_damage: {attack_damage:?}f32, attack_speed: {attack_speed:?}f32, \
              armor: {armor:?}f32, toughness: {toughness:?}f32 }},"

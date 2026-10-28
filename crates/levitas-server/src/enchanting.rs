@@ -125,6 +125,10 @@ pub struct Definition {
     pub weight: u32,
     min_cost: (i32, i32),
     max_cost: (i32, i32),
+    /// The anvil's level cost per enchantment level.
+    pub anvil_cost: u32,
+    /// Curses survive the grindstone.
+    pub curse: bool,
     supported: Value,
     primary: Option<Value>,
     exclusive: Option<Value>,
@@ -132,7 +136,7 @@ pub struct Definition {
 }
 
 impl Definition {
-    fn min_cost(&self, level: u32) -> i32 {
+    pub fn min_cost(&self, level: u32) -> i32 {
         self.min_cost.0 + self.min_cost.1 * (level as i32 - 1)
     }
 
@@ -141,7 +145,6 @@ impl Definition {
     }
 
     /// Whether the enchantment can go on `item` at all (anvils, books).
-    #[cfg(test)]
     pub fn supports(&self, item: i32) -> bool {
         item_matches(&self.supported, item)
     }
@@ -200,6 +203,8 @@ pub fn definitions() -> &'static [Definition] {
             serde_json::from_str(ENCHANTMENTS_JSON).expect("enchantments are valid JSON");
         let in_table = TagRegistry::get("minecraft:enchantment")
             .map_or(&[][..], |t| t.members("minecraft:in_enchanting_table"));
+        let curses = TagRegistry::get("minecraft:enchantment")
+            .map_or(&[][..], |t| t.members("minecraft:curse"));
         let cost = |v: &Value| {
             (
                 v["base"].as_i64().unwrap_or(0) as i32,
@@ -216,6 +221,8 @@ pub fn definitions() -> &'static [Definition] {
                     weight: d["weight"].as_u64().unwrap_or(1) as u32,
                     min_cost: cost(&d["min_cost"]),
                     max_cost: cost(&d["max_cost"]),
+                    anvil_cost: d["anvil_cost"].as_u64().unwrap_or(1) as u32,
+                    curse: curses.contains(&i64::from(id)),
                     supported: d["supported_items"].clone(),
                     primary: d.get("primary_items").cloned(),
                     exclusive: d.get("exclusive_set").cloned(),

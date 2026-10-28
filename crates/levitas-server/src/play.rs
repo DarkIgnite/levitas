@@ -176,6 +176,8 @@ fn decode(id: i32, packet: &[u8]) -> io::Result<Option<Event>> {
                     let data = r.bytes(length)?;
                     if kind == levitas_registry::component::DAMAGE {
                         stack.damage = Reader::new(data).varint()?.max(0);
+                    } else if kind == levitas_registry::component::REPAIR_COST {
+                        stack.repair_cost = Reader::new(data).varint()?.max(0);
                     } else if kind == levitas_registry::component::ENCHANTMENTS
                         || kind == levitas_registry::component::STORED_ENCHANTMENTS
                     {

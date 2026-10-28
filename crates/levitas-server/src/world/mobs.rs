@@ -1456,7 +1456,10 @@ mod path_tests {
         let plain = distance(0.4, &mut world);
         let strong = distance(1.4, &mut world);
         assert!(plain > 0.5, "a plain hit still pushes: {plain}");
-        assert!(strong > plain * 2.0, "knockback II pushes further: {strong} vs {plain}");
+        assert!(
+            strong > plain * 2.0,
+            "knockback II pushes further: {strong} vs {plain}"
+        );
     }
 
     #[test]

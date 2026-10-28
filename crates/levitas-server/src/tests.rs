@@ -1769,23 +1769,23 @@ async fn bows_shoot_arrows_that_hurt_mobs() {
     let mut alice = join(server().await, "Alice", 1).await;
     read_until(&mut alice, play::clientbound::PLAYER_POSITION).await;
     give(&mut alice, "bow", 1).await;
-    give(&mut alice, "arrow", 4).await;
-    command(&mut alice, "summon cow").await;
-    let cow = spawned(&mut alice, entity_type::COW).await;
-    // Step back six blocks and aim slightly down at the cow.
-    send(
-        &mut alice,
+    give(&mut alice, "arrow", 8).await;
+    let stand = |z: f64, pitch: f32| {
         Writer::packet(play::serverbound::MOVE_PLAYER_POS_ROT)
             .f64(0.5)
             .f64(-60.0)
-            .f64(-5.5)
+            .f64(z)
             .f32(0.0)
-            .f32(8.0)
-            .u8(1),
-    )
-    .await;
-    // Arrows spread a little, like vanilla, so allow a few shots.
-    for sequence in 1..=4 {
+            .f32(pitch)
+            .u8(1)
+    };
+    // Arrows spread a little, like vanilla, and cows wander, so allow a few shots, each
+    // at a fresh cow summoned where the player stood, from six blocks back.
+    for sequence in 1..=6 {
+        send(&mut alice, stand(0.5, 0.0)).await;
+        command(&mut alice, "summon cow").await;
+        let cow = spawned(&mut alice, entity_type::COW).await;
+        send(&mut alice, stand(-5.5, 8.0)).await;
         send(&mut alice, use_item(sequence)).await;
         tokio::time::sleep(std::time::Duration::from_millis(1100)).await;
         send(
@@ -1804,7 +1804,7 @@ async fn bows_shoot_arrows_that_hurt_mobs() {
             return;
         }
     }
-    panic!("four arrows missed the cow");
+    panic!("six arrows missed their cows");
 }
 
 #[tokio::test]

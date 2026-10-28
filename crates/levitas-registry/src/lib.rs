@@ -170,6 +170,8 @@ pub struct ItemInfo {
     pub consumable: Option<Consumable>,
     /// How well the item takes enchantments at an enchanting table; 0 if it cannot.
     pub enchantability: u8,
+    /// What repairs the item in an anvil: an item name, or `#tag` of items.
+    pub repair_with: Option<&'static str>,
     pub tool: Option<Tool>,
     /// Durability; 0 for items that do not wear out.
     pub max_damage: i32,

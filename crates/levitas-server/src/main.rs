@@ -7,6 +7,7 @@ mod inventory;
 mod loot;
 mod play;
 mod recipes;
+mod repair;
 mod rng;
 mod terrain;
 #[cfg(test)]

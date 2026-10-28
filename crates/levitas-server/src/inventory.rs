@@ -21,6 +21,8 @@ pub struct Stack {
     pub damage: i32,
     /// Enchantments: on the item, or stored in an enchanted book.
     pub enchants: Enchantments,
+    /// The anvil's prior work penalty (the `minecraft:repair_cost` component).
+    pub repair_cost: i32,
 }
 
 impl Stack {
@@ -29,6 +31,7 @@ impl Stack {
         count: 0,
         damage: 0,
         enchants: Enchantments::NONE,
+        repair_cost: 0,
     };
 
     pub fn new(item: i32, count: i32) -> Self {
@@ -37,6 +40,7 @@ impl Stack {
             count,
             damage: 0,
             enchants: Enchantments::NONE,
+            repair_cost: 0,
         }
     }
 
@@ -51,7 +55,10 @@ impl Stack {
 
     /// Whether two stacks can merge: the same item with the same components.
     pub fn same_kind(&self, other: &Stack) -> bool {
-        self.item == other.item && self.damage == other.damage && self.enchants == other.enchants
+        self.item == other.item
+            && self.damage == other.damage
+            && self.enchants == other.enchants
+            && self.repair_cost == other.repair_cost
     }
 
     pub fn is_empty(&self) -> bool {
@@ -84,6 +91,9 @@ impl Stack {
             };
             components.insert(key, self.enchants.to_nbt());
         }
+        if self.repair_cost > 0 {
+            components.insert("minecraft:repair_cost", self.repair_cost);
+        }
         if !components.is_empty() {
             nbt.insert("components", components);
         }
@@ -106,11 +116,16 @@ impl Stack {
                     .or_else(|| c.compound("minecraft:stored_enchantments"))
             })
             .map_or(Enchantments::NONE, Enchantments::from_nbt);
+        let repair_cost = components
+            .and_then(|c| c.int("minecraft:repair_cost"))
+            .unwrap_or(0)
+            .clamp(0, i64::from(i32::MAX)) as i32;
         Stack {
             item,
             count,
             damage: damage.max(0),
             enchants,
+            repair_cost,
         }
     }
 }
@@ -146,8 +161,9 @@ pub fn write_stack(packet: Writer, stack: Stack) -> Writer {
     // Both counts come first (components to add, then to remove), then the components.
     let damaged = stack.damage > 0;
     let enchanted = !stack.enchants.is_empty();
+    let worked = stack.repair_cost > 0;
     let mut packet = packet
-        .varint(i32::from(damaged) + i32::from(enchanted))
+        .varint(i32::from(damaged) + i32::from(enchanted) + i32::from(worked))
         .varint(0);
     if damaged {
         packet = packet.varint(component::DAMAGE).varint(stack.damage);
@@ -159,6 +175,11 @@ pub fn write_stack(packet: Writer, stack: Stack) -> Writer {
             component::ENCHANTMENTS
         };
         packet = stack.enchants.write(packet.varint(kind));
+    }
+    if worked {
+        packet = packet
+            .varint(component::REPAIR_COST)
+            .varint(stack.repair_cost);
     }
     packet
 }

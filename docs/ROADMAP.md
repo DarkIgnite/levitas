@@ -220,7 +220,12 @@ Known gaps are listed under each phase instead of being hidden.
       fortune, silk touch, looting, the protection family, feather falling,
       respiration, power, flame, infinity and mending. Missing: thorns, punch,
       frost walker, depth strider (client side), aqua affinity, curses.
-- [ ] Anvil (repair, rename, combine), grindstone
+- [ ] Anvil (repair, rename, combine), grindstone. Anvils (`repair.rs`) repair with
+      materials or a second item, merge enchantments from items and books by the
+      wiki's rules, charge levels with the prior work penalty, refuse 40 levels or
+      more in survival, and wear out. Grindstones strip all but curses, merge two
+      items and give experience back. Renaming is missing (item names are not
+      tracked yet).
 - [ ] Brewing stand, potions, splash and lingering potions, tipped arrows
 - [ ] Beacons, conduits
 - [ ] Maps, compasses, recovery compasses, clocks, spyglass
