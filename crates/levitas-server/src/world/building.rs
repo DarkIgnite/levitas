@@ -150,6 +150,18 @@ impl World {
             }
             return true;
         }
+        if name == "minecraft:comparator" {
+            let subtract = prop(state, "mode") != Some("subtract");
+            let mode = if subtract { "subtract" } else { "compare" };
+            self.set_block(pos, with(state, "mode", mode));
+            self.play_sound_pitched(
+                "minecraft:block.comparator.click",
+                pos,
+                None,
+                if subtract { 0.55 } else { 0.5 },
+            );
+            return true;
+        }
         if name == "minecraft:repeater" {
             // Each use adds a redstone tick of delay, up to four, then starts over.
             let delay: u8 = prop(state, "delay")

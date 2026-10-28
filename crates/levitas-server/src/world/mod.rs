@@ -418,6 +418,8 @@ struct World {
     tnt: HashMap<i32, tnt::PrimedTnt>,
     /// Blocks changed this tick, for redstone to look around.
     redstone_dirty: Vec<BlockPos>,
+    /// Comparators' output levels, which their block states do not hold.
+    comparators: HashMap<BlockPos, u8>,
     block_entities: HashMap<BlockPos, BlockEntity>,
     scheduled: Vec<ScheduledTick>,
     terrain: Arc<dyn Terrain>,
@@ -493,6 +495,7 @@ impl World {
             falling_blocks: HashMap::new(),
             tnt: HashMap::new(),
             redstone_dirty: Vec::new(),
+            comparators: HashMap::new(),
             block_entities: HashMap::new(),
             scheduled: Vec::new(),
             terrain,

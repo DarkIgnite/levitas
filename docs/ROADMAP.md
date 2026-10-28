@@ -202,11 +202,13 @@ Known gaps are listed under each phase instead of being hidden.
       (`world/redstone.rs`, `blocks/redstone.rs`): strong and weak power through solid
       blocks, dust networks losing one power per block and connecting up and down
       steps, torches inverting after 2 ticks, repeaters with their delays (set by
-      using them), blocks of redstone. Missing: comparators, repeater locking, torch
-      burnout.
+      using them), repeater locking, comparators (compare and subtract, reading how
+      full chests, barrels and furnaces are, also through a block), blocks of
+      redstone. Missing: torch burnout, comparators reading other blocks (cake,
+      composters, item frames, ...).
 - [ ] Buttons, levers, pressure plates, tripwires, daylight sensors, observers,
-      target blocks, sculk sensors. Buttons, levers and pressure plates (pressed by
-      players) give power; the rest are missing.
+      target blocks, sculk sensors. Buttons, levers, pressure plates (pressed by
+      players) and observers give power; the rest are missing.
 - [ ] Pistons and sticky pistons (moving blocks and entities)
 - [ ] Hoppers, droppers, dispensers (with their item behaviours), crafters
 - [ ] Rails: powered, detector, activator

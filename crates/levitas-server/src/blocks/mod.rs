@@ -353,6 +353,7 @@ pub fn can_survive(state: u16, pos: BlockPos, get: &mut impl FnMut(BlockPos) -> 
     let needs_floor = n == "minecraft:redstone_wire"
         || n == "minecraft:repeater"
         || n == "minecraft:comparator"
+        || n == "minecraft:comparator"
         || n == "minecraft:snow"
         || block_has_tag(state, "minecraft:rails")
         || block_has_tag(state, "minecraft:pressure_plates")

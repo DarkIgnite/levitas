@@ -38,6 +38,19 @@ pub fn is_repeater(state: u16) -> bool {
     name(state) == "minecraft:repeater"
 }
 
+pub fn is_comparator(state: u16) -> bool {
+    name(state) == "minecraft:comparator"
+}
+
+pub fn is_observer(state: u16) -> bool {
+    name(state) == "minecraft:observer"
+}
+
+/// Repeaters and comparators: they take power at the back and give it at the front.
+pub fn is_diode(state: u16) -> bool {
+    is_repeater(state) || is_comparator(state)
+}
+
 fn is_pressure_plate(state: u16) -> bool {
     name(state).ends_with("_pressure_plate")
 }
@@ -66,7 +79,8 @@ pub fn is_source(state: u16) -> bool {
         || block_has_tag(state, "minecraft:buttons")
         || is_pressure_plate(state)
         || is_torch(state)
-        || is_repeater(state)
+        || is_diode(state)
+        || is_observer(state)
         || is_wire(state)
 }
 
@@ -76,8 +90,8 @@ pub fn is_conductor(state: u16) -> bool {
     is_full_cube(state) && BlockInfo::of(state).light_filter == 15 && !is_source(state)
 }
 
-/// The output side of a repeater: it faces its input.
-fn repeater_output(state: u16) -> Option<Dir> {
+/// The output side of a repeater or comparator: they face their input.
+pub fn diode_output(state: u16) -> Option<Dir> {
     super::facing(state).map(Dir::opposite)
 }
 
@@ -106,7 +120,15 @@ pub fn weak(state: u16, to: Dir) -> u8 {
         };
     }
     if is_repeater(state) {
-        return if is_on(state, "powered") && Some(to) == repeater_output(state) {
+        return if is_on(state, "powered") && Some(to) == diode_output(state) {
+            MAX_POWER
+        } else {
+            0
+        };
+    }
+    if is_observer(state) {
+        // An observer faces what it watches and pulses out of its back.
+        return if is_on(state, "powered") && super::facing(state).map(Dir::opposite) == Some(to) {
             MAX_POWER
         } else {
             0
@@ -148,7 +170,7 @@ pub fn strong(state: u16, to: Dir) -> u8 {
     if is_torch(state) {
         return if to == Dir::Up { weak(state, to) } else { 0 };
     }
-    if is_repeater(state) || is_wire(state) {
+    if is_repeater(state) || is_wire(state) || is_observer(state) {
         return weak(state, to);
     }
     0
@@ -170,8 +192,11 @@ fn plate_power(state: u16) -> u8 {
 /// Whether dust running towards `side` points at the block `state` there: other dust
 /// and power sources, but repeaters only along their axis.
 fn dust_points_at(state: u16, side: Dir) -> bool {
-    if is_repeater(state) {
+    if is_diode(state) {
         return super::facing(state).is_some_and(|f| f == side || f == side.opposite());
+    }
+    if is_observer(state) {
+        return super::facing(state) == Some(side);
     }
     is_source(state)
         || matches!(
@@ -262,7 +287,7 @@ pub fn reacts(state: u16) -> bool {
         || n == "minecraft:redstone_lamp"
         || n == "minecraft:tnt"
         || is_torch(state)
-        || is_repeater(state)
+        || is_diode(state)
 }
 
 /// The repeater's delay in game ticks (one to four redstone ticks).

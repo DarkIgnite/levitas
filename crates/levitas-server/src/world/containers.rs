@@ -177,6 +177,16 @@ impl BlockEntity {
         }
     }
 
+    /// The stacks inside, for comparators.
+    pub fn stacks(&self) -> &[Stack] {
+        self.items()
+    }
+
+    #[cfg(test)]
+    pub fn stacks_mut(&mut self) -> &mut [Stack] {
+        self.items_mut()
+    }
+
     fn items(&self) -> &[Stack] {
         match self {
             BlockEntity::Chest(c) => &c.items[..],
@@ -456,6 +466,7 @@ impl World {
                         let len = items.len();
                         items.copy_from_slice(&slots[first..first + len]);
                         self.dirty.insert(part.chunk());
+                        self.redstone_dirty.push(part);
                     }
                 }
             }
@@ -934,6 +945,7 @@ impl World {
         }
 
         for (pos, changed) in updates {
+            self.redstone_dirty.push(pos);
             self.notify_viewers(pos, &changed, None);
             let Some(BlockEntity::Furnace(f)) = self.block_entities.get(&pos) else {
                 continue;
