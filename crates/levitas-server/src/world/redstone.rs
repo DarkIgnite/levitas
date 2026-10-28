@@ -80,7 +80,7 @@ impl World {
 
     /// The power the block at `from` gives its neighbour in direction `to`: a solid
     /// block passes on the strong power it gets, anything else gives its own.
-    fn power_from(&self, from: BlockPos, to: Dir, with_dust: bool) -> u8 {
+    pub(super) fn power_from(&self, from: BlockPos, to: Dir, with_dust: bool) -> u8 {
         let state = self.state_at(from);
         if is_conductor(state) {
             self.strong_into(from, with_dust)
@@ -225,7 +225,9 @@ impl World {
     /// A component next to a change answers the power it now gets.
     fn react(&mut self, pos: BlockPos, state: u16) {
         let n = blocks::name(state);
-        if blocks::is_door(state) {
+        if crate::blocks::piston::is_piston(state) {
+            self.react_piston(pos, state);
+        } else if blocks::is_door(state) {
             if prop(state, "half") == Some("upper") {
                 return; // the lower half decides for both
             }

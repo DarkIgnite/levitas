@@ -22,6 +22,7 @@ mod mobs;
 mod monsters;
 mod nature;
 mod pathfinding;
+mod piston;
 mod redstone;
 mod storage;
 mod survival;
@@ -420,6 +421,8 @@ struct World {
     redstone_dirty: Vec<BlockPos>,
     /// Comparators' output levels, which their block states do not hold.
     comparators: HashMap<BlockPos, u8>,
+    /// Blocks a piston is moving, waiting to land.
+    landings: Vec<piston::Landing>,
     block_entities: HashMap<BlockPos, BlockEntity>,
     scheduled: Vec<ScheduledTick>,
     terrain: Arc<dyn Terrain>,
@@ -496,6 +499,7 @@ impl World {
             tnt: HashMap::new(),
             redstone_dirty: Vec::new(),
             comparators: HashMap::new(),
+            landings: Vec::new(),
             block_entities: HashMap::new(),
             scheduled: Vec::new(),
             terrain,
@@ -1068,6 +1072,7 @@ impl World {
         }
         self.tick_scheduled();
         self.tick_pressure_plates();
+        self.tick_pistons();
         self.tick_redstone();
         self.tick_fluids();
         self.tick_random();

@@ -6,6 +6,7 @@
 
 pub mod fire;
 pub mod fluid;
+pub mod piston;
 pub mod place;
 pub mod plants;
 pub mod redstone;
@@ -229,6 +230,16 @@ fn is_soil(state: u16) -> bool {
 pub fn can_survive(state: u16, pos: BlockPos, get: &mut impl FnMut(BlockPos) -> u16) -> bool {
     if fire::is_fire(state) {
         return fire::fire_survives(state, pos, get);
+    }
+    // A piston head needs its extended piston behind it.
+    if name(state) == "minecraft:piston_head" {
+        let Some(f) = facing(state) else {
+            return false;
+        };
+        let base = get(offset(pos, f.opposite()));
+        return piston::is_piston(base)
+            && facing(base) == Some(f)
+            && prop(base, "extended") == Some("true");
     }
     let n = name(state);
     let below = |get: &mut dyn FnMut(BlockPos) -> u16| get(offset(pos, Dir::Down));

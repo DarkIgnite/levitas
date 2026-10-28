@@ -288,6 +288,7 @@ pub fn reacts(state: u16) -> bool {
         || n == "minecraft:tnt"
         || is_torch(state)
         || is_diode(state)
+        || super::piston::is_piston(state)
 }
 
 /// The repeater's delay in game ticks (one to four redstone ticks).

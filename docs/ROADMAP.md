@@ -209,7 +209,11 @@ Known gaps are listed under each phase instead of being hidden.
 - [ ] Buttons, levers, pressure plates, tripwires, daylight sensors, observers,
       target blocks, sculk sensors. Buttons, levers, pressure plates (pressed by
       players) and observers give power; the rest are missing.
-- [ ] Pistons and sticky pistons (moving blocks and entities)
+- [ ] Pistons and sticky pistons (moving blocks and entities). Pistons
+      (`world/piston.rs`) push up to 12 blocks, break fragile ones, stop at obsidian,
+      unbreakable blocks and blocks holding things, answer quasi-connectivity, and
+      sticky ones pull a block back; clients animate the move. Missing: moving
+      entities, slime and honey blocks, zero-tick behaviour.
 - [ ] Hoppers, droppers, dispensers (with their item behaviours), crafters
 - [ ] Rails: powered, detector, activator
 - [ ] Doors, trapdoors, lamps, TNT, note blocks and bells powered by redstone. Doors
