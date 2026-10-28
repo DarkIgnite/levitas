@@ -240,14 +240,9 @@ impl World {
                 .varint(1),
             None,
         );
-        let pitch = 0.35 + self.rng.f64() as f32 * 0.7;
-        self.play_sound_at(
-            "minecraft:entity.experience_orb.pickup",
-            orb.pos,
-            0.1,
-            pitch,
-            None,
-        );
+        // The client flies the orb into the player and plays the pickup sound itself,
+        // but unlike items it only removes an orb when told to.
+        self.broadcast(items::remove_entity(id), None);
         let left = self.mend(player, orb.value);
         if left > 0 {
             self.give_xp(player, left);
