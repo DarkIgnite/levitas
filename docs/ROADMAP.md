@@ -71,7 +71,9 @@ Known gaps are listed under each phase instead of being hidden.
 - [x] Server-side click simulation: shift-click (including crafting many at once),
       drag splitting, double-click collect, number keys, offhand swap, throwing, creative
       cloning; the client is corrected when it predicted something else
-- [ ] Blast furnace, smoker, campfire, stonecutter, smithing table
+- [x] Blast furnace and smoker: their own recipe lists, cooking twice as fast and
+      burning fuel twice as fast
+- [ ] Campfire, stonecutter, smithing table
 - [ ] Special crafting recipes: dyeing, fireworks, map and book cloning, banners,
       shields, repairing, decorated pots, transmute recipes
 - [ ] Signs (editing text), item frames, armor stands, flower pots, jukebox, note blocks
@@ -84,7 +86,11 @@ Known gaps are listed under each phase instead of being hidden.
       Water breaks falls. Known gaps: placing a waterloggable block into water does
       not waterlog it, and flowing water does not push dropped items.
 - [x] Lava and water interaction (cobblestone, stone, obsidian, basalt)
-- [ ] Swimming, drowning, fire and lava damage, burning, fire spread
+- [x] Drowning, fire and lava damage, burning: 300 ticks of air, 2 drowning damage a
+      second; lava 4 and fire 1 (soul fire 2) every half second, setting players alight;
+      magma hurts unless sneaking; burning hurts once a second until water or rain puts it
+      out. Armor follows the `bypasses_armor` tag. Mobs burn in lava; items burn up.
+- [ ] Swimming physics, fire spread
 - [x] Falling blocks: sand, gravel, concrete powder, anvils, pointed dripstone.
       Gravity blocks schedule a 2-tick block tick on update, spawn a falling block entity
       (type 49, with state ID), simulate gravity and drag, and land or shatter into items

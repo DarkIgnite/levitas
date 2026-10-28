@@ -11,6 +11,7 @@ mod experience;
 mod explosion;
 mod falling;
 mod fluids;
+mod hazards;
 mod items;
 mod mobs;
 mod monsters;
@@ -273,6 +274,11 @@ struct Player {
     xp_level: i32,
     xp_points: i32,
     xp_total: i32,
+    /// Ticks of air left under water (300 when full), ticks left burning, and ticks
+    /// until lava, fire or magma can hurt again.
+    air: i32,
+    fire_ticks: i32,
+    hazard_cooldown: u32,
 }
 
 impl Player {
@@ -318,6 +324,9 @@ impl Player {
             xp_level: 0,
             xp_points: 0,
             xp_total: 0,
+            air: 300,
+            fire_ticks: 0,
+            hazard_cooldown: 0,
         }
     }
 
@@ -984,6 +993,7 @@ impl World {
         self.tick_orbs();
         self.tick_monster_spawning();
         self.tick_survival();
+        self.tick_hazards();
         self.tick_items();
         self.tick_furnaces();
         if self.tick.is_multiple_of(AUTOSAVE_TICKS) {

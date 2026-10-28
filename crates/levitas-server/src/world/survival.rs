@@ -55,6 +55,11 @@ pub enum Damage {
     Explosion(&'static str),
     /// Shot by an arrow from what is named.
     Arrow(&'static str),
+    Drown,
+    Lava,
+    InFire,
+    OnFire,
+    HotFloor,
 }
 
 impl Damage {
@@ -70,6 +75,11 @@ impl Damage {
             Damage::Mob(_) => "minecraft:mob_attack",
             Damage::Explosion(_) => "minecraft:explosion",
             Damage::Arrow(_) => "minecraft:arrow",
+            Damage::Drown => "minecraft:drown",
+            Damage::Lava => "minecraft:lava",
+            Damage::InFire => "minecraft:in_fire",
+            Damage::OnFire => "minecraft:on_fire",
+            Damage::HotFloor => "minecraft:hot_floor",
         }
     }
 
@@ -85,14 +95,25 @@ impl Damage {
             Damage::Mob(mob) => format!("{name} was slain by {mob}"),
             Damage::Explosion(by) => format!("{name} was blown up by {by}"),
             Damage::Arrow(by) => format!("{name} was shot by {by}"),
+            Damage::Drown => format!("{name} drowned"),
+            Damage::Lava => format!("{name} tried to swim in lava"),
+            Damage::InFire => format!("{name} went up in flames"),
+            Damage::OnFire => format!("{name} burned to death"),
+            Damage::HotFloor => format!("{name} discovered the floor was lava"),
         }
     }
 
     /// Whether worn armor softens this damage.
     fn reduced_by_armor(self) -> bool {
+        // The data generator's `bypasses_armor` tag leaves these to armor.
         matches!(
             self,
-            Damage::Mob(_) | Damage::Explosion(_) | Damage::Arrow(_)
+            Damage::Mob(_)
+                | Damage::Explosion(_)
+                | Damage::Arrow(_)
+                | Damage::Lava
+                | Damage::InFire
+                | Damage::HotFloor
         )
     }
 
@@ -243,6 +264,8 @@ impl World {
         p.saturation = 5.0;
         p.exhaustion = 0.0;
         p.food_timer = 0;
+        p.air = 300;
+        p.fire_ticks = 0;
         p.pos = spawn;
         p.sent_pos = spawn;
         p.yaw = 0.0;

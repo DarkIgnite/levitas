@@ -10,7 +10,7 @@ use std::ops::Range;
 use levitas_registry::ItemInfo;
 
 use crate::inventory::Stack;
-use crate::recipes::{fuel_ticks, Recipes};
+use crate::recipes::{fuel_ticks, Cooker, Recipes};
 
 /// Click modes as numbered by the protocol.
 const PICKUP: i32 = 0;
@@ -35,7 +35,7 @@ pub enum Layout {
     /// A crafting table: result, 3x3 grid, then the player's main inventory and hotbar.
     Crafting,
     /// A furnace: input, fuel, output, then main inventory and hotbar.
-    Furnace,
+    Furnace(Cooker),
     /// A chest-like container with this many slots, then main inventory and hotbar.
     Chest(usize),
 }
@@ -45,7 +45,7 @@ impl Layout {
         match self {
             Layout::Inventory => 9,
             Layout::Crafting => 10,
-            Layout::Furnace => 3,
+            Layout::Furnace(_) => 3,
             Layout::Chest(n) => n,
         }
     }
@@ -101,8 +101,8 @@ impl Layout {
         }
         match self {
             Layout::Inventory if (5..9).contains(&slot) => self.armor_slot(stack) == Some(slot),
-            Layout::Furnace if slot == 2 => false,
-            Layout::Furnace if slot == 1 => fuel_ticks(stack.item) > 0 || is_bucket(stack),
+            Layout::Furnace(_) if slot == 2 => false,
+            Layout::Furnace(_) if slot == 1 => fuel_ticks(stack.item) > 0 || is_bucket(stack),
             _ => true,
         }
     }
@@ -110,7 +110,7 @@ impl Layout {
     /// How many of `stack` fit in `slot`.
     fn limit(self, slot: usize, stack: &Stack) -> i32 {
         let armor = self == Layout::Inventory && (5..9).contains(&slot);
-        let bucket_fuel = self == Layout::Furnace && slot == 1 && is_bucket(stack);
+        let bucket_fuel = matches!(self, Layout::Furnace(_)) && slot == 1 && is_bucket(stack);
         if armor || bucket_fuel {
             1
         } else {
@@ -390,12 +390,12 @@ fn quick_move(w: &mut Window, s: usize) {
                 move_into(w, stack, player, false)
             }
         }
-        Layout::Furnace => {
+        Layout::Furnace(kind) => {
             if s == 2 {
                 move_into(w, stack, player, true)
             } else if !in_player {
                 move_into(w, stack, player, false)
-            } else if w.recipes.smelting(stack.item).is_some() {
+            } else if w.recipes.cooking(kind, stack.item).is_some() {
                 move_into(w, stack, 0..1, false)
             } else if fuel_ticks(stack.item) > 0 {
                 move_into(w, stack, 1..2, false)

@@ -247,7 +247,20 @@ impl World {
             .map(|c| c.get((feet.x & 15) as usize, feet.y, (feet.z & 15) as usize))
             .and_then(fluid_at)
             .is_some_and(|f| f.fluid == Fluid::Water);
-        if in_water {
+        let in_lava = self
+            .chunks
+            .get(&feet.chunk())
+            .filter(|_| (MIN_Y..=MAX_Y).contains(&feet.y))
+            .map(|c| c.get((feet.x & 15) as usize, feet.y, (feet.z & 15) as usize))
+            .and_then(fluid_at)
+            .is_some_and(|f| f.fluid == Fluid::Lava);
+        if in_lava {
+            // Lava burns everything for 15 seconds, and hurts twice a second.
+            mob.fire_ticks = mob.fire_ticks.max(300);
+            if self.tick.is_multiple_of(10) {
+                self.hurt_mob(id, mob, 4.0, "minecraft:lava");
+            }
+        } else if in_water {
             mob.fire_ticks = 0;
         } else if mob.kind.burns_in_daylight() && !self.weather.is_raining() {
             let head = BlockPos::new(

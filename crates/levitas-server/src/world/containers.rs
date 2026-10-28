@@ -12,7 +12,7 @@ use super::*;
 use crate::blocks;
 use crate::click;
 use crate::inventory::{items_from_nbt, items_to_nbt};
-use crate::recipes::{fuel_remainder, fuel_ticks};
+use crate::recipes::{fuel_remainder, fuel_ticks, Cooker};
 
 const CHEST_SLOTS: usize = 27;
 const FURNACE_INPUT: usize = 0;
@@ -39,6 +39,7 @@ pub struct Chest {
 
 #[derive(Default)]
 pub struct Furnace {
+    kind: Cooker,
     items: [Stack; 3],
     /// Ticks left on the current fuel, and the fuel's full burn time.
     burn_left: i32,
@@ -59,7 +60,7 @@ impl BlockEntity {
                 ("minecraft:trapped_chest", &c.items[..])
             }
             BlockEntity::Chest(c) => ("minecraft:chest", &c.items[..]),
-            BlockEntity::Furnace(f) => ("minecraft:furnace", &f.items[..]),
+            BlockEntity::Furnace(f) => (cooker_id(f.kind), &f.items[..]),
         };
         let mut nbt = Compound::new()
             .with("id", id)
@@ -90,6 +91,8 @@ impl BlockEntity {
             "minecraft:trapped_chest" => Self::for_block(block::TRAPPED_CHEST)?,
             "minecraft:barrel" => Self::for_block(block::BARREL)?,
             "minecraft:furnace" => Self::for_block(block::FURNACE)?,
+            "minecraft:smoker" => Self::for_block(block::SMOKER)?,
+            "minecraft:blast_furnace" => Self::for_block(block::BLAST_FURNACE)?,
             _ => return None,
         };
         let items = entity.items_mut();
@@ -124,6 +127,14 @@ impl BlockEntity {
             "minecraft:trapped_chest" => chest(block_entity_type::TRAPPED_CHEST),
             "minecraft:barrel" => chest(block_entity_type::BARREL),
             "minecraft:furnace" => Some(BlockEntity::Furnace(Furnace::default())),
+            "minecraft:smoker" => Some(BlockEntity::Furnace(Furnace {
+                kind: Cooker::Smoker,
+                ..Furnace::default()
+            })),
+            "minecraft:blast_furnace" => Some(BlockEntity::Furnace(Furnace {
+                kind: Cooker::BlastFurnace,
+                ..Furnace::default()
+            })),
             _ => None,
         }
     }
@@ -131,7 +142,11 @@ impl BlockEntity {
     pub fn type_id(&self) -> i32 {
         match self {
             BlockEntity::Chest(c) => c.kind,
-            BlockEntity::Furnace(_) => block_entity_type::FURNACE,
+            BlockEntity::Furnace(f) => match f.kind {
+                Cooker::Furnace => block_entity_type::FURNACE,
+                Cooker::Smoker => block_entity_type::SMOKER,
+                Cooker::BlastFurnace => block_entity_type::BLAST_FURNACE,
+            },
         }
     }
 
@@ -163,7 +178,7 @@ pub enum View {
     /// The player's own inventory (window 0) with the 2x2 crafting grid.
     Inventory,
     Crafting,
-    Furnace(BlockPos),
+    Furnace(BlockPos, Cooker),
     Chest(BlockPos),
     /// Both halves of a double chest: the right half's 27 slots, then the left half's.
     DoubleChest(BlockPos, BlockPos),
@@ -175,7 +190,7 @@ impl View {
         match self {
             View::Inventory => 0,
             View::Crafting => 10,
-            View::Furnace(_) => 3,
+            View::Furnace(..) => 3,
             View::Chest(_) => CHEST_SLOTS,
             View::DoubleChest(..) => 2 * CHEST_SLOTS,
         }
@@ -184,7 +199,7 @@ impl View {
     /// The block entities shown in the window, each with its first window slot.
     fn parts(self) -> Vec<(BlockPos, usize)> {
         match self {
-            View::Chest(pos) | View::Furnace(pos) => vec![(pos, 0)],
+            View::Chest(pos) | View::Furnace(pos, _) => vec![(pos, 0)],
             View::DoubleChest(first, second) => vec![(first, 0), (second, CHEST_SLOTS)],
             View::Inventory | View::Crafting => Vec::new(),
         }
@@ -195,7 +210,7 @@ impl View {
         match self {
             View::Inventory => click::Layout::Inventory,
             View::Crafting => click::Layout::Crafting,
-            View::Furnace(_) => click::Layout::Furnace,
+            View::Furnace(_, kind) => click::Layout::Furnace(kind),
             View::Chest(_) | View::DoubleChest(..) => click::Layout::Chest(self.container_len()),
         }
     }
@@ -228,7 +243,17 @@ impl World {
                 }
             }
             "minecraft:barrel" => (View::Chest(pos), menu::GENERIC_9X3, "Barrel"),
-            "minecraft:furnace" => (View::Furnace(pos), menu::FURNACE, "Furnace"),
+            "minecraft:furnace" => (
+                View::Furnace(pos, Cooker::Furnace),
+                menu::FURNACE,
+                "Furnace",
+            ),
+            "minecraft:smoker" => (View::Furnace(pos, Cooker::Smoker), menu::SMOKER, "Smoker"),
+            "minecraft:blast_furnace" => (
+                View::Furnace(pos, Cooker::BlastFurnace),
+                menu::BLAST_FURNACE,
+                "Blast Furnace",
+            ),
             _ => return false,
         };
         self.close_container(id);
@@ -268,7 +293,7 @@ impl World {
                 self.chest_viewers_changed(first);
                 self.chest_viewers_changed(second);
             }
-            View::Furnace(pos) => {
+            View::Furnace(pos, _) => {
                 if let Some(BlockEntity::Furnace(f)) = self.block_entities.get(&pos) {
                     let data = furnace_data(window, f);
                     for packet in data {
@@ -296,7 +321,7 @@ impl World {
                 slots.extend_from_slice(&open.grid);
                 slots
             }
-            View::Chest(_) | View::Furnace(_) | View::DoubleChest(..) => {
+            View::Chest(_) | View::Furnace(..) | View::DoubleChest(..) => {
                 let mut slots = vec![Stack::EMPTY; view.container_len()];
                 for (part, first) in view.parts() {
                     if let Some(entity) = self.block_entities.get(&part) {
@@ -330,7 +355,7 @@ impl World {
                 open.result = slots[0];
                 open.grid.copy_from_slice(&slots[1..10]);
             }
-            View::Chest(_) | View::Furnace(_) | View::DoubleChest(..) => {
+            View::Chest(_) | View::Furnace(..) | View::DoubleChest(..) => {
                 for (part, first) in view.parts() {
                     if let Some(entity) = self.block_entities.get_mut(&part) {
                         let items = entity.items_mut();
@@ -549,7 +574,7 @@ impl World {
         let mut returned = Vec::new();
         match open.view {
             View::Crafting => returned.extend(open.grid),
-            View::Chest(_) | View::Furnace(_) | View::DoubleChest(..) => {
+            View::Chest(_) | View::Furnace(..) | View::DoubleChest(..) => {
                 let mut last_viewer = false;
                 for (part, _) in open.view.parts() {
                     if let Some(entity) = self.block_entities.get_mut(&part) {
@@ -635,7 +660,7 @@ impl World {
             let mut changed = Vec::new();
             let input = f.items[FURNACE_INPUT];
             let recipe = (!input.is_empty())
-                .then(|| self.recipes.smelting(input.item))
+                .then(|| self.recipes.cooking(f.kind, input.item))
                 .flatten();
             let output = f.items[FURNACE_OUTPUT];
             let can_smelt = recipe.is_some_and(|r| {
@@ -649,7 +674,11 @@ impl World {
             }
             let fuel = f.items[FURNACE_FUEL];
             if f.burn_left == 0 && can_smelt && !fuel.is_empty() && fuel_ticks(fuel.item) > 0 {
-                f.burn_left = fuel_ticks(fuel.item);
+                // Smokers and blast furnaces burn through fuel twice as fast.
+                f.burn_left = match f.kind {
+                    Cooker::Furnace => fuel_ticks(fuel.item),
+                    _ => fuel_ticks(fuel.item) / 2,
+                };
                 f.burn_total = f.burn_left;
                 f.items[FURNACE_FUEL] = match fuel_remainder(fuel.item) {
                     Some(remainder) => Stack::new(remainder, 1),
@@ -723,6 +752,15 @@ impl World {
                 self.set_block(pos, new);
             }
         }
+    }
+}
+
+/// The saved id of a cooker's block entity.
+fn cooker_id(kind: Cooker) -> &'static str {
+    match kind {
+        Cooker::Furnace => "minecraft:furnace",
+        Cooker::Smoker => "minecraft:smoker",
+        Cooker::BlastFurnace => "minecraft:blast_furnace",
     }
 }
 

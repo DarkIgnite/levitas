@@ -1931,3 +1931,23 @@ async fn fed_animals_breed_babies() {
         }
     }
 }
+
+#[tokio::test]
+async fn lava_burns_players() {
+    let mut alice = join(server().await, "Alice", 1).await;
+    read_until(&mut alice, play::clientbound::PLAYER_POSITION).await;
+    give(&mut alice, "lava_bucket", 1).await;
+    stand_looking_down(&mut alice, 0, 0).await;
+    send(&mut alice, use_item(1)).await;
+    // Lava sets the player alight, then hurts for 4 (in the same tick).
+    loop {
+        let body = read_until(&mut alice, play::clientbound::SET_ENTITY_DATA).await;
+        let mut r = Reader::new(&body);
+        r.varint().unwrap();
+        if (r.u8().unwrap(), r.varint().unwrap()) == (0, 0) {
+            assert_ne!(r.u8().unwrap() & 0x01, 0, "on fire");
+            break;
+        }
+    }
+    assert_eq!(health_below(&mut alice, 20.0).await, 16.0);
+}

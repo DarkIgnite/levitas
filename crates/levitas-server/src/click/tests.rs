@@ -157,7 +157,7 @@ fn milk_buckets_leave_buckets() {
 
 #[test]
 fn shift_click_into_furnace_slots() {
-    let mut t = Test::new(Layout::Furnace);
+    let mut t = Test::new(Layout::Furnace(crate::recipes::Cooker::Furnace));
     t.slots[3] = stack("raw_iron", 5);
     t.slots[4] = stack("coal", 5);
     t.slots[5] = stack("dirt", 5);

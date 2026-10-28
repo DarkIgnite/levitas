@@ -147,7 +147,20 @@ impl World {
             item.pickup_delay = item.pickup_delay.saturating_sub(1);
             self.move_item(&mut item);
 
-            if item.age > DESPAWN_AGE || item.pos[1] < f64::from(MIN_Y - 64) {
+            // Items that fall into lava burn up.
+            let cell = BlockPos::new(
+                item.pos[0].floor() as i32,
+                item.pos[1].floor() as i32,
+                item.pos[2].floor() as i32,
+            );
+            let in_lava = self
+                .loaded_block(cell)
+                .and_then(crate::blocks::fluid::fluid_at)
+                .is_some_and(|f| f.fluid == crate::blocks::fluid::Fluid::Lava);
+            if in_lava {
+                self.play_sound_at("minecraft:entity.generic.burn", item.pos, 0.4, 2.0, None);
+            }
+            if in_lava || item.age > DESPAWN_AGE || item.pos[1] < f64::from(MIN_Y - 64) {
                 self.broadcast(remove_entity(id), None);
                 continue;
             }

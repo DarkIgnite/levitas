@@ -31,11 +31,21 @@ pub struct Smelting {
     pub cook_time: i32,
 }
 
+/// The blocks that cook: furnaces cook everything, smokers food and blast furnaces ores
+/// and metal, both twice as fast.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum Cooker {
+    #[default]
+    Furnace,
+    Smoker,
+    BlastFurnace,
+}
+
 pub struct Recipes {
     shaped: Vec<Shaped>,
     shapeless: Vec<Shapeless>,
-    /// Smelting recipes by input item.
-    smelting: HashMap<i32, Smelting>,
+    /// Cooking recipes by cooker and input item.
+    cooking: HashMap<(Cooker, i32), Smelting>,
 }
 
 impl Recipes {
@@ -45,7 +55,7 @@ impl Recipes {
         let mut recipes = Recipes {
             shaped: Vec::new(),
             shapeless: Vec::new(),
-            smelting: HashMap::new(),
+            cooking: HashMap::new(),
         };
         for recipe in all.values() {
             // Recipes naming unknown items or tags are skipped rather than half-loaded.
@@ -93,13 +103,20 @@ impl Recipes {
                     result: result(&recipe["result"])?,
                 });
             }
-            "minecraft:smelting" => {
+            kind @ ("minecraft:smelting" | "minecraft:smoking" | "minecraft:blasting") => {
+                let (cooker, default_time) = match kind {
+                    "minecraft:smoking" => (Cooker::Smoker, 100),
+                    "minecraft:blasting" => (Cooker::BlastFurnace, 100),
+                    _ => (Cooker::Furnace, 200),
+                };
                 let smelting = Smelting {
                     result: result(&recipe["result"])?,
-                    cook_time: recipe["cookingtime"].as_i64().unwrap_or(200) as i32,
+                    cook_time: recipe["cookingtime"].as_i64().unwrap_or(default_time) as i32,
                 };
                 for item in ingredient(&recipe["ingredient"])? {
-                    self.smelting.entry(item).or_insert(smelting.clone());
+                    self.cooking
+                        .entry((cooker, item))
+                        .or_insert(smelting.clone());
                 }
             }
             _ => {}
@@ -140,8 +157,9 @@ impl Recipes {
         Stack::EMPTY
     }
 
-    pub fn smelting(&self, item: i32) -> Option<&Smelting> {
-        self.smelting.get(&item)
+    /// What `cooker` makes of `item`.
+    pub fn cooking(&self, cooker: Cooker, item: i32) -> Option<&Smelting> {
+        self.cooking.get(&(cooker, item))
     }
 }
 
@@ -362,7 +380,9 @@ mod tests {
     #[test]
     fn smelting_and_fuel() {
         let r = Recipes::load();
-        let iron = r.smelting(item("minecraft:raw_iron")).unwrap();
+        let iron = r
+            .cooking(Cooker::Furnace, item("minecraft:raw_iron"))
+            .unwrap();
         assert_eq!(iron.result, Stack::new(item("minecraft:iron_ingot"), 1));
         assert_eq!(iron.cook_time, 200);
         assert_eq!(fuel_ticks(item("minecraft:coal")), 1600);
@@ -372,5 +392,23 @@ mod tests {
             fuel_remainder(item("minecraft:lava_bucket")),
             Some(item("minecraft:bucket"))
         );
+    }
+
+    #[test]
+    fn smokers_cook_food_and_blast_furnaces_ores_twice_as_fast() {
+        let r = Recipes::load();
+        let beef = r.cooking(Cooker::Smoker, item("minecraft:beef")).unwrap();
+        assert_eq!(beef.result.item, item("minecraft:cooked_beef"));
+        assert_eq!(beef.cook_time, 100);
+        assert!(r
+            .cooking(Cooker::Smoker, item("minecraft:raw_iron"))
+            .is_none());
+        let iron = r
+            .cooking(Cooker::BlastFurnace, item("minecraft:raw_iron"))
+            .unwrap();
+        assert_eq!(iron.cook_time, 100);
+        assert!(r
+            .cooking(Cooker::BlastFurnace, item("minecraft:beef"))
+            .is_none());
     }
 }
