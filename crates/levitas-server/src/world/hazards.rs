@@ -73,6 +73,7 @@ impl World {
         let was_burning = p.fire_ticks > 0;
         let air_before = p.air;
         p.hazard_cooldown = p.hazard_cooldown.saturating_sub(1);
+        p.hurt_ticks = p.hurt_ticks.saturating_sub(1);
 
         // Air: used up under water, then drowning; refilled quickly above it.
         if underwater && survival {

@@ -1008,61 +1008,6 @@ impl World {
         }
     }
 
-    /// A player hits a mob with what they hold. Damage follows the held item and how far
-    /// the attack has recharged; the mob is knocked back and panics.
-    pub(super) fn attack_mob(&mut self, attacker: i32, target: i32) {
-        let Some(p) = self.players.get(&attacker) else {
-            return;
-        };
-        let Some(mob) = self.mobs.get(&target) else {
-            return;
-        };
-        if !p.alive || mob.dying.is_some() || !within_reach(p, mob) {
-            return;
-        }
-        let slot = p.hand_slot(0);
-        let item = ItemInfo::get(p.inventory.slots[slot].item);
-        let (damage, speed) = item.map_or((1.0, 4.0), |i| (i.attack_damage, i.attack_speed));
-        let cooldown = 20.0 / f64::from(speed);
-        let charge = ((self.tick.saturating_sub(p.attack_reset) as f64 + 0.5) / cooldown).min(1.0);
-        let mut damage = damage * (0.2 + (charge * charge) as f32 * 0.8);
-        let critical = charge > 0.9 && p.fall_distance > 0.0 && !p.on_ground;
-        if critical {
-            damage *= 1.5;
-        }
-        let yaw = f64::from(p.yaw).to_radians();
-        let is_weapon = item.is_some_and(|i| {
-            i.name.ends_with("_sword") || i.name.ends_with("_axe") || i.name.ends_with("_trident")
-        });
-
-        let p = self.players.get_mut(&attacker).expect("player exists");
-        p.attack_reset = self.tick;
-        p.exhaustion += 0.1;
-
-        let away = [-yaw.sin(), yaw.cos()];
-        if !self.hit_mob(
-            target,
-            damage,
-            Some(attacker),
-            away,
-            "minecraft:player_attack",
-        ) {
-            return;
-        }
-        if critical {
-            if let Some(mob) = self.mobs.remove(&target) {
-                self.send_to_viewers(
-                    &mob,
-                    Writer::packet(clientbound::ANIMATE).varint(target).u8(4),
-                );
-                self.mobs.insert(target, mob);
-            }
-        }
-        if is_weapon {
-            self.damage_item(attacker, slot, 1, ENTITY_EVENT_MAINHAND_BREAK);
-        }
-    }
-
     /// Hurts a mob: it flinches, is knocked back along `away` (a horizontal unit
     /// vector), and panics or, for a monster hit by a player, hunts them. A mob still
     /// recovering from a hit only takes what a harder hit adds. Returns whether the hit

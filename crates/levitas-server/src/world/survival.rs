@@ -6,6 +6,8 @@ use levitas_registry::BlockInfo;
 use super::*;
 
 pub const MAX_HEALTH: f32 = 20.0;
+/// Ticks of invulnerability after a hit.
+const HURT_TICKS: u32 = 10;
 /// Eating takes 1.6 seconds.
 const EAT_TICKS: u64 = 32;
 const ENTITY_EVENT_DEATH: i8 = 3;
@@ -60,6 +62,8 @@ pub enum Damage {
     InFire,
     OnFire,
     HotFloor,
+    /// Hit by another player (their entity id).
+    Player(i32),
 }
 
 impl Damage {
@@ -80,6 +84,7 @@ impl Damage {
             Damage::InFire => "minecraft:in_fire",
             Damage::OnFire => "minecraft:on_fire",
             Damage::HotFloor => "minecraft:hot_floor",
+            Damage::Player(_) => "minecraft:player_attack",
         }
     }
 
@@ -100,6 +105,7 @@ impl Damage {
             Damage::InFire => format!("{name} went up in flames"),
             Damage::OnFire => format!("{name} burned to death"),
             Damage::HotFloor => format!("{name} discovered the floor was lava"),
+            Damage::Player(_) => format!("{name} was slain by a player"),
         }
     }
 
@@ -109,6 +115,7 @@ impl Damage {
         matches!(
             self,
             Damage::Mob(_)
+                | Damage::Player(_)
                 | Damage::Explosion(_)
                 | Damage::Arrow(_)
                 | Damage::Lava
@@ -159,14 +166,34 @@ impl World {
         self.damage_from(id, amount, kind, None);
     }
 
-    /// Hurts a player; `source` is the entity that caused it, if any.
-    pub(super) fn damage_from(&mut self, id: i32, amount: f32, kind: Damage, source: Option<i32>) {
-        let Some(p) = self.players.get(&id) else {
-            return;
+    /// Hurts a player; `source` is the entity that caused it, if any. Returns whether
+    /// the hit got through.
+    pub(super) fn damage_from(
+        &mut self,
+        id: i32,
+        amount: f32,
+        kind: Damage,
+        source: Option<i32>,
+    ) -> bool {
+        let Some(p) = self.players.get_mut(&id) else {
+            return false;
         };
         if !p.alive || (!p.survival() && !kind.bypasses_creative()) {
-            return;
+            return false;
         }
+        // Just after a hit, only a harder one gets through, and only by the difference.
+        let amount = if p.hurt_ticks > 0 && !kind.bypasses_creative() {
+            let extra = amount - p.last_damage;
+            if extra <= 0.0 {
+                return false;
+            }
+            p.last_damage = amount;
+            extra
+        } else {
+            p.last_damage = amount;
+            p.hurt_ticks = HURT_TICKS;
+            amount
+        };
         let amount = if kind.reduced_by_armor() {
             self.through_armor(id, amount)
         } else {
@@ -196,6 +223,7 @@ impl World {
         if dead {
             self.die(id, kind);
         }
+        true
     }
 
     /// What is left of `amount` after the player's armor, which wears down a little.
@@ -232,7 +260,16 @@ impl World {
         p.alive = false;
         p.eating = None;
         p.fall_distance = 0.0;
-        let message = kind.death_message(&p.profile.name);
+        let mut message = kind.death_message(&p.profile.name);
+        if let Damage::Player(killer) = kind {
+            if let Some(k) = self.players.get(&killer) {
+                message = format!(
+                    "{} was slain by {}",
+                    self.players[&id].profile.name, k.profile.name
+                );
+            }
+        }
+        let p = self.players.get_mut(&id).expect("player exists");
         let pos = p.pos;
         let dropped = p.inventory.drain();
         let content = p.inventory.content_packet();

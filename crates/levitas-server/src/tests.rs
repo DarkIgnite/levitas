@@ -1951,3 +1951,28 @@ async fn lava_burns_players() {
     }
     assert_eq!(health_below(&mut alice, 20.0).await, 16.0);
 }
+
+#[tokio::test]
+async fn players_can_hit_each_other() {
+    let addr = server().await;
+    let mut alice = join(addr, "Alice", 1).await;
+    read_until(&mut alice, play::clientbound::PLAYER_POSITION).await;
+    let mut bob = join(addr, "Bob", 2).await;
+    read_until(&mut bob, play::clientbound::PLAYER_POSITION).await;
+    let bob_id = spawned(&mut alice, entity_type::PLAYER).await;
+    give(&mut alice, "diamond_sword", 1).await;
+
+    // A fully charged diamond sword deals 7 and knocks Bob back.
+    tokio::time::sleep(std::time::Duration::from_millis(900)).await;
+    send(&mut alice, interact(bob_id, 1)).await;
+    assert_eq!(health_below(&mut bob, 20.0).await, 13.0);
+    read_until(&mut bob, play::clientbound::SET_ENTITY_MOTION).await;
+
+    // Hit again at once: a weak blow does not get through the invulnerability.
+    send(&mut alice, interact(bob_id, 1)).await;
+    tokio::time::sleep(std::time::Duration::from_millis(900)).await;
+    send(&mut alice, interact(bob_id, 1)).await;
+    // Bob may have healed a little from saturation in between.
+    let health = health_below(&mut bob, 13.0).await;
+    assert!((6.0..7.0).contains(&health), "{health}");
+}

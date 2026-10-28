@@ -5,6 +5,7 @@
 mod arrows;
 mod breeding;
 mod building;
+mod combat;
 mod commands;
 mod containers;
 mod experience;
@@ -279,6 +280,10 @@ struct Player {
     air: i32,
     fire_ticks: i32,
     hazard_cooldown: u32,
+    /// Ticks left of the short invulnerability after being hurt, and the hit that
+    /// started it: only harder hits get through meanwhile, and only by the difference.
+    hurt_ticks: u32,
+    last_damage: f32,
 }
 
 impl Player {
@@ -327,6 +332,8 @@ impl Player {
             air: 300,
             fire_ticks: 0,
             hazard_cooldown: 0,
+            hurt_ticks: 0,
+            last_damage: 0.0,
         }
     }
 
@@ -559,7 +566,7 @@ impl World {
                 self.broadcast(packet, Some(id));
             }
             Event::LeaveBed { id } => self.wake_up(id),
-            Event::Attack { id, target } => self.attack_mob(id, target),
+            Event::Attack { id, target } => self.attack(id, target),
             Event::UseEntity { id, target, hand } => self.use_on_mob(id, target, hand),
             Event::Sprint { id, sprinting } => {
                 if let Some(p) = self.players.get_mut(&id) {
