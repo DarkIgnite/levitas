@@ -150,6 +150,15 @@ impl World {
             }
             return true;
         }
+        if name == "minecraft:repeater" {
+            // Each use adds a redstone tick of delay, up to four, then starts over.
+            let delay: u8 = prop(state, "delay")
+                .and_then(|d| d.parse().ok())
+                .unwrap_or(1);
+            let next = delay % 4 + 1;
+            self.set_block(pos, with(state, "delay", &next.to_string()));
+            return true;
+        }
         if name == "minecraft:lever" {
             let on = prop(state, "powered") != Some("true");
             self.set_block_updating(pos, with_bool(state, "powered", on));
@@ -266,6 +275,14 @@ impl World {
         }
     }
 
+    /// Whether a block tick is waiting for this block at `pos`.
+    pub(super) fn is_scheduled(&self, pos: BlockPos, state: u16) -> bool {
+        let first = BlockInfo::of(state).first_state;
+        self.scheduled
+            .iter()
+            .any(|t| t.pos == pos && t.block == first)
+    }
+
     pub(super) fn schedule(&mut self, pos: BlockPos, state: u16, delay: u64) {
         self.scheduled.push(ScheduledTick {
             due: self.tick + delay,
@@ -306,6 +323,9 @@ impl World {
             }
             if crate::blocks::fire::is_fire(state) {
                 self.fire_tick(tick.pos, state);
+            }
+            if crate::blocks::redstone::is_component(state) {
+                self.redstone_tick(tick.pos, state);
             }
         }
     }

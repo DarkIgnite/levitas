@@ -198,13 +198,21 @@ Known gaps are listed under each phase instead of being hidden.
 
 ## Phase 7: Redstone
 
-- [ ] Redstone wire, torches, repeaters, comparators, blocks of redstone
+- [ ] Redstone wire, torches, repeaters, comparators, blocks of redstone. Working
+      (`world/redstone.rs`, `blocks/redstone.rs`): strong and weak power through solid
+      blocks, dust networks losing one power per block and connecting up and down
+      steps, torches inverting after 2 ticks, repeaters with their delays (set by
+      using them), blocks of redstone. Missing: comparators, repeater locking, torch
+      burnout.
 - [ ] Buttons, levers, pressure plates, tripwires, daylight sensors, observers,
-      target blocks, sculk sensors
+      target blocks, sculk sensors. Buttons, levers and pressure plates (pressed by
+      players) give power; the rest are missing.
 - [ ] Pistons and sticky pistons (moving blocks and entities)
 - [ ] Hoppers, droppers, dispensers (with their item behaviours), crafters
 - [ ] Rails: powered, detector, activator
-- [ ] Doors, trapdoors, lamps, TNT, note blocks and bells powered by redstone
+- [ ] Doors, trapdoors, lamps, TNT, note blocks and bells powered by redstone. Doors
+      (iron ones too), trapdoors, fence gates, lamps and TNT answer power; note blocks
+      and bells do not yet.
 - [ ] Update order and timing faithful enough that common farms and machines work
 
 ## Phase 8: Progression

@@ -22,6 +22,7 @@ mod mobs;
 mod monsters;
 mod nature;
 mod pathfinding;
+mod redstone;
 mod storage;
 mod survival;
 mod time;
@@ -415,6 +416,8 @@ struct World {
     falling_blocks: HashMap<i32, falling::FallingBlock>,
     /// Lit TNT waiting to explode.
     tnt: HashMap<i32, tnt::PrimedTnt>,
+    /// Blocks changed this tick, for redstone to look around.
+    redstone_dirty: Vec<BlockPos>,
     block_entities: HashMap<BlockPos, BlockEntity>,
     scheduled: Vec<ScheduledTick>,
     terrain: Arc<dyn Terrain>,
@@ -489,6 +492,7 @@ impl World {
             items: HashMap::new(),
             falling_blocks: HashMap::new(),
             tnt: HashMap::new(),
+            redstone_dirty: Vec::new(),
             block_entities: HashMap::new(),
             scheduled: Vec::new(),
             terrain,
@@ -1060,6 +1064,8 @@ impl World {
             self.broadcast(packet, Some(id));
         }
         self.tick_scheduled();
+        self.tick_pressure_plates();
+        self.tick_redstone();
         self.tick_fluids();
         self.tick_random();
         self.tick_time();
@@ -1309,6 +1315,9 @@ impl World {
             self.chunk(cx, cz)
                 .set((pos.x & 15) as usize, pos.y, (pos.z & 15) as usize, state);
         self.dirty.insert((cx, cz));
+        if old != state {
+            self.redstone_changed(pos);
+        }
         self.light
             .block_changed(&mut self.chunks, [pos.x, pos.y, pos.z], old, state);
         self.fluids_changed_around(pos);

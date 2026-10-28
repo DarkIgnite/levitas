@@ -8,6 +8,7 @@ pub mod fire;
 pub mod fluid;
 pub mod place;
 pub mod plants;
+pub mod redstone;
 
 use levitas_protocol::BlockPos;
 use levitas_registry::{block, block_has_tag, collision_boxes, face_sturdy, BlockInfo};
@@ -648,6 +649,7 @@ pub fn toggles(state: u16) -> bool {
         || (block_has_tag(state, "minecraft:trapdoors") && n != "minecraft:iron_trapdoor")
         || block_has_tag(state, "minecraft:fence_gates")
         || n == "minecraft:lever"
+        || n == "minecraft:repeater"
         || block_has_tag(state, "minecraft:buttons")
 }
 
