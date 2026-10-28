@@ -150,6 +150,19 @@ impl World {
             }
             return true;
         }
+        if name == "minecraft:note_block" {
+            self.tune_note_block(pos, state);
+            return true;
+        }
+        if name == "minecraft:bell" {
+            let from = Dir::from_yaw(self.players[&id].yaw);
+            self.ring_bell(pos, from);
+            return true;
+        }
+        if name == "minecraft:daylight_detector" {
+            self.invert_daylight_detector(pos, state);
+            return true;
+        }
         if name == "minecraft:comparator" {
             let subtract = prop(state, "mode") != Some("subtract");
             let mode = if subtract { "subtract" } else { "compare" };

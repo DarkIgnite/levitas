@@ -11,7 +11,7 @@
   <img alt="Java Edition 1.21.8" src="https://img.shields.io/badge/Java%20Edition-1.21.8-f74c00">
   <img alt="Written in Rust" src="https://img.shields.io/badge/written%20in-Rust-b7410e?logo=rust">
   <img alt="License: GPL-3.0-only" src="https://img.shields.io/badge/license-GPL--3.0--only-blue">
-  <img alt="Progress: about 49%" src="https://img.shields.io/badge/progress-~49%25-orange">
+  <img alt="Progress: about 50%" src="https://img.shields.io/badge/progress-~50%25-orange">
 </p>
 
 # Levitas
@@ -25,7 +25,7 @@ needs, with a plugin API for survival-economy servers on top.
 
 > **Status: playable, early.** You can join a generated world and play survival: mine,
 > craft, farm, fight monsters and save your progress. Redstone, the Nether and End,
-> villagers and plugins are still to come. Overall progress: **about 49%** of the
+> villagers and plugins are still to come. Overall progress: **about 50%** of the
 > [roadmap](docs/ROADMAP.md).
 
 ## Progress
@@ -41,7 +41,7 @@ counts half. The roadmap lists exactly what is done and what is missing in each 
 | 4. Combat and basic entities | 65% | `██████▌░░░` |
 | 5. Mobs | 50% | `█████░░░░░` |
 | 6. Farming, nature and time | 62% | `██████▏░░░` |
-| 7. Redstone | 55% | `█████▌░░░░` |
+| 7. Redstone | 62% | `██████▏░░░` |
 | 8. Progression (enchanting, brewing, ...) | 42% | `████▏░░░░░` |
 | 9. Dimensions (Nether, End) | 0% | `░░░░░░░░░░` |
 | 10. Villagers and raids | 0% | `░░░░░░░░░░` |
@@ -49,7 +49,7 @@ counts half. The roadmap lists exactly what is done and what is missing in each 
 | 12. World generation | 50% | `█████░░░░░` |
 | 13. Plugins and economy | 0% | `░░░░░░░░░░` |
 | Infrastructure (CI, parallel ticking, benchmarks) | 0% | `░░░░░░░░░░` |
-| **Overall** | **~49%** | `████▉░░░░░` |
+| **Overall** | **~50%** | `█████░░░░░` |
 
 ## What works today
 

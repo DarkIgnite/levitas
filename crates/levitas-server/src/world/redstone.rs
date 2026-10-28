@@ -229,6 +229,10 @@ impl World {
             self.react_piston(pos, state);
         } else if n == "minecraft:hopper" {
             self.react_hopper(pos, state);
+        } else if n == "minecraft:note_block" {
+            self.react_note_block(pos, state);
+        } else if n == "minecraft:bell" {
+            self.react_bell(pos, state);
         } else if n == "minecraft:dropper" || n == "minecraft:dispenser" {
             self.react_dispenser(pos, state);
         } else if blocks::is_door(state) {

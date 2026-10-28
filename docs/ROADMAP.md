@@ -208,7 +208,8 @@ Known gaps are listed under each phase instead of being hidden.
       composters, item frames, ...).
 - [ ] Buttons, levers, pressure plates, tripwires, daylight sensors, observers,
       target blocks, sculk sensors. Buttons, levers, pressure plates (pressed by
-      players) and observers give power; the rest are missing.
+      players), observers and daylight detectors (inverted by using them) give power;
+      tripwires, target blocks and sculk sensors are missing.
 - [ ] Pistons and sticky pistons (moving blocks and entities). Pistons
       (`world/piston.rs`) push up to 12 blocks, break fragile ones, stop at obsidian,
       unbreakable blocks and blocks holding things, answer quasi-connectivity, and
@@ -221,9 +222,10 @@ Known gaps are listed under each phase instead of being hidden.
       steel and TNT, and drop the rest. Missing: crafters, minecart hoppers, other
       dispenser items (armor, shulker boxes, spawn eggs, boats, ...).
 - [ ] Rails: powered, detector, activator
-- [ ] Doors, trapdoors, lamps, TNT, note blocks and bells powered by redstone. Doors
-      (iron ones too), trapdoors, fence gates, lamps and TNT answer power; note blocks
-      and bells do not yet.
+- [x] Doors, trapdoors, lamps, TNT, note blocks and bells powered by redstone. Doors
+      (iron ones too), trapdoors, fence gates, lamps and TNT answer power. Note blocks
+      (`world/devices.rs`) take their instrument from the block below, are tuned by
+      using them and play when hit or powered; bells ring when used or powered.
 - [ ] Update order and timing faithful enough that common farms and machines work
 
 ## Phase 8: Progression

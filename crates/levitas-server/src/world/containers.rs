@@ -29,6 +29,13 @@ pub enum BlockEntity {
     Chest(Chest),
     Furnace(Furnace),
     Campfire(super::campfire::Campfire),
+    /// A block entity holding nothing Levitas tracks (daylight detectors, bells).
+    Plain(Plain),
+}
+
+pub struct Plain {
+    kind: i32,
+    viewers: HashSet<i32>,
 }
 
 /// Plain storage: chests, barrels, hoppers, droppers and dispensers.
@@ -80,6 +87,10 @@ impl BlockEntity {
             BlockEntity::Furnace(f) => (cooker_id(f.kind), &f.items[..]),
             BlockEntity::Campfire(c) if c.soul => ("minecraft:soul_campfire", &c.items[..]),
             BlockEntity::Campfire(c) => ("minecraft:campfire", &c.items[..]),
+            BlockEntity::Plain(p) if p.kind == block_entity_type::BELL => {
+                ("minecraft:bell", &[][..])
+            }
+            BlockEntity::Plain(_) => ("minecraft:daylight_detector", &[][..]),
         };
         let mut nbt = Compound::new()
             .with("id", id)
@@ -128,6 +139,8 @@ impl BlockEntity {
             "minecraft:blast_furnace" => Self::for_block(block::BLAST_FURNACE)?,
             "minecraft:campfire" => Self::for_block(block::CAMPFIRE)?,
             "minecraft:soul_campfire" => Self::for_block(block::SOUL_CAMPFIRE)?,
+            "minecraft:bell" => Self::for_block(block::BELL)?,
+            "minecraft:daylight_detector" => Self::for_block(block::DAYLIGHT_DETECTOR)?,
             _ => return None,
         };
         let items = entity.items_mut();
@@ -178,6 +191,14 @@ impl BlockEntity {
                 kind: Cooker::BlastFurnace,
                 ..Furnace::default()
             })),
+            "minecraft:bell" => Some(BlockEntity::Plain(Plain {
+                kind: block_entity_type::BELL,
+                viewers: HashSet::new(),
+            })),
+            "minecraft:daylight_detector" => Some(BlockEntity::Plain(Plain {
+                kind: block_entity_type::DAYLIGHT_DETECTOR,
+                viewers: HashSet::new(),
+            })),
             name @ ("minecraft:campfire" | "minecraft:soul_campfire") => {
                 Some(BlockEntity::Campfire(super::campfire::Campfire {
                     soul: name == "minecraft:soul_campfire",
@@ -198,6 +219,7 @@ impl BlockEntity {
                 Cooker::Campfire => block_entity_type::CAMPFIRE,
             },
             BlockEntity::Campfire(_) => block_entity_type::CAMPFIRE,
+            BlockEntity::Plain(p) => p.kind,
         }
     }
 
@@ -215,6 +237,7 @@ impl BlockEntity {
             BlockEntity::Chest(c) => &c.items[..],
             BlockEntity::Furnace(f) => &f.items,
             BlockEntity::Campfire(c) => &c.items,
+            BlockEntity::Plain(_) => &[],
         }
     }
 
@@ -223,6 +246,7 @@ impl BlockEntity {
             BlockEntity::Chest(c) => &mut c.items[..],
             BlockEntity::Furnace(f) => &mut f.items,
             BlockEntity::Campfire(c) => &mut c.items,
+            BlockEntity::Plain(_) => &mut [],
         }
     }
 
@@ -231,6 +255,7 @@ impl BlockEntity {
             BlockEntity::Chest(c) => &mut c.viewers,
             BlockEntity::Furnace(f) => &mut f.viewers,
             BlockEntity::Campfire(c) => &mut c.viewers,
+            BlockEntity::Plain(p) => &mut p.viewers,
         }
     }
 }

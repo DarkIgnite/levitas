@@ -9,6 +9,7 @@ mod campfire;
 mod combat;
 mod commands;
 mod containers;
+mod devices;
 mod effects;
 mod enchanting_table;
 mod experience;
@@ -863,6 +864,12 @@ impl World {
         match status {
             DIG_START | DIG_FINISH if alive => {
                 let state = self.block(pos);
+                if status == DIG_START
+                    && survival
+                    && crate::blocks::name(state) == "minecraft:note_block"
+                {
+                    self.play_note(pos);
+                }
                 if is_air(state) {
                     // Nothing to do.
                 } else if !survival {
@@ -1091,6 +1098,7 @@ impl World {
         self.tick_furnaces();
         self.tick_campfires();
         self.tick_hoppers();
+        self.tick_daylight_detectors();
         if self.tick.is_multiple_of(AUTOSAVE_TICKS) {
             self.save_all();
         }
