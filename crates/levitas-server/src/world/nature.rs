@@ -288,6 +288,9 @@ impl World {
             }
             return true;
         }
+        if held == "minecraft:flint_and_steel" {
+            return self.strike_flint(id, slot, pos, face);
+        }
         if held.ends_with("_hoe") && face != Dir::Down {
             let tilled = match blocks::name(clicked) {
                 "minecraft:grass_block" | "minecraft:dirt" | "minecraft:dirt_path" => {

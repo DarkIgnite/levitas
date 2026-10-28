@@ -8,7 +8,7 @@ use std::collections::HashSet;
 use super::*;
 use levitas_registry::sound_id;
 
-use crate::blocks::fluid::fluid_at;
+use crate::blocks::{self, fluid::fluid_at};
 use crate::world::survival::Damage;
 
 /// Rays start from the surface of a 16x16x16 cube of directions.
@@ -25,6 +25,12 @@ impl World {
         // Blocks break; each drops what it would with a chance of 1 in `power`.
         for &pos in &destroyed {
             let state = self.block(pos);
+            // TNT caught in the blast is lit instead, on a short fuse.
+            if blocks::name(state) == "minecraft:tnt" {
+                self.set_block(pos, block::AIR);
+                self.prime_tnt_by_explosion(pos);
+                continue;
+            }
             if self.rng.f64() < 1.0 / f64::from(power) {
                 let drops = self.loot.block_drops(&mut LootContext {
                     state,
@@ -80,6 +86,16 @@ impl World {
             .filter(|(_, m)| m.alive())
             .filter_map(|(&id, m)| impact(m.pos).map(|(s, push)| (id, s, push)))
             .collect();
+        let hit_tnt: Vec<(i32, [f64; 3])> = self
+            .tnt
+            .iter()
+            .filter_map(|(&id, t)| impact(t.pos()).map(|(_, push)| (id, push)))
+            .collect();
+        for (id, push) in hit_tnt {
+            if let Some(t) = self.tnt.get_mut(&id) {
+                t.push(push);
+            }
+        }
         for (id, strength, push) in hit_mobs {
             let Some(mut mob) = self.mobs.remove(&id) else {
                 continue;

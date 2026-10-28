@@ -303,6 +303,9 @@ impl World {
             if can_fall {
                 self.spawn_falling_block(tick.pos, state);
             }
+            if crate::blocks::fire::is_fire(state) {
+                self.fire_tick(tick.pos, state);
+            }
         }
     }
 

@@ -11,6 +11,7 @@ mod containers;
 mod experience;
 mod explosion;
 mod falling;
+mod fire;
 mod fluids;
 mod hazards;
 mod items;
@@ -21,6 +22,7 @@ mod pathfinding;
 mod storage;
 mod survival;
 mod time;
+mod tnt;
 
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
@@ -393,6 +395,8 @@ struct World {
     players: HashMap<i32, Player>,
     items: HashMap<i32, ItemEntity>,
     falling_blocks: HashMap<i32, falling::FallingBlock>,
+    /// Lit TNT waiting to explode.
+    tnt: HashMap<i32, tnt::PrimedTnt>,
     block_entities: HashMap<BlockPos, BlockEntity>,
     scheduled: Vec<ScheduledTick>,
     terrain: Arc<dyn Terrain>,
@@ -466,6 +470,7 @@ impl World {
             players: HashMap::new(),
             items: HashMap::new(),
             falling_blocks: HashMap::new(),
+            tnt: HashMap::new(),
             block_entities: HashMap::new(),
             scheduled: Vec::new(),
             terrain,
@@ -687,6 +692,9 @@ impl World {
         }
         for (&falling_id, falling) in &self.falling_blocks {
             packets.push(falling::spawn_packet(falling_id, falling));
+        }
+        for (&tnt_id, tnt) in &self.tnt {
+            packets.extend(tnt::spawn_packets(tnt_id, tnt));
         }
         packets.extend(self.arrow_packets());
         packets.extend(self.orb_packets());
@@ -995,6 +1003,7 @@ impl World {
         self.tick_random();
         self.tick_time();
         self.tick_falling_blocks();
+        self.tick_tnt();
         self.tick_mobs();
         self.tick_arrows();
         self.tick_orbs();

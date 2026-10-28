@@ -4,6 +4,7 @@
 //!
 //! Functions read neighbours through a `get` closure so they can be tested without a world.
 
+pub mod fire;
 pub mod fluid;
 pub mod place;
 pub mod plants;
@@ -225,6 +226,9 @@ fn is_soil(state: u16) -> bool {
 /// Whether a block can stay at `pos` given its neighbours. Blocks that cannot are popped
 /// off (dropping their loot) when a neighbour changes, and cannot be placed there.
 pub fn can_survive(state: u16, pos: BlockPos, get: &mut impl FnMut(BlockPos) -> u16) -> bool {
+    if fire::is_fire(state) {
+        return fire::fire_survives(state, pos, get);
+    }
     let n = name(state);
     let below = |get: &mut dyn FnMut(BlockPos) -> u16| get(offset(pos, Dir::Down));
 

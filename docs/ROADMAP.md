@@ -90,7 +90,11 @@ Known gaps are listed under each phase instead of being hidden.
       second; lava 4 and fire 1 (soul fire 2) every half second, setting players alight;
       magma hurts unless sneaking; burning hurts once a second until water or rain puts it
       out. Armor follows the `bypasses_armor` tag. Mobs burn in lava; items burn up.
-- [ ] Swimming physics, fire spread
+- [x] Fire (`world/fire.rs`): flint and steel lights fire, TNT, campfires and candles;
+      fire ages, goes out without fuel or in the rain, burns flammable blocks away by
+      the wiki's odds and spreads to nearby air; netherrack and magma burn forever.
+      Lava does not set things alight yet.
+- [ ] Swimming physics
 - [x] Falling blocks: sand, gravel, concrete powder, anvils, pointed dripstone.
       Gravity blocks schedule a 2-tick block tick on update, spawn a falling block entity
       (type 49, with state ID), simulate gravity and drag, and land or shatter into items
@@ -107,9 +111,11 @@ Known gaps are listed under each phase instead of being hidden.
 
 ## Phase 4: Combat and basic entities
 
-- [ ] Attacking players: damage, attack cooldown, critical hits, knockback, sweeping.
-      Players attacking mobs works (held item's attack damage and speed from the data
-      generator, charge, critical hits, knockback, weapon wear); PvP and sweeping do not.
+- [x] Attacking: damage, attack cooldown, critical hits, knockback, sweeping
+      (`world/combat.rs`). Mobs and players are hit the same way: held item's attack
+      damage and speed from the data generator, charge, critical hits, sprint knockback,
+      sweeping sword blows, weapon wear, attack sounds. Players get vanilla's short
+      invulnerability after a hit.
 - [ ] Armor and armor toughness, shields, damage types and immunities. Worn armor
       reduces mob and explosion damage by the wiki's formula and wears down; no
       shields, enchantments or other damage types yet.
@@ -122,9 +128,11 @@ Known gaps are listed under each phase instead of being hidden.
       with gravity and block collisions, and are saved in vanilla `entities/` region
       files. Items and falling blocks are not tracked per player yet.
 - [ ] Minecarts, boats, item frames, paintings, armor stands, experience orbs
-- [ ] TNT and explosions. Explosions (`world/explosion.rs`) cast rays like vanilla,
+- [x] TNT and explosions. Explosions (`world/explosion.rs`) cast rays like vanilla,
       break blocks by blast resistance (dropping them 1 in `power` times, containers
-      spilling), and damage and push entities; creepers use them. TNT is still missing.
+      spilling), and damage and push entities; creepers use them. TNT (`world/tnt.rs`)
+      is lit by flint and steel, fire or other explosions (on a short fuse), and falls
+      and bounces until it goes off. Redstone does not light it yet (Phase 7).
 
 ## Phase 5: Mobs
 

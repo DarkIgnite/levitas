@@ -1976,3 +1976,22 @@ async fn players_can_hit_each_other() {
     let health = health_below(&mut bob, 13.0).await;
     assert!((6.0..7.0).contains(&health), "{health}");
 }
+
+#[tokio::test]
+async fn flint_and_steel_lights_tnt() {
+    let mut alice = join(server().await, "Alice", 1).await;
+    read_until(&mut alice, play::clientbound::PLAYER_POSITION).await;
+    give(&mut alice, "tnt", 1).await;
+    let ground = BlockPos::new(3, -61, 0);
+    send(&mut alice, use_on(ground, 1, 1)).await;
+    let tnt = BlockPos::new(3, -60, 0);
+    assert_eq!(
+        levitas_registry::BlockInfo::of(block_at(&mut alice, tnt).await).name,
+        "minecraft:tnt"
+    );
+    give(&mut alice, "flint_and_steel", 1).await;
+    send(&mut alice, use_on(tnt, 1, 2)).await;
+    assert_eq!(block_at(&mut alice, tnt).await, block::AIR);
+    spawned(&mut alice, entity_type::TNT).await;
+    read_until(&mut alice, play::clientbound::EXPLODE).await;
+}
