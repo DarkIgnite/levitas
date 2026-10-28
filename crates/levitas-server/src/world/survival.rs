@@ -353,7 +353,7 @@ impl World {
                 .text(&message),
         );
         self.broadcast(entity_event(id, ENTITY_EVENT_DEATH), Some(id));
-        self.broadcast(system_chat(&message), None);
+        self.announce(system_chat(&message));
         info!("{message}");
         for stack in dropped {
             self.scatter_item(pos, stack);
@@ -362,6 +362,18 @@ impl World {
 
     pub(super) fn respawn(&mut self, id: i32) {
         if self.players.get(&id).is_none_or(|p| p.alive) {
+            return;
+        }
+        // Players respawn in the overworld, wherever they died.
+        if self.dimension != super::dimension::Dimension::Overworld
+            && self.hand_over(
+                id,
+                super::dimension::Dimension::Overworld,
+                None,
+                false,
+                true,
+            )
+        {
             return;
         }
         let spawn = self.respawn_point(id);
@@ -387,7 +399,7 @@ impl World {
         p.loaded.clear();
         let mode = p.mode;
 
-        let respawn = spawn_info(Writer::packet(clientbound::RESPAWN), mode).u8(0); // keep no data
+        let respawn = spawn_info(Writer::packet(clientbound::RESPAWN), mode, self.dimension).u8(0); // keep no data
         self.send(id, respawn);
         self.send(
             id,

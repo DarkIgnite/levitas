@@ -10,7 +10,9 @@
 use levitas_registry::{block, BlockInfo, SyncedRegistry};
 use levitas_world::chunk::{Section, SECTIONS};
 use levitas_world::light::LIGHT_SECTIONS;
-use levitas_world::{is_air, Chunk, ChunkLight, Kind, LightLayer, PalettedContainer, MAX_Y, MIN_Y};
+use levitas_world::{
+    is_air, Chunk, ChunkLight, Kind, LightLayer, PalettedContainer, Span, MAX_Y, MIN_Y,
+};
 use pumpkin_config::lighting::LightingEngineConfig;
 use pumpkin_data::chunk::Biome;
 use pumpkin_data::dimension::Dimension;
@@ -47,9 +49,11 @@ const MARGIN: i32 = 3;
 /// A finished chunk and its position.
 pub type Generated = ((i32, i32), Chunk);
 
-/// Overworld terrain for one seed.
+/// Terrain of one dimension for one seed.
 pub struct PumpkinTerrain {
     generator: Box<WorldGenerator>,
+    /// The sections the dimension's terrain fills; the rest stay empty.
+    span: Span,
     /// The 1.21.8 state of every Pumpkin block state, by Pumpkin state ID.
     states: Box<[u16]>,
     /// The biome registry index of every Pumpkin biome, by Pumpkin biome ID.
@@ -58,10 +62,20 @@ pub struct PumpkinTerrain {
 }
 
 impl PumpkinTerrain {
+    /// Overworld terrain.
     pub fn new(seed: i64) -> Self {
+        Self::of(seed, Dimension::OVERWORLD, Span::OVERWORLD)
+    }
+
+    /// Nether terrain, from y = 0 to 255.
+    pub fn nether(seed: i64) -> Self {
+        Self::of(seed, Dimension::THE_NETHER, Span::NETHER)
+    }
+
+    fn of(seed: i64, dimension: Dimension, span: Span) -> Self {
         let generator = get_world_gen(
             Seed(seed as u64),
-            Dimension::OVERWORLD,
+            dimension,
             false,
             Vec::new(),
             String::new(),
@@ -82,6 +96,7 @@ impl PumpkinTerrain {
             .collect();
         Self {
             generator,
+            span,
             states,
             biomes,
             biome_kind: Kind::biomes(registry.entries.len()),
@@ -167,12 +182,21 @@ impl PumpkinTerrain {
     fn translate(&self, proto: &ProtoChunk) -> Chunk {
         let mut blocks = vec![0u16; 4096];
         let mut biomes = [0u16; 64];
+        let span = self.span;
         let sections = (0..SECTIONS)
-            .map(|s| {
+            .map(|index| {
+                // Sections outside the dimension's height stay empty, with the biome of
+                // the nearest section that has one.
+                let s = index.clamp(span.first, span.first + span.count - 1) - span.first;
+                let inside = (span.first..span.first + span.count).contains(&index);
                 for y in 0..16 {
                     for z in 0..16 {
                         for x in 0..16 {
-                            let id = proto.get_block_state_raw(x, (s * 16 + y) as i32, z);
+                            let id = if inside {
+                                proto.get_block_state_raw(x, (s * 16 + y) as i32, z)
+                            } else {
+                                BlockStateId::AIR
+                            };
                             blocks[(y * 16 + z as usize) * 16 + x as usize] =
                                 self.states[usize::from(id.as_u16())];
                         }
@@ -182,7 +206,7 @@ impl PumpkinTerrain {
                 for y in 0..4 {
                     for z in 0..4 {
                         for x in 0..4 {
-                            let cell_y = (MIN_Y >> 2) + (s * 4 + y) as i32;
+                            let cell_y = (span.min_y() >> 2) + (s * 4 + y) as i32;
                             let id = proto.get_biome_id(x, cell_y, z);
                             biomes[(y * 4 + z as usize) * 4 + x as usize] =
                                 self.biomes[usize::from(id)];
@@ -197,7 +221,7 @@ impl PumpkinTerrain {
             .collect();
 
         let mut chunk = Chunk::from_sections(sections);
-        chunk.light = light(&proto.light.sky_light, &proto.light.block_light);
+        chunk.light = light(&proto.light.sky_light, &proto.light.block_light, span);
         chunk
     }
 
@@ -234,7 +258,7 @@ impl Grid {
 
 /// Pumpkin keeps light for the world's sections; Levitas also has one below and one
 /// above, which stay dark and fully lit.
-fn light(sky: &[LightContainer], block: &[LightContainer]) -> ChunkLight {
+fn light(sky: &[LightContainer], block: &[LightContainer], span: Span) -> ChunkLight {
     fn layer(container: &LightContainer) -> LightLayer {
         match container {
             LightContainer::Empty(level) => LightLayer::Uniform(*level),
@@ -242,6 +266,14 @@ fn light(sky: &[LightContainer], block: &[LightContainer]) -> ChunkLight {
         }
     }
     let mut light = ChunkLight::full_sky();
+    if span != Span::OVERWORLD {
+        // A dimension without a sky (the Nether) has no sky light at all.
+        light.sky = vec![LightLayer::Uniform(0); LIGHT_SECTIONS];
+        for (i, container) in block.iter().enumerate().take(span.count + 2) {
+            light.block[span.first + i] = layer(container);
+        }
+        return light;
+    }
     let offset = usize::from(sky.len() < LIGHT_SECTIONS);
     if offset == 1 {
         light.sky[0] = LightLayer::Uniform(0);
@@ -486,6 +518,21 @@ impl WorldPortalExt for Portals {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn nether_has_a_bedrock_floor_and_roof_and_netherrack_between() {
+        let nether = PumpkinTerrain::nether(1);
+        let chunk = nether.generate(0, 0);
+        let name = |y: i32| BlockInfo::of(chunk.get(3, y, 3)).name;
+        assert_eq!(name(0), "minecraft:bedrock");
+        assert_eq!(name(127), "minecraft:bedrock");
+        assert!(is_air(chunk.get(3, -10, 3)), "nothing below the Nether");
+        let netherrack = (1..127)
+            .filter(|&y| name(y) == "minecraft:netherrack")
+            .count();
+        assert!(netherrack > 10, "{netherrack}");
+    }
+
     use super::*;
 
     #[test]

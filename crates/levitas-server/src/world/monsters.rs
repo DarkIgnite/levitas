@@ -59,6 +59,11 @@ impl World {
 
     /// Sky light and block light at a block, if its chunk is loaded.
     pub(super) fn light_at(&self, pos: BlockPos) -> Option<(u8, u8)> {
+        let (sky, block) = self.raw_light_at(pos)?;
+        Some((if self.dimension.has_sky() { sky } else { 0 }, block))
+    }
+
+    fn raw_light_at(&self, pos: BlockPos) -> Option<(u8, u8)> {
         if !(MIN_Y..=MAX_Y).contains(&pos.y) {
             return Some((15, 0));
         }

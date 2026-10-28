@@ -85,6 +85,11 @@ fn handshake(intent: i32) -> Writer {
 
 /// Logs in and completes configuration, leaving the client in the play state.
 async fn join(addr: SocketAddr, name: &str, uuid: u128) -> TcpStream {
+    join_with_login(addr, name, uuid).await.0
+}
+
+/// Joins and returns the login packet's body too.
+async fn join_with_login(addr: SocketAddr, name: &str, uuid: u128) -> (TcpStream, Vec<u8>) {
     let mut client = TcpStream::connect(addr).await.unwrap();
     send(&mut client, handshake(2)).await;
     send(
@@ -124,8 +129,8 @@ async fn join(addr: SocketAddr, name: &str, uuid: u128) -> TcpStream {
         Writer::packet(configuration::serverbound::FINISH_CONFIGURATION),
     )
     .await;
-    read_until(&mut client, play::clientbound::LOGIN).await;
-    client
+    let login = read_until(&mut client, play::clientbound::LOGIN).await;
+    (client, login)
 }
 
 #[tokio::test]
@@ -1554,6 +1559,7 @@ async fn joining_players_get_the_command_tree() {
         top,
         [
             "effect",
+            "execute",
             "experience",
             "gamemode",
             "give",
@@ -1561,7 +1567,9 @@ async fn joining_players_get_the_command_tree() {
             "help",
             "kill",
             "summon",
+            "teleport",
             "time",
+            "tp",
             "weather",
             "xp"
         ]
@@ -2062,4 +2070,63 @@ async fn poison_hurts_but_never_kills() {
     // regeneration may lift it a little in between).
     let health = health_below(&mut alice, 1.5).await;
     assert!((1.0..1.5).contains(&health), "{health}");
+}
+
+/// The dimension name a login or respawn packet's spawn information names.
+fn spawn_dimension(r: &mut Reader<'_>) -> String {
+    r.varint().unwrap(); // dimension type
+    r.string(256).unwrap().to_owned()
+}
+
+#[tokio::test]
+async fn players_travel_to_the_nether_and_respawn_in_the_overworld() {
+    let addr = server().await;
+    let mut alice = join(addr, "Alice", 1).await;
+    read_until(&mut alice, play::clientbound::PLAYER_POSITION).await;
+    command(
+        &mut alice,
+        "execute in minecraft:the_nether run tp 8.5 70 8.5",
+    )
+    .await;
+    let body = read_until(&mut alice, play::clientbound::RESPAWN).await;
+    assert_eq!(
+        spawn_dimension(&mut Reader::new(&body)),
+        "minecraft:the_nether"
+    );
+    // Nether chunks follow once generated.
+    read_until(&mut alice, play::clientbound::PLAYER_POSITION).await;
+    read_until(&mut alice, play::clientbound::LEVEL_CHUNK_WITH_LIGHT).await;
+
+    // Logging out and back in keeps her in the Nether.
+    drop(alice);
+    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+    let (mut alice, body) = join_with_login(addr, "Alice", 1).await;
+    let mut r = Reader::new(&body);
+    r.i32().unwrap();
+    r.bool().unwrap();
+    for _ in 0..r.varint().unwrap() {
+        r.string(256).unwrap();
+    }
+    for _ in 0..3 {
+        r.varint().unwrap();
+    }
+    for _ in 0..3 {
+        r.bool().unwrap();
+    }
+    assert_eq!(spawn_dimension(&mut r), "minecraft:the_nether");
+    read_until(&mut alice, play::clientbound::PLAYER_POSITION).await;
+
+    // Dying there brings her back to the overworld.
+    command(&mut alice, "kill").await;
+    read_until(&mut alice, play::clientbound::PLAYER_COMBAT_KILL).await;
+    send(
+        &mut alice,
+        Writer::packet(play::serverbound::CLIENT_COMMAND).varint(0),
+    )
+    .await;
+    let body = read_until(&mut alice, play::clientbound::RESPAWN).await;
+    assert_eq!(
+        spawn_dimension(&mut Reader::new(&body)),
+        "minecraft:overworld"
+    );
 }

@@ -405,20 +405,25 @@ impl World {
             .join(format!("{}.dat", uuid_string(uuid)))
     }
 
-    /// Applies a joining player's saved data, if there is any.
-    pub(super) fn load_player(&mut self, id: i32) {
+    /// Applies a joining player's saved data, if there is any. Returns the dimension
+    /// they were saved in.
+    pub(super) fn load_player(&mut self, id: i32) -> Option<super::dimension::Dimension> {
         let uuid = self.players[&id].profile.uuid;
         let path = self.player_path(uuid);
-        let Ok(bytes) = fs::read(&path) else {
-            return;
-        };
+        let bytes = fs::read(&path).ok()?;
         match levitas_nbt::from_gzip(&bytes) {
-            Ok((_, nbt)) => self
-                .players
-                .get_mut(&id)
-                .expect("player exists")
-                .load_nbt(&nbt),
-            Err(e) => error!("{} is unreadable, starting fresh: {e}", path.display()),
+            Ok((_, nbt)) => {
+                self.players
+                    .get_mut(&id)
+                    .expect("player exists")
+                    .load_nbt(&nbt);
+                nbt.str("Dimension")
+                    .and_then(super::dimension::Dimension::from_name)
+            }
+            Err(e) => {
+                error!("{} is unreadable, starting fresh: {e}", path.display());
+                None
+            }
         }
     }
 
@@ -427,8 +432,9 @@ impl World {
             return;
         };
         let path = self.player_path(p.profile.uuid);
+        let nbt = p.to_nbt().with("Dimension", self.dimension.name());
         let result = fs::create_dir_all(path.parent().expect("has a parent"))
-            .and_then(|()| write_atomic(&path, &levitas_nbt::to_gzip("", &p.to_nbt())));
+            .and_then(|()| write_atomic(&path, &levitas_nbt::to_gzip("", &nbt)));
         if let Err(e) = result {
             error!("could not save {}: {e}", path.display());
         }
@@ -477,7 +483,16 @@ impl World {
             .collect();
         let ticks = self.scheduled_ticks_in(x, z);
         let fluid_ticks = self.fluid_ticks_in(x, z);
-        let nbt = anvil::to_nbt(chunk, x, z, entities, ticks, fluid_ticks, self.tick as i64);
+        let nbt = anvil::to_nbt(
+            chunk,
+            x,
+            z,
+            entities,
+            ticks,
+            fluid_ticks,
+            self.tick as i64,
+            self.dimension.span(),
+        );
         if let Err(e) = self.storage.write(x, z, &nbt) {
             error!("could not save chunk {x},{z}: {e}");
         }
@@ -493,6 +508,9 @@ impl World {
         let ids: Vec<i32> = self.players.keys().copied().collect();
         for id in ids {
             self.save_player(id);
+        }
+        if self.dimension != super::dimension::Dimension::Overworld {
+            return; // level.dat is the overworld's to write
         }
         let level = LevelData {
             spawn: [

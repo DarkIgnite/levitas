@@ -6,7 +6,7 @@
 
 use levitas_protocol::varint;
 
-use crate::chunk::SECTIONS;
+use crate::chunk::{Span, SECTIONS};
 
 /// Light sections: the world's sections plus one below and one above.
 pub const LIGHT_SECTIONS: usize = SECTIONS + 2;
@@ -96,24 +96,27 @@ impl ChunkLight {
 
     /// The light part of a chunk packet: which sections have light, which are dark, then
     /// the nibble arrays of the lit ones, for sky light and block light.
-    pub fn encode(&self, out: &mut Vec<u8>) {
-        self.encode_sections(out, u64::MAX, u64::MAX);
+    pub fn encode(&self, out: &mut Vec<u8>, span: Span) {
+        self.encode_sections(out, u64::MAX, u64::MAX, span);
     }
 
     /// Like [`ChunkLight::encode`], but only for the sections set in `sky` and `block`
-    /// (bit `i` for light section `i`), as a light update packet sends them.
-    pub fn encode_sections(&self, out: &mut Vec<u8>, sky: u64, block: u64) {
+    /// (bit `i` for light section `i`), as a light update packet sends them. Only the
+    /// light sections of `span` go out, numbered from its first.
+    pub fn encode_sections(&self, out: &mut Vec<u8>, sky: u64, block: u64, span: Span) {
+        let range = span.light();
         let masks = |layers: &[LightLayer], wanted: u64| {
             let mut lit = 0u64;
             let mut dark = 0u64;
             for (i, layer) in layers.iter().enumerate() {
-                if wanted & (1 << i) == 0 {
+                if wanted & (1 << i) == 0 || !range.contains(&i) {
                     continue;
                 }
+                let bit = 1 << (i - range.start);
                 if *layer == LightLayer::Uniform(0) {
-                    dark |= 1 << i;
+                    dark |= bit;
                 } else {
-                    lit |= 1 << i;
+                    lit |= bit;
                 }
             }
             (lit, dark)
@@ -134,8 +137,8 @@ impl ChunkLight {
         bitset(out, block_dark);
         for (layers, lit) in [(&self.sky, sky_lit), (&self.block, block_lit)] {
             varint::write(out, lit.count_ones() as i32);
-            for (i, layer) in layers.iter().enumerate() {
-                if lit & (1 << i) != 0 {
+            for (i, layer) in layers.iter().enumerate().skip(range.start) {
+                if i < range.end && lit & (1 << (i - range.start)) != 0 {
                     varint::write(out, NIBBLE_BYTES as i32);
                     layer.write_nibbles(out);
                 }
@@ -169,7 +172,7 @@ mod tests {
     #[test]
     fn full_sky_encoding_matches_the_old_constant() {
         let mut out = Vec::new();
-        ChunkLight::full_sky().encode(&mut out);
+        ChunkLight::full_sky().encode(&mut out, Span::OVERWORLD);
         // Sky mask (1 long), empty block mask, empty sky-dark mask, block-dark mask (1 long),
         // 26 sky arrays, no block arrays.
         let header = 1 + 8 + 1 + 1 + 1 + 8;

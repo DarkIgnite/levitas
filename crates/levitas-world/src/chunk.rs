@@ -10,6 +10,41 @@ pub const MIN_Y: i32 = -64;
 pub const SECTIONS: usize = 24;
 pub const MAX_Y: i32 = MIN_Y + (SECTIONS as i32) * 16 - 1;
 
+/// The sections a dimension shows clients and saves, out of the 24 every chunk keeps:
+/// all of them in the overworld, the 16 from y = 0 to 255 in the Nether. Chunks keep the
+/// same layout everywhere; only what goes out is cut down to the dimension's height.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Span {
+    /// Index of the first section shown.
+    pub first: usize,
+    pub count: usize,
+}
+
+impl Span {
+    pub const OVERWORLD: Span = Span {
+        first: 0,
+        count: SECTIONS,
+    };
+    pub const NETHER: Span = Span {
+        first: 4,
+        count: 16,
+    };
+
+    /// The lowest block y of the span.
+    pub fn min_y(self) -> i32 {
+        MIN_Y + 16 * self.first as i32
+    }
+
+    pub fn max_y(self) -> i32 {
+        self.min_y() + 16 * self.count as i32 - 1
+    }
+
+    /// Light sections of the span: one below and one above its block sections too.
+    pub fn light(self) -> std::ops::Range<usize> {
+        self.first..self.first + self.count + 2
+    }
+}
+
 pub fn is_air(state: u16) -> bool {
     matches!(state, block::AIR | block::CAVE_AIR | block::VOID_AIR)
 }
@@ -120,9 +155,9 @@ impl Chunk {
     }
 
     /// The section data of a chunk packet: a length-prefixed byte array of all sections.
-    pub fn encode_sections(&self, out: &mut Vec<u8>) {
+    pub fn encode_sections(&self, out: &mut Vec<u8>, span: Span) {
         let mut data = Vec::new();
-        for section in &self.sections {
+        for section in &self.sections[span.first..span.first + span.count] {
             section.encode(&mut data);
         }
         varint::write(out, data.len() as i32);

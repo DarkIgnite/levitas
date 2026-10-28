@@ -10,6 +10,7 @@ mod combat;
 mod commands;
 mod containers;
 mod devices;
+pub mod dimension;
 mod effects;
 mod enchanting_table;
 mod experience;
@@ -30,6 +31,7 @@ mod storage;
 mod survival;
 mod time;
 mod tnt;
+pub mod travel;
 
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
@@ -41,6 +43,8 @@ use levitas_protocol::{angle, varint, BlockPos, Writer};
 use levitas_registry::packet::play::clientbound;
 use levitas_registry::{block, block_has_tag, entity_type, BlockInfo, ItemInfo, SyncedRegistry};
 use levitas_world::chunk::pack_heightmap;
+
+use self::dimension::Dimension;
 use levitas_world::{is_air, Chunk, LightEngine, RegionStorage, MAX_Y, MIN_Y};
 use tokio::sync::{mpsc, oneshot};
 use tracing::info;
@@ -110,6 +114,14 @@ pub enum Event {
         id: i32,
         profile: Profile,
         out: mpsc::Sender<Frame>,
+        /// Lets the world point the connection at another dimension.
+        route: travel::Route,
+    },
+    /// A player handed over from another dimension.
+    Arrive(Box<travel::Arrival>),
+    /// A message for every player here, sent from another dimension.
+    Announce {
+        frame: Frame,
     },
     Leave {
         id: i32,
@@ -222,20 +234,45 @@ pub struct NewWorld {
     pub seed: Option<i64>,
 }
 
-/// Starts the world task for the world saved in `dir` (created as `new` if missing) and
-/// returns the channel connections send events to.
+/// Starts the world tasks for the world saved in `dir` (created as `new` if missing),
+/// one per dimension, and returns the overworld's channel, where connections start.
 pub fn spawn(dir: impl Into<PathBuf>, new: NewWorld) -> mpsc::Sender<Event> {
-    let (tx, rx) = mpsc::channel(1024);
-    let (world, generated) = World::new(dir.into(), new);
-    tokio::spawn(world.run(rx, generated));
-    tx
+    let dir = dir.into();
+    let (overworld, generated) = World::new(dir.clone(), new);
+    // The other dimensions share the overworld's seed and kind.
+    let shared = NewWorld {
+        kind: overworld.kind,
+        seed: Some(overworld.seed),
+    };
+    let mut worlds = vec![(overworld, generated)];
+    for dimension in Dimension::ALL.into_iter().skip(1) {
+        worlds.push(World::new_in(dir.clone(), shared, dimension));
+    }
+    let channels: Vec<_> = worlds.iter().map(|_| mpsc::channel(1024)).collect();
+    let senders: HashMap<Dimension, mpsc::Sender<Event>> = worlds
+        .iter()
+        .zip(&channels)
+        .map(|((w, _), (tx, _))| (w.dimension, tx.clone()))
+        .collect();
+    let overworld_tx = senders[&Dimension::Overworld].clone();
+    for ((mut world, generated), (_, rx)) in worlds.into_iter().zip(channels) {
+        world.links = senders
+            .iter()
+            .filter(|(&d, _)| d != world.dimension)
+            .map(|(&d, tx)| (d, tx.clone()))
+            .collect();
+        tokio::spawn(world.run(rx, generated));
+    }
+    overworld_tx
 }
 
-/// The terrain generator for a world of this kind.
-fn terrain_for(kind: WorldKind, seed: i64) -> Arc<dyn Terrain> {
-    match kind {
-        WorldKind::Flat => Arc::new(FlatGenerator::new()),
-        WorldKind::Noise => Arc::new(PumpkinTerrain::new(seed)),
+/// The terrain generator for a dimension of a world of this kind. The Nether is the
+/// Nether in flat worlds too.
+fn terrain_for(kind: WorldKind, seed: i64, dimension: Dimension) -> Arc<dyn Terrain> {
+    match (dimension, kind) {
+        (Dimension::Nether, _) => Arc::new(PumpkinTerrain::nether(seed)),
+        (Dimension::Overworld, WorldKind::Flat) => Arc::new(FlatGenerator::new()),
+        (Dimension::Overworld, WorldKind::Noise) => Arc::new(PumpkinTerrain::new(seed)),
     }
 }
 
@@ -295,6 +332,8 @@ struct Player {
     air: i32,
     fire_ticks: i32,
     hazard_cooldown: u32,
+    /// Where the player's connection sends its events; switched on changing dimension.
+    route: Option<travel::Route>,
     /// Ticks left of the short invulnerability after being hurt, and the hit that
     /// started it: only harder hits get through meanwhile, and only by the difference.
     hurt_ticks: u32,
@@ -353,6 +392,7 @@ impl Player {
             air: 300,
             fire_ticks: 0,
             hazard_cooldown: 0,
+            route: None,
             hurt_ticks: 0,
             last_damage: 0.0,
             effects: Vec::new(),
@@ -399,6 +439,10 @@ impl Player {
 }
 
 struct World {
+    /// Which dimension this world task runs.
+    dimension: Dimension,
+    /// The other dimensions' world tasks.
+    links: HashMap<Dimension, mpsc::Sender<Event>>,
     /// The world folder: level.dat, region/ and playerdata/.
     dir: PathBuf,
     storage: RegionStorage,
@@ -451,9 +495,18 @@ fn frame(packet: Writer) -> Frame {
 }
 
 impl World {
+    /// The overworld of the world in `dir`.
     fn new(
         dir: PathBuf,
         new: NewWorld,
+    ) -> (Self, tokio::sync::mpsc::UnboundedReceiver<Vec<Generated>>) {
+        Self::new_in(dir, new, Dimension::Overworld)
+    }
+
+    fn new_in(
+        dir: PathBuf,
+        new: NewWorld,
+        dimension: Dimension,
     ) -> (Self, tokio::sync::mpsc::UnboundedReceiver<Vec<Generated>>) {
         let existing = LevelData::load(&dir);
         let created = existing.is_none();
@@ -467,12 +520,15 @@ impl World {
                 .unwrap_or_else(|| Rng::from_time().next_u64() as i64),
             kind: new.kind,
         });
-        let terrain = terrain_for(level.kind, level.seed);
-        if created {
+        let terrain = terrain_for(level.kind, level.seed, dimension);
+        if created && dimension == Dimension::Overworld {
             level.spawn = terrain.spawn_point();
             info!("created a new {:?} world, seed {}", level.kind, level.seed);
         }
-        info!("world folder: {}", dir.display());
+        if dimension == Dimension::Overworld {
+            info!("world folder: {}", dir.display());
+        }
+        let folder = dimension.folder(&dir);
         let (generation, generated) = if terrain.is_cheap() {
             (None, tokio::sync::mpsc::unbounded_channel().1)
         } else {
@@ -480,8 +536,10 @@ impl World {
             (Some(pool), generated)
         };
         let world = Self {
-            storage: RegionStorage::new(dir.join("region")),
-            entity_storage: RegionStorage::new(dir.join("entities")),
+            dimension,
+            links: HashMap::new(),
+            storage: RegionStorage::new(folder.join("region")),
+            entity_storage: RegionStorage::new(folder.join("entities")),
             mobs: HashMap::new(),
             arrows: HashMap::new(),
             orbs: HashMap::new(),
@@ -551,7 +609,18 @@ impl World {
 
     fn handle(&mut self, event: Event) {
         match event {
-            Event::Join { id, profile, out } => self.join(id, profile, out),
+            Event::Join {
+                id,
+                profile,
+                out,
+                route,
+            } => self.join(id, profile, out, route),
+            Event::Arrive(arrival) => self.arrive(*arrival),
+            Event::Announce { frame } => {
+                for p in self.players.values_mut() {
+                    p.deliver(&frame);
+                }
+            }
             Event::Leave { id } => self.leave(id),
             Event::Move {
                 id,
@@ -620,36 +689,69 @@ impl World {
                 if let Some(p) = self.players.get(&id) {
                     let line = format!("<{}> {message}", p.profile.name);
                     info!("{line}");
-                    self.broadcast(system_chat(&line), None);
+                    self.announce(system_chat(&line));
                 }
             }
             Event::Command { id, command } => self.command(id, &command),
             Event::Shutdown { done } => {
+                // The overworld, where shutdown starts, has the other dimensions save
+                // too; `done` waits for all of them.
+                let mut others = Vec::new();
+                let links = if self.dimension == Dimension::Overworld {
+                    self.links.values().cloned().collect()
+                } else {
+                    Vec::new()
+                };
+                for link in links {
+                    let (tx, rx) = oneshot::channel();
+                    if link.try_send(Event::Shutdown { done: tx }).is_ok() {
+                        others.push(rx);
+                    }
+                }
                 self.shutdown();
-                let _ = done.send(());
+                tokio::spawn(async move {
+                    for rx in others {
+                        let _ = rx.await;
+                    }
+                    let _ = done.send(());
+                });
             }
         }
     }
 
-    fn join(&mut self, id: i32, profile: Profile, out: mpsc::Sender<Frame>) {
-        let name = profile.name.clone();
-        self.players
-            .insert(id, Player::new(profile, out, self.spawn));
-        self.load_player(id);
+    fn join(&mut self, id: i32, profile: Profile, out: mpsc::Sender<Frame>, route: travel::Route) {
+        let mut player = Player::new(profile, out, self.spawn);
+        player.route = Some(route);
+        self.players.insert(id, player);
+        let saved_in = self.load_player(id);
+        // A player who logged out in another dimension goes back there.
+        if let Some(other) = saved_in.filter(|&d| d != self.dimension) {
+            if self.hand_over(id, other, None, true, false) {
+                return;
+            }
+        }
+        self.welcome(id);
+    }
+
+    /// Logs a player in to this dimension: the login packet, the world around them,
+    /// everyone else.
+    fn welcome(&mut self, id: i32) {
+        let name = self.players[&id].profile.name.clone();
         let mode = self.players[&id].mode;
 
         let mut login = Writer::packet(clientbound::LOGIN)
             .i32(id)
             .bool(false) // hardcore
-            .varint(1)
-            .string("minecraft:overworld") // dimension names
+            .varint(Dimension::ALL.len() as i32) // dimension names
+            .string(Dimension::Overworld.name())
+            .string(Dimension::Nether.name())
             .varint(100) // max players (unused by the client)
             .varint(VIEW_DISTANCE)
             .varint(VIEW_DISTANCE) // simulation distance
             .bool(false) // reduced debug info
             .bool(true) // enable respawn screen
             .bool(false); // limited crafting
-        login = spawn_info(login, mode).bool(false); // enforces secure chat
+        login = spawn_info(login, mode, self.dimension).bool(false); // enforces secure chat
         self.send(id, login);
         self.send(
             id,
@@ -684,7 +786,7 @@ impl World {
                 "Welcome to Levitas, {name}! Survival world. Try /gamemode creative, /give, /kill."
             )),
         );
-        self.broadcast(system_chat(&format!("{name} joined the game")), Some(id));
+        self.announce_except(system_chat(&format!("{name} joined the game")), id);
         info!(name, "joined the world ({} online)", self.players.len());
     }
 
@@ -707,8 +809,8 @@ impl World {
                 .uuid(player.profile.uuid),
             None,
         );
-        let name = &player.profile.name;
-        self.broadcast(system_chat(&format!("{name} left the game")), None);
+        let name = player.profile.name.clone();
+        self.announce(system_chat(&format!("{name} left the game")));
         info!(name, "left the game ({} online)", self.players.len());
     }
 
@@ -1084,13 +1186,17 @@ impl World {
         self.tick_redstone();
         self.tick_fluids();
         self.tick_random();
-        self.tick_time();
+        if self.dimension.has_sky() {
+            self.tick_time();
+        }
         self.tick_falling_blocks();
         self.tick_tnt();
         self.tick_mobs();
         self.tick_arrows();
         self.tick_orbs();
-        self.tick_monster_spawning();
+        if self.dimension == Dimension::Overworld {
+            self.tick_monster_spawning();
+        }
         self.tick_survival();
         self.tick_hazards();
         self.tick_effects();
@@ -1105,6 +1211,23 @@ impl World {
         if self.tick.is_multiple_of(UNLOAD_TICKS) {
             self.unload_unseen_chunks();
         }
+    }
+
+    /// Moves a player within this dimension.
+    pub(super) fn teleport(&mut self, id: i32, pos: [f64; 3]) {
+        let Some(p) = self.players.get_mut(&id) else {
+            return;
+        };
+        p.pos = pos;
+        p.moved = true;
+        p.fall_distance = 0.0;
+        p.center = (
+            (pos[0] / 16.0).floor() as i32,
+            (pos[2] / 16.0).floor() as i32,
+        );
+        let (yaw, pitch) = (p.yaw, p.pitch);
+        self.update_view(id);
+        self.send(id, position_packet(pos, yaw, pitch));
     }
 
     /// Recenters a player's chunk view, unloading chunks that left the view distance and
@@ -1292,13 +1415,17 @@ impl World {
         varint::write(&mut body, heightmaps.len() as i32);
         for (kind, heights) in heightmaps {
             varint::write(&mut body, kind);
+            // Heights count from the bottom of the dimension.
+            let below = (16 * self.dimension.span().first) as u16;
+            let heights = heights.map(|h| h.saturating_sub(below));
             let longs = pack_heightmap(&heights);
             varint::write(&mut body, longs.len() as i32);
             for long in longs {
                 body.extend_from_slice(&long.to_be_bytes());
             }
         }
-        self.chunk(x, z).encode_sections(&mut body);
+        let span = self.dimension.span();
+        self.chunk(x, z).encode_sections(&mut body, span);
         let entities = self.block_entities_in(x, z);
         varint::write(&mut body, entities.len() as i32);
         for (pos, kind, data) in entities {
@@ -1311,7 +1438,7 @@ impl World {
                 None => body.extend_from_slice(&[0x0A, 0x00]), // empty compound: no data
             }
         }
-        self.chunk(x, z).light.encode(&mut body);
+        self.chunk(x, z).light.encode(&mut body, span);
         frame(
             Writer::packet(clientbound::LEVEL_CHUNK_WITH_LIGHT)
                 .i32(x)
@@ -1356,7 +1483,9 @@ impl World {
             };
             self.dirty.insert((x, z));
             let mut body = Vec::new();
-            chunk.light.encode_sections(&mut body, sky, block);
+            chunk
+                .light
+                .encode_sections(&mut body, sky, block, self.dimension.span());
             let update = frame(
                 Writer::packet(clientbound::LIGHT_UPDATE)
                     .varint(x)
@@ -1396,13 +1525,10 @@ impl World {
 }
 
 /// The spawn information shared by the login and respawn packets.
-fn spawn_info(packet: Writer, mode: u8) -> Writer {
-    let overworld = SyncedRegistry::get("minecraft:dimension_type")
-        .and_then(|r| r.id_of("minecraft:overworld"))
-        .expect("overworld dimension type");
+fn spawn_info(packet: Writer, mode: u8, dimension: Dimension) -> Writer {
     packet
-        .varint(overworld)
-        .string("minecraft:overworld")
+        .varint(dimension.type_id())
+        .string(dimension.name())
         .i64(0) // hashed seed
         .u8(mode)
         .i8(-1) // previous game mode: none
@@ -1410,7 +1536,7 @@ fn spawn_info(packet: Writer, mode: u8) -> Writer {
         .bool(true) // flat world
         .bool(false) // no death location
         .varint(0) // portal cooldown
-        .varint(63) // sea level
+        .varint(dimension.sea_level())
 }
 
 fn position_packet(pos: [f64; 3], yaw: f32, pitch: f32) -> Writer {

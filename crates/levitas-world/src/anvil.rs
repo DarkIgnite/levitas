@@ -4,7 +4,7 @@
 use levitas_nbt::{Compound, Tag};
 use levitas_registry::{block, BlockInfo, SyncedRegistry, DATA_VERSION};
 
-use crate::chunk::{Chunk, Section, MIN_Y, SECTIONS};
+use crate::chunk::{Chunk, Section, Span, MIN_Y, SECTIONS};
 use crate::light::{ChunkLight, LightLayer, LIGHT_SECTIONS};
 use crate::paletted::{bits_for, Kind, PalettedContainer};
 
@@ -28,6 +28,7 @@ fn biome_kind() -> Kind {
 }
 
 /// Serializes a chunk as vanilla 1.21.8 does, so vanilla and Leaf can read it.
+#[allow(clippy::too_many_arguments)]
 pub fn to_nbt(
     chunk: &Chunk,
     cx: i32,
@@ -36,20 +37,26 @@ pub fn to_nbt(
     block_ticks: Vec<Compound>,
     fluid_ticks: Vec<Compound>,
     game_time: i64,
+    span: Span,
 ) -> Compound {
     let mut sections = Vec::new();
     let nibbles = |layer: &LightLayer| -> Vec<i8> {
         layer.to_nibbles().into_iter().map(|b| b as i8).collect()
     };
     // Light covers a section below and above the world, which hold nothing else.
-    for i in 0..LIGHT_SECTIONS {
+    for i in span.light() {
         let mut entry = Compound::new()
             .with("Y", (FIRST_LIGHT_Y + i as i32) as i8)
             .with("SkyLight", nibbles(&chunk.light.sky[i]));
         if chunk.light.block[i] != LightLayer::Uniform(0) {
             entry.insert("BlockLight", nibbles(&chunk.light.block[i]));
         }
-        if let Some(section) = i.checked_sub(1).and_then(|s| chunk.sections().get(s)) {
+        let in_span = i > span.first && i <= span.first + span.count;
+        if let Some(section) = i
+            .checked_sub(1)
+            .filter(|_| in_span)
+            .and_then(|s| chunk.sections().get(s))
+        {
             add_blocks(&mut entry, section);
         }
         sections.push(Tag::Compound(entry));
@@ -58,7 +65,7 @@ pub fn to_nbt(
         .with("DataVersion", DATA_VERSION)
         .with("xPos", cx)
         .with("zPos", cz)
-        .with("yPos", MIN_Y >> 4)
+        .with("yPos", span.min_y() >> 4)
         .with("Status", "minecraft:full")
         .with("LastUpdate", game_time)
         .with("InhabitedTime", 0i64)
@@ -330,6 +337,7 @@ mod tests {
             Vec::new(),
             Vec::new(),
             123,
+            Span::OVERWORLD,
         );
         // Through the binary form too, as it would go to disk.
         let nbt = levitas_nbt::from_bytes(&levitas_nbt::to_bytes("", &nbt))
@@ -347,7 +355,16 @@ mod tests {
 
     #[test]
     fn vanilla_style_palette_entries() {
-        let nbt = to_nbt(&sample_chunk(), 0, 0, Vec::new(), Vec::new(), Vec::new(), 0);
+        let nbt = to_nbt(
+            &sample_chunk(),
+            0,
+            0,
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            0,
+            Span::OVERWORLD,
+        );
         let sections = nbt.list("sections").unwrap();
         // y = 70 is section 4 (y 64..80); the list starts with the light-only section -5.
         let section = sections[9].as_compound().unwrap();
@@ -391,5 +408,32 @@ mod tests {
             .with("sections", vec![Tag::Compound(section)]);
         let loaded = from_nbt(&nbt).unwrap().unwrap();
         assert_eq!(loaded.chunk.get(0, 0, 0), block::AIR);
+    }
+
+    #[test]
+    fn nether_chunks_save_only_their_sections() {
+        let mut chunk = sample_chunk();
+        chunk.set(0, 10, 0, block::STONE);
+        let nbt = to_nbt(
+            &chunk,
+            0,
+            0,
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            0,
+            Span::NETHER,
+        );
+        assert_eq!(nbt.int("yPos"), Some(0));
+        let ys: Vec<i64> = nbt
+            .list("sections")
+            .unwrap()
+            .iter()
+            .map(|s| s.as_compound().unwrap().int("Y").unwrap())
+            .collect();
+        assert_eq!(ys.first(), Some(&-1));
+        assert_eq!(ys.last(), Some(&16));
+        let loaded = from_nbt(&nbt).unwrap().unwrap();
+        assert_eq!(loaded.chunk.get(0, 10, 0), block::STONE);
     }
 }

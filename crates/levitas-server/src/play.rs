@@ -33,11 +33,14 @@ pub async fn run(conn: Conn, profile: Profile, world: mpsc::Sender<Event>) -> io
     let id = world::next_entity_id();
     let (tx, rx) = mpsc::channel(OUTGOING_CAPACITY);
     let writer = tokio::spawn(write_loop(out, rx));
+    // Events go to whichever dimension the player is in; the world switches this.
+    let (route, current) = tokio::sync::watch::channel(world.clone());
     if world
         .send(Event::Join {
             id,
             profile,
             out: tx,
+            route,
         })
         .await
         .is_err()
@@ -45,7 +48,8 @@ pub async fn run(conn: Conn, profile: Profile, world: mpsc::Sender<Event>) -> io
         writer.abort();
         return Ok(());
     }
-    let result = read_loop(&mut reader, id, &world).await;
+    let result = read_loop(&mut reader, id, &current).await;
+    let world = current.borrow().clone();
     let _ = world.send(Event::Leave { id }).await;
     writer.abort();
     result
@@ -76,7 +80,7 @@ async fn write_loop(mut out: Outgoing, mut frames: mpsc::Receiver<Frame>) -> io:
 async fn read_loop(
     reader: &mut BufReader<OwnedReadHalf>,
     id: i32,
-    world: &mpsc::Sender<Event>,
+    route: &tokio::sync::watch::Receiver<mpsc::Sender<Event>>,
 ) -> io::Result<()> {
     loop {
         let packet = match read_frame(reader).await {
@@ -85,6 +89,7 @@ async fn read_loop(
             Err(e) => return Err(e),
         };
         if let Some(event) = decode(id, &packet)? {
+            let world = route.borrow().clone();
             if world.send(event).await.is_err() {
                 return Ok(());
             }

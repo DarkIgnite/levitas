@@ -76,7 +76,7 @@ impl World {
     /// Time and weather for a player who just joined or respawned.
     pub(super) fn send_time_and_weather(&mut self, id: i32) {
         self.send(id, self.time_packet());
-        if self.weather.is_raining() {
+        if self.dimension.has_sky() && self.weather.is_raining() {
             self.send(id, game_event(GAME_EVENT_START_RAINING, 0.0));
             self.send(
                 id,

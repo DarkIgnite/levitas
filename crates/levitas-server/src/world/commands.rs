@@ -8,7 +8,7 @@ use levitas_registry::command_argument;
 use super::*;
 
 const HELP: &str = "Commands: /gamemode <survival|creative>, /give <item> [count], /kill, \
-                    /time <set|add|query> ..., /effect <give|clear> ..., /weather <clear|rain|thunder> [seconds], /summon <mob>, /xp <add|query> ...";
+                    /time <set|add|query> ..., /tp <x> <y> <z>, /effect <give|clear> ..., /weather <clear|rain|thunder> [seconds], /summon <mob>, /xp <add|query> ...";
 
 impl World {
     pub(super) fn command(&mut self, id: i32, command: &str) {
@@ -53,11 +53,65 @@ impl World {
                 let rest: Vec<&str> = args.collect();
                 self.effect_command(id, &rest)
             }
+            Some("tp" | "teleport") => {
+                let rest: Vec<&str> = args.collect();
+                self.tp_command(id, self.dimension, &rest)
+            }
+            Some("execute") => {
+                let rest: Vec<&str> = args.collect();
+                match rest.as_slice() {
+                    ["in", dimension, "run", "tp" | "teleport", coords @ ..] => {
+                        match super::dimension::Dimension::from_name(dimension) {
+                            Some(d) => self.tp_command(id, d, coords),
+                            None => format!("Unknown dimension: {dimension}"),
+                        }
+                    }
+                    _ => "Only /execute in <dimension> run tp <x> <y> <z> works so far".to_owned(),
+                }
+            }
             Some("xp" | "experience") => self.xp_command(id, args.next(), args.next(), args.next()),
             Some("help") => HELP.to_owned(),
             _ => format!("Unknown command: /{command}. {HELP}"),
         };
         self.send(id, system_chat(&reply));
+    }
+
+    /// `/tp <x> <y> <z>`, with `~` for the player's own coordinates, into `dimension`.
+    fn tp_command(
+        &mut self,
+        id: i32,
+        dimension: super::dimension::Dimension,
+        coords: &[&str],
+    ) -> String {
+        const USAGE: &str = "Usage: /tp <x> <y> <z>";
+        let Some(p) = self.players.get(&id) else {
+            return String::new();
+        };
+        let [x, y, z] = coords else {
+            return USAGE.to_owned();
+        };
+        let mut pos = [0.0; 3];
+        for (i, s) in [x, y, z].into_iter().enumerate() {
+            let value = match s.strip_prefix('~') {
+                Some("") => Some(p.pos[i]),
+                Some(offset) => offset.parse::<f64>().ok().map(|o| p.pos[i] + o),
+                None => s.parse::<f64>().ok(),
+            };
+            let Some(value) = value else {
+                return USAGE.to_owned();
+            };
+            pos[i] = value;
+        }
+        if dimension != self.dimension {
+            let name = dimension.name();
+            return if self.travel(id, dimension, pos) {
+                format!("Teleported to {name}")
+            } else {
+                format!("Cannot reach {name}")
+            };
+        }
+        self.teleport(id, pos);
+        format!("Teleported to {:.1}, {:.1}, {:.1}", pos[0], pos[1], pos[2])
     }
 
     fn xp_command(
@@ -328,6 +382,16 @@ pub(super) fn command_tree() -> Writer {
     t.argument(seconds, "amplifier", integer, at_least(0));
     let clear = t.literal(effect, "clear", true);
     t.argument(clear, "effect", command_argument::RESOURCE, registry);
+
+    for name in ["tp", "teleport"] {
+        let tp = t.literal(root, name, false);
+        t.argument(tp, "location", command_argument::VEC3, Vec::new());
+    }
+    let execute = t.literal(root, "execute", false);
+    let within = t.literal(execute, "in", false);
+    let dimension = t.argument(within, "dimension", command_argument::DIMENSION, Vec::new());
+    let run = t.literal(dimension, "run", false);
+    t.nodes[run].redirect = Some(root);
 
     let weather = t.literal(root, "weather", false);
     for kind in ["clear", "rain", "thunder"] {
