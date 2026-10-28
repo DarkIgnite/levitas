@@ -235,6 +235,28 @@ impl World {
         );
     }
 
+    /// Sets a mob alight for `ticks`, as fire aspect and flaming arrows do, showing the
+    /// flames to players if it was not burning yet.
+    pub(super) fn ignite_mob(&mut self, id: i32, ticks: i32) {
+        let Some(mut mob) = self.mobs.remove(&id) else {
+            return;
+        };
+        let was_burning = mob.fire_ticks > 0;
+        mob.fire_ticks = mob.fire_ticks.max(ticks.max(0) as u32);
+        if !was_burning && mob.fire_ticks > 0 {
+            self.send_to_viewers(
+                &mob,
+                Writer::packet(clientbound::SET_ENTITY_DATA)
+                    .varint(id)
+                    .u8(DATA_FLAGS)
+                    .varint(SERIALIZER_BYTE)
+                    .u8(ON_FIRE)
+                    .u8(0xFF),
+            );
+        }
+        self.mobs.insert(id, mob);
+    }
+
     /// Zombies catch fire in direct sunlight and burn until they find shade or water.
     pub(super) fn burn_in_daylight(&mut self, id: i32, mob: &mut Mob) {
         let was_burning = mob.fire_ticks > 0;

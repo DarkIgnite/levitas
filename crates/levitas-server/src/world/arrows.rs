@@ -247,9 +247,7 @@ impl World {
         match hit {
             Hit::Player(id) => {
                 if arrow.flaming {
-                    if let Some(p) = self.players.get_mut(&id) {
-                        p.fire_ticks = p.fire_ticks.max(100);
-                    }
+                    self.ignite_player(id, 100);
                 }
                 self.damage_from(id, damage, Damage::Arrow(shooter_name), Some(arrow.shooter));
                 self.push_player(id, [away[0] * 0.3, 0.1, away[1] * 0.3]);

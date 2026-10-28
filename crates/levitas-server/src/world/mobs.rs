@@ -211,6 +211,8 @@ pub struct Mob {
     uuid: u128,
     pub pos: [f64; 3],
     vel: [f64; 3],
+    /// Sideways speed from knockback and explosions, fading with friction.
+    knockback: [f64; 2],
     pub yaw: f32,
     pub head_yaw: f32,
     on_ground: bool,
@@ -261,6 +263,7 @@ impl Mob {
             uuid: (u128::from(rng.next_u64()) << 64) | u128::from(rng.next_u64()),
             pos,
             vel: [0.0; 3],
+            knockback: [0.0; 2],
             yaw: rng.f64() as f32 * 360.0,
             head_yaw: 0.0,
             on_ground: false,
@@ -311,10 +314,12 @@ impl Mob {
     }
 
     /// Adds to the mob's velocity (knockback).
+    /// Pushes the mob (knockback, explosions): sideways on top of its walking, which
+    /// does not cancel it, and up through its own velocity.
     pub fn push(&mut self, by: [f64; 3]) {
-        for (v, b) in self.vel.iter_mut().zip(by) {
-            *v += b;
-        }
+        self.knockback[0] += by[0];
+        self.knockback[1] += by[2];
+        self.vel[1] += by[1];
     }
 
     pub fn chunk(&self) -> (i32, i32) {
@@ -714,7 +719,11 @@ impl World {
         if let Some((target, _)) = mob.target {
             let (dx, dz) = (target[0] - mob.pos[0], target[1] - mob.pos[2]);
             let distance = dx.hypot(dz).max(1e-6);
-            let speed = mob.kind.speed() * if mob.panic > 0 { 2.0 } else { 1.0 };
+            let mut speed = mob.kind.speed() * if mob.panic > 0 { 2.0 } else { 1.0 };
+            // A mob knocked into the air has little say in where it goes.
+            if !mob.on_ground && mob.knockback.iter().any(|k| k.abs() > 0.05) {
+                speed *= 0.2;
+            }
             // Mobs keep heading for their target in the air too (over a step they
             // jumped, or up a wall a spider climbs).
             mob.vel[0] = dx / distance * speed;
@@ -742,12 +751,22 @@ impl World {
             mob.vel[1] = 0.0;
         }
         mob.blocked = false;
-        for axis in [0, 2] {
-            let d = self.clip_move(pos, half, height, axis, mob.vel[axis]);
+        for (axis, push) in [(0, 0), (2, 1)] {
+            let wanted = mob.vel[axis] + mob.knockback[push];
+            let d = self.clip_move(pos, half, height, axis, wanted);
             pos[axis] += d;
-            if (d - mob.vel[axis]).abs() > 1e-9 {
+            if (d - wanted).abs() > 1e-9 {
                 mob.blocked = true;
                 mob.vel[axis] = 0.0;
+                mob.knockback[push] = 0.0;
+            }
+        }
+        // Knockback fades like a slide: quickly on the ground, slowly in the air.
+        let friction = if mob.on_ground { 0.546 } else { 0.91 };
+        for k in &mut mob.knockback {
+            *k *= friction;
+            if k.abs() < 0.003 {
+                *k = 0.0;
             }
         }
         // Like vanilla, the mob moves first and gravity then slows the next move, so a
@@ -1016,13 +1035,6 @@ impl World {
     /// vector), and panics or, for a monster hit by a player, hunts them. A mob still
     /// recovering from a hit only takes what a harder hit adds. Returns whether the hit
     /// did anything.
-    /// Sets a mob alight for `ticks`, as fire aspect and flaming arrows do.
-    pub(super) fn ignite_mob(&mut self, id: i32, ticks: i32) {
-        if let Some(mob) = self.mobs.get_mut(&id) {
-            mob.fire_ticks = mob.fire_ticks.max(ticks.max(0) as u32);
-        }
-    }
-
     /// Whether a mob belongs to an entity type tag (`minecraft:undead`, ...).
     pub(super) fn mob_tagged(&self, id: i32, tag: &str) -> bool {
         let Some(mob) = self.mobs.get(&id) else {
@@ -1075,8 +1087,8 @@ impl World {
             mob.panic = PANIC_TICKS;
             mob.target = None;
         }
-        mob.vel[0] = mob.vel[0] / 2.0 + away[0] * KNOCKBACK;
-        mob.vel[2] = mob.vel[2] / 2.0 + away[1] * KNOCKBACK;
+        mob.knockback[0] = mob.knockback[0] / 2.0 + away[0] * KNOCKBACK;
+        mob.knockback[1] = mob.knockback[1] / 2.0 + away[1] * KNOCKBACK;
         if mob.on_ground {
             mob.vel[1] = (mob.vel[1] / 2.0 + KNOCKBACK).min(KNOCKBACK);
         }
@@ -1420,6 +1432,31 @@ mod path_tests {
             world.step(&mut zombie);
         }
         assert!(zombie.pos[0] > 5.0, "stuck at {:?}", zombie.pos);
+    }
+
+    #[test]
+    fn knockback_carries_a_walking_mob_back() {
+        let mut world = flat_world();
+        // A zombie walking towards +x is hit back towards -x, once softly and once with
+        // knockback II.
+        let distance = |strength: f64, world: &mut World| {
+            let mut zombie = Mob::new(MobKind::Zombie, [0.5, -60.0, 0.5], &mut world.rng);
+            zombie.on_ground = true;
+            zombie.target = Some(([20.0, 0.5], 200));
+            zombie.knockback = [-strength, 0.0];
+            zombie.vel[1] = KNOCKBACK;
+            let lowest = (0..20)
+                .map(|_| {
+                    world.step(&mut zombie);
+                    zombie.pos[0]
+                })
+                .fold(f64::MAX, f64::min);
+            0.5 - lowest
+        };
+        let plain = distance(0.4, &mut world);
+        let strong = distance(1.4, &mut world);
+        assert!(plain > 0.5, "a plain hit still pushes: {plain}");
+        assert!(strong > plain * 2.0, "knockback II pushes further: {strong} vs {plain}");
     }
 
     #[test]

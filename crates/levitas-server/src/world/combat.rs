@@ -96,11 +96,7 @@ impl World {
             let ticks = 80 * fire_aspect as i32;
             match target {
                 Target::Mob(id) => self.ignite_mob(id, ticks),
-                Target::Player(id) => {
-                    if let Some(p) = self.players.get_mut(&id) {
-                        p.fire_ticks = p.fire_ticks.max(ticks);
-                    }
-                }
+                Target::Player(id) => self.ignite_player(id, ticks),
             }
         }
         if sprint_hit {

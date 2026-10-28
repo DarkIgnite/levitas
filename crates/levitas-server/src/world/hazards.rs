@@ -158,6 +158,31 @@ impl World {
         }
     }
 
+    /// Sets a player alight for `ticks` (fire aspect, flaming arrows), showing the
+    /// flames if they were not burning yet.
+    pub(super) fn ignite_player(&mut self, id: i32, ticks: i32) {
+        let Some(p) = self.players.get_mut(&id) else {
+            return;
+        };
+        if !p.alive || !p.survival() {
+            return;
+        }
+        let was_burning = p.fire_ticks > 0;
+        p.fire_ticks = p.fire_ticks.max(ticks);
+        if !was_burning {
+            let flags = self.player_flags(id);
+            self.broadcast(
+                Writer::packet(clientbound::SET_ENTITY_DATA)
+                    .varint(id)
+                    .u8(DATA_FLAGS)
+                    .varint(SERIALIZER_BYTE)
+                    .u8(flags)
+                    .u8(0xFF),
+                None,
+            );
+        }
+    }
+
     /// A player's entity flags: burning, sneaking and sprinting.
     fn player_flags(&self, id: i32) -> u8 {
         let p = &self.players[&id];
