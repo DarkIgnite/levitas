@@ -182,6 +182,8 @@ pub enum View {
     Chest(BlockPos),
     /// Both halves of a double chest: the right half's 27 slots, then the left half's.
     DoubleChest(BlockPos, BlockPos),
+    /// An enchanting table; its two slots live in the window, like a crafting grid.
+    Enchanting(BlockPos),
 }
 
 impl View {
@@ -193,6 +195,7 @@ impl View {
             View::Furnace(..) => 3,
             View::Chest(_) => CHEST_SLOTS,
             View::DoubleChest(..) => 2 * CHEST_SLOTS,
+            View::Enchanting(_) => 2,
         }
     }
 
@@ -201,7 +204,7 @@ impl View {
         match self {
             View::Chest(pos) | View::Furnace(pos, _) => vec![(pos, 0)],
             View::DoubleChest(first, second) => vec![(first, 0), (second, CHEST_SLOTS)],
-            View::Inventory | View::Crafting => Vec::new(),
+            View::Inventory | View::Crafting | View::Enchanting(_) => Vec::new(),
         }
     }
 
@@ -212,6 +215,7 @@ impl View {
             View::Crafting => click::Layout::Crafting,
             View::Furnace(_, kind) => click::Layout::Furnace(kind),
             View::Chest(_) | View::DoubleChest(..) => click::Layout::Chest(self.container_len()),
+            View::Enchanting(_) => click::Layout::Enchanting,
         }
     }
 }
@@ -220,9 +224,12 @@ impl View {
 pub struct Open {
     pub window: i32,
     pub view: View,
-    /// The crafting table grid; it lives in the window, not in the world.
-    grid: [Stack; 9],
+    /// The crafting table grid, or the enchanting table's item and lapis; they live in
+    /// the window, not in the world.
+    pub grid: [Stack; 9],
     result: Stack,
+    /// What the enchanting table offers in its three slots.
+    pub offers: [super::enchanting_table::Offer; 3],
 }
 
 impl World {
@@ -230,6 +237,7 @@ impl World {
     pub(super) fn open_container(&mut self, id: i32, pos: BlockPos, state: u16) -> bool {
         let (view, menu, title) = match BlockInfo::of(state).name {
             "minecraft:crafting_table" => (View::Crafting, menu::CRAFTING, "Crafting"),
+            "minecraft:enchanting_table" => (View::Enchanting(pos), menu::ENCHANTMENT, "Enchant"),
             "minecraft:chest" | "minecraft:trapped_chest" => {
                 let partner = blocks::chest_partner(state, pos)
                     .filter(|&q| blocks::same_block(self.block(q), state));
@@ -278,6 +286,7 @@ impl World {
             view,
             grid: [Stack::EMPTY; 9],
             result: Stack::EMPTY,
+            offers: Default::default(),
         });
         self.send(
             id,
@@ -293,6 +302,7 @@ impl World {
                 self.chest_viewers_changed(first);
                 self.chest_viewers_changed(second);
             }
+            View::Enchanting(_) => self.refresh_offers(id),
             View::Furnace(pos, _) => {
                 if let Some(BlockEntity::Furnace(f)) = self.block_entities.get(&pos) {
                     let data = furnace_data(window, f);
@@ -320,6 +330,10 @@ impl World {
                 let mut slots = vec![open.result];
                 slots.extend_from_slice(&open.grid);
                 slots
+            }
+            View::Enchanting(_) => {
+                let open = p.open.as_ref().expect("enchanting window is open");
+                open.grid[..2].to_vec()
             }
             View::Chest(_) | View::Furnace(..) | View::DoubleChest(..) => {
                 let mut slots = vec![Stack::EMPTY; view.container_len()];
@@ -355,6 +369,11 @@ impl World {
                 open.result = slots[0];
                 open.grid.copy_from_slice(&slots[1..10]);
             }
+            View::Enchanting(_) => {
+                let p = self.players.get_mut(&id).expect("player exists");
+                let open = p.open.as_mut().expect("enchanting window is open");
+                open.grid[..2].copy_from_slice(&slots[..2]);
+            }
             View::Chest(_) | View::Furnace(..) | View::DoubleChest(..) => {
                 for (part, first) in view.parts() {
                     if let Some(entity) = self.block_entities.get_mut(&part) {
@@ -368,7 +387,7 @@ impl World {
         }
     }
 
-    fn resync_window(&mut self, id: i32, window: i32, view: View) {
+    pub(super) fn resync_window(&mut self, id: i32, window: i32, view: View) {
         let slots = self.window_slots(id, view);
         let p = self.players.get_mut(&id).expect("player exists");
         let content = p.inventory.window_content_packet(window, &slots);
@@ -445,6 +464,9 @@ impl World {
             let p = self.players.get_mut(&id).expect("player exists");
             let update = p.inventory.window_slot_packet(window, r, slots[r]);
             self.send(id, update);
+        }
+        if matches!(view, View::Enchanting(_)) {
+            self.refresh_offers(id);
         }
         let parts = view.parts();
         for (i, &(part, first)) in parts.iter().enumerate() {
@@ -574,6 +596,7 @@ impl World {
         let mut returned = Vec::new();
         match open.view {
             View::Crafting => returned.extend(open.grid),
+            View::Enchanting(_) => returned.extend(&open.grid[..2]),
             View::Chest(_) | View::Furnace(..) | View::DoubleChest(..) => {
                 let mut last_viewer = false;
                 for (part, _) in open.view.parts() {

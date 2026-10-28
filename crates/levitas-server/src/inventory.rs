@@ -5,6 +5,8 @@ use levitas_nbt::{Compound, Tag};
 use levitas_protocol::Writer;
 use levitas_registry::{component, ItemInfo};
 
+use crate::enchanting::Enchantments;
+
 pub const SLOTS: usize = 46;
 pub const CRAFTING_GRID: std::ops::RangeInclusive<usize> = 1..=4;
 pub const HOTBAR: usize = 36;
@@ -17,6 +19,8 @@ pub struct Stack {
     pub count: i32,
     /// Durability used up (the `minecraft:damage` component); 0 when undamaged.
     pub damage: i32,
+    /// Enchantments: on the item, or stored in an enchanted book.
+    pub enchants: Enchantments,
 }
 
 impl Stack {
@@ -24,6 +28,7 @@ impl Stack {
         item: 0,
         count: 0,
         damage: 0,
+        enchants: Enchantments::NONE,
     };
 
     pub fn new(item: i32, count: i32) -> Self {
@@ -31,6 +36,7 @@ impl Stack {
             item,
             count,
             damage: 0,
+            enchants: Enchantments::NONE,
         }
     }
 
@@ -45,7 +51,7 @@ impl Stack {
 
     /// Whether two stacks can merge: the same item with the same components.
     pub fn same_kind(&self, other: &Stack) -> bool {
-        self.item == other.item && self.damage == other.damage
+        self.item == other.item && self.damage == other.damage && self.enchants == other.enchants
     }
 
     pub fn is_empty(&self) -> bool {
@@ -56,16 +62,30 @@ impl Stack {
         ItemInfo::get(self.item).map_or(64, |i| i32::from(i.max_stack))
     }
 
-    /// The vanilla saved form: `{id, count, components}`. Of the components only damage
-    /// is tracked so far.
+    /// Whether the enchantments are stored (an enchanted book) rather than active.
+    pub fn stores_enchantments(&self) -> bool {
+        ItemInfo::get(self.item).is_some_and(|i| i.name == "minecraft:enchanted_book")
+    }
+
+    /// The vanilla saved form: `{id, count, components}`. Of the components damage and
+    /// enchantments are tracked so far.
     pub fn to_nbt(self) -> Compound {
         let name = ItemInfo::get(self.item).map_or("minecraft:air", |i| i.name);
         let mut nbt = Compound::new().with("id", name).with("count", self.count);
+        let mut components = Compound::new();
         if self.damage > 0 {
-            nbt.insert(
-                "components",
-                Compound::new().with("minecraft:damage", self.damage),
-            );
+            components.insert("minecraft:damage", self.damage);
+        }
+        if !self.enchants.is_empty() {
+            let key = if self.stores_enchantments() {
+                "minecraft:stored_enchantments"
+            } else {
+                "minecraft:enchantments"
+            };
+            components.insert(key, self.enchants.to_nbt());
+        }
+        if !components.is_empty() {
+            nbt.insert("components", components);
         }
         nbt
     }
@@ -76,14 +96,21 @@ impl Stack {
             return Stack::EMPTY;
         };
         let count = nbt.int("count").unwrap_or(1) as i32;
-        let damage = nbt
-            .compound("components")
+        let components = nbt.compound("components");
+        let damage = components
             .and_then(|c| c.int("minecraft:damage"))
             .unwrap_or(0) as i32;
+        let enchants = components
+            .and_then(|c| {
+                c.compound("minecraft:enchantments")
+                    .or_else(|| c.compound("minecraft:stored_enchantments"))
+            })
+            .map_or(Enchantments::NONE, Enchantments::from_nbt);
         Stack {
             item,
             count,
             damage: damage.max(0),
+            enchants,
         }
     }
 }
@@ -117,15 +144,23 @@ pub fn write_stack(packet: Writer, stack: Stack) -> Writer {
     }
     let packet = packet.varint(stack.count).varint(stack.item);
     // Both counts come first (components to add, then to remove), then the components.
-    if stack.damage > 0 {
-        packet
-            .varint(1)
-            .varint(0)
-            .varint(component::DAMAGE)
-            .varint(stack.damage)
-    } else {
-        packet.varint(0).varint(0)
+    let damaged = stack.damage > 0;
+    let enchanted = !stack.enchants.is_empty();
+    let mut packet = packet
+        .varint(i32::from(damaged) + i32::from(enchanted))
+        .varint(0);
+    if damaged {
+        packet = packet.varint(component::DAMAGE).varint(stack.damage);
     }
+    if enchanted {
+        let kind = if stack.stores_enchantments() {
+            component::STORED_ENCHANTMENTS
+        } else {
+            component::ENCHANTMENTS
+        };
+        packet = stack.enchants.write(packet.varint(kind));
+    }
+    packet
 }
 
 pub struct Inventory {
@@ -333,5 +368,35 @@ mod tests {
             .varint(0)
             .into_frame();
         assert_eq!(fresh, expected);
+    }
+
+    #[test]
+    fn enchanted_stacks_send_and_save_their_enchantments() {
+        let sharpness = crate::enchanting::enchantment_id("minecraft:sharpness").unwrap();
+        let mut stack = Stack::new(item("minecraft:diamond_sword"), 1);
+        stack.enchants.set(sharpness, 5);
+        let sent = write_stack(Writer::packet(0), stack).into_frame();
+        let expected = Writer::packet(0)
+            .varint(1)
+            .varint(stack.item)
+            .varint(1)
+            .varint(0)
+            .varint(component::ENCHANTMENTS)
+            .varint(1)
+            .varint(sharpness)
+            .varint(5)
+            .into_frame();
+        assert_eq!(sent, expected);
+        assert_eq!(Stack::from_nbt(&stack.to_nbt()), stack);
+        // Books store theirs.
+        let mut book = Stack::new(item("minecraft:enchanted_book"), 1);
+        book.enchants = stack.enchants;
+        let nbt = book.to_nbt();
+        assert!(nbt
+            .compound("components")
+            .unwrap()
+            .compound("minecraft:stored_enchantments")
+            .is_some());
+        assert!(!stack.same_kind(&Stack::new(stack.item, 1)));
     }
 }

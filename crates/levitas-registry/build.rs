@@ -102,6 +102,14 @@ fn main() {
     embed_json_dir(
         &data,
         &out_dir,
+        "enchantment",
+        "ENCHANTMENTS_JSON",
+        "Enchantment definitions as JSON: costs, weights, supported items, effects.",
+        &mut out,
+    );
+    embed_json_dir(
+        &data,
+        &out_dir,
         "recipe",
         "RECIPES_JSON",
         "Recipes as JSON: an object mapping recipe names to recipes.",
@@ -529,6 +537,7 @@ pub static NAMES: &[&str] = &[{}];",
             }
             None => "None".to_owned(),
         };
+        let enchantability = c["minecraft:enchantable"]["value"].as_u64().unwrap_or(0);
         let tool = match c.get("minecraft:tool") {
             Some(tool) => {
                 let rules: Vec<String> = tool["rules"]
@@ -576,7 +585,7 @@ pub static NAMES: &[&str] = &[{}];",
         writeln!(
             out,
             "ItemInfo {{ name: {name:?}, max_stack: {max_stack}, block: {block}, food: {food}, \
-             consumable: {consumable}, \
+             consumable: {consumable}, enchantability: {enchantability}, \
              tool: {tool}, max_damage: {max_damage}, equip_slot: {equip_slot:?}, \
              attack_damage: {attack_damage:?}f32, attack_speed: {attack_speed:?}f32, \
              armor: {armor:?}f32, toughness: {toughness:?}f32 }},"

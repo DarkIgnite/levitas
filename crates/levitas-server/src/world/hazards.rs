@@ -79,8 +79,15 @@ impl World {
         let breathes_water = p
             .effect(levitas_registry::mob_effect::WATER_BREATHING)
             .is_some();
+        // Respiration keeps air in by level in level + 1.
+        let respiration = p.inventory.slots[5]
+            .enchants
+            .level_of("minecraft:respiration");
+        let holds_breath = respiration > 0 && self.rng.below(respiration + 1) > 0;
         if underwater && survival && !breathes_water {
-            p.air -= 1;
+            if !holds_breath {
+                p.air -= 1;
+            }
             if p.air <= -20 {
                 p.air = 0;
                 hits.push((2.0, Damage::Drown));

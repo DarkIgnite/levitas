@@ -9,6 +9,7 @@
 use levitas_registry::particle;
 
 use super::*;
+use crate::enchanting::Enchantments;
 use crate::world::survival::Damage;
 
 /// How far a player can reach an entity.
@@ -57,8 +58,10 @@ impl World {
         let (damage, speed) = item.map_or((1.0, 4.0), |i| (i.attack_damage, i.attack_speed));
         let cooldown = 20.0 / f64::from(speed);
         let charge = ((self.tick.saturating_sub(p.attack_reset) as f64 + 0.5) / cooldown).min(1.0);
-        let damage = (damage + p.attack_bonus()).max(0.0);
-        let mut damage = damage * (0.2 + (charge * charge) as f32 * 0.8);
+        let base_damage = (damage + p.attack_bonus()).max(0.0);
+        let enchants = p.inventory.slots[slot].enchants;
+        let mut damage = base_damage * (0.2 + (charge * charge) as f32 * 0.8)
+            + self.enchant_damage(&enchants, target) * charge as f32;
         let charged = charge > 0.9;
         let critical = charged && p.fall_distance > 0.0 && !p.on_ground && !p.sprinting;
         if critical {
@@ -81,10 +84,24 @@ impl World {
         p.attack_reset = self.tick;
         p.exhaustion += 0.1;
 
-        let knockback = KNOCKBACK + if sprint_hit { SPRINT_KNOCKBACK } else { 0.0 };
+        let knockback = KNOCKBACK
+            + if sprint_hit { SPRINT_KNOCKBACK } else { 0.0 }
+            + 0.5 * f64::from(enchants.level_of("minecraft:knockback"));
         if !self.hit_target(target, damage, attacker, away, knockback) {
             self.attack_sound(attacker_pos, "minecraft:entity.player.attack.nodamage");
             return;
+        }
+        let fire_aspect = enchants.level_of("minecraft:fire_aspect");
+        if fire_aspect > 0 {
+            let ticks = 80 * fire_aspect as i32;
+            match target {
+                Target::Mob(id) => self.ignite_mob(id, ticks),
+                Target::Player(id) => {
+                    if let Some(p) = self.players.get_mut(&id) {
+                        p.fire_ticks = p.fire_ticks.max(ticks);
+                    }
+                }
+            }
         }
         if sprint_hit {
             // A knockback hit ends the sprint.
@@ -116,7 +133,10 @@ impl World {
             );
         }
         if sweep {
-            self.sweep(attacker, target, pos, attacker_pos, away);
+            // Sweeping edge passes on part of the blow's damage.
+            let edge = enchants.level_of("minecraft:sweeping_edge") as f32;
+            let sweep_damage = SWEEP_DAMAGE + base_damage * edge / (edge + 1.0);
+            self.sweep(attacker, target, pos, attacker_pos, away, sweep_damage);
         }
         if is_weapon {
             self.damage_item(attacker, slot, 1, ENTITY_EVENT_MAINHAND_BREAK);
@@ -172,6 +192,7 @@ impl World {
         at: [f64; 3],
         attacker_pos: [f64; 3],
         away: [f64; 2],
+        damage: f32,
     ) {
         let near = |pos: [f64; 3], height: f64| {
             let beside = (pos[0] - at[0]).abs() <= SWEEP_SPREAD + 0.6
@@ -194,7 +215,7 @@ impl World {
                 .map(|(&id, _)| Target::Player(id)),
         );
         for other in hit.into_iter().filter(|&t| t != target) {
-            self.hit_target(other, SWEEP_DAMAGE, attacker, away, KNOCKBACK);
+            self.hit_target(other, damage, attacker, away, KNOCKBACK);
         }
 
         let at = [
@@ -217,6 +238,26 @@ impl World {
                 .varint(particle::SWEEP_ATTACK),
             None,
         );
+    }
+
+    /// Extra damage from the weapon's enchantments against this target: sharpness
+    /// against anything, smite against the undead, bane of arthropods against spiders.
+    fn enchant_damage(&self, enchants: &Enchantments, target: Target) -> f32 {
+        let level = |name: &str| enchants.level_of(name) as f32;
+        let mut extra = 0.0;
+        let sharpness = level("minecraft:sharpness");
+        if sharpness > 0.0 {
+            extra += 0.5 * sharpness + 0.5;
+        }
+        if let Target::Mob(id) = target {
+            if self.mob_tagged(id, "minecraft:sensitive_to_smite") {
+                extra += 2.5 * level("minecraft:smite");
+            }
+            if self.mob_tagged(id, "minecraft:sensitive_to_bane_of_arthropods") {
+                extra += 2.5 * level("minecraft:bane_of_arthropods");
+            }
+        }
+        extra
     }
 
     fn attack_sound(&mut self, at: [f64; 3], sound: &str) {

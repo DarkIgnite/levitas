@@ -176,6 +176,11 @@ fn decode(id: i32, packet: &[u8]) -> io::Result<Option<Event>> {
                     let data = r.bytes(length)?;
                     if kind == levitas_registry::component::DAMAGE {
                         stack.damage = Reader::new(data).varint()?.max(0);
+                    } else if kind == levitas_registry::component::ENCHANTMENTS
+                        || kind == levitas_registry::component::STORED_ENCHANTMENTS
+                    {
+                        stack.enchants =
+                            crate::enchanting::Enchantments::read(&mut Reader::new(data))?;
                     }
                 }
             }
@@ -206,6 +211,11 @@ fn decode(id: i32, packet: &[u8]) -> io::Result<Option<Event>> {
                 carried: hashed_stack(&mut r)?,
             }
         }
+        serverbound::CONTAINER_BUTTON_CLICK => Event::ContainerButton {
+            id,
+            window: r.varint()?,
+            button: r.varint()?,
+        },
         serverbound::CONTAINER_CLOSE => Event::ContainerClose {
             id,
             window: r.varint()?,

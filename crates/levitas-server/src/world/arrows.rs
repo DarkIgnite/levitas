@@ -32,6 +32,12 @@ pub struct Shot {
     pub speed: f64,
     pub inaccuracy: f64,
     pub critical: bool,
+    /// Damage per unit of speed: 2, more with power.
+    pub base_damage: f64,
+    /// Whether players may pick the arrow up (not from infinity bows).
+    pub pickup: bool,
+    /// Whether the arrow is aflame (flame), setting what it hits on fire.
+    pub flaming: bool,
 }
 
 pub struct Arrow {
@@ -41,6 +47,9 @@ pub struct Arrow {
     shooter: i32,
     by_player: bool,
     critical: bool,
+    base_damage: f64,
+    pickup: bool,
+    flaming: bool,
     stuck: Option<u32>,
     age: u32,
 }
@@ -61,6 +70,9 @@ impl World {
             speed,
             inaccuracy,
             critical,
+            base_damage,
+            pickup,
+            flaming,
         } = shot;
         let length = (dir[0] * dir[0] + dir[1] * dir[1] + dir[2] * dir[2])
             .sqrt()
@@ -79,6 +91,9 @@ impl World {
             shooter,
             by_player,
             critical,
+            base_damage,
+            pickup,
+            flaming,
             stuck: None,
             age: 0,
         };
@@ -213,7 +228,7 @@ impl World {
 
     fn arrow_hits(&mut self, arrow: &Arrow, hit: Hit) {
         let speed = arrow.vel.iter().map(|v| v * v).sum::<f64>().sqrt();
-        let mut damage = (speed * BASE_DAMAGE).ceil();
+        let mut damage = (speed * arrow.base_damage).ceil();
         if arrow.critical {
             damage += f64::from(self.rng.below(damage as u32 / 2 + 2));
         }
@@ -231,11 +246,19 @@ impl World {
         };
         match hit {
             Hit::Player(id) => {
+                if arrow.flaming {
+                    if let Some(p) = self.players.get_mut(&id) {
+                        p.fire_ticks = p.fire_ticks.max(100);
+                    }
+                }
                 self.damage_from(id, damage, Damage::Arrow(shooter_name), Some(arrow.shooter));
                 self.push_player(id, [away[0] * 0.3, 0.1, away[1] * 0.3]);
             }
             Hit::Mob(id) => {
                 let by = arrow.by_player.then_some(arrow.shooter);
+                if arrow.flaming {
+                    self.ignite_mob(id, 100);
+                }
                 self.hit_mob(id, damage, by, away, "minecraft:arrow");
             }
             Hit::Block => {}
@@ -245,7 +268,7 @@ impl World {
 
     /// A player walking over an arrow they may take picks it up. Returns whether one did.
     fn pick_up_arrow(&mut self, id: i32, arrow: &Arrow) -> bool {
-        if !arrow.by_player {
+        if !arrow.by_player || !arrow.pickup {
             return false;
         }
         let Some(item) = ItemInfo::id_of("minecraft:arrow") else {
@@ -331,12 +354,18 @@ impl World {
             return;
         }
         let bow_slot = p.hand_slot(hand);
+        let bow = p.inventory.slots[bow_slot].enchants;
+        let infinity = bow.level_of("minecraft:infinity") > 0;
+        let power_level = bow.level_of("minecraft:power");
         let (eye, look, _) = p.eye_ray();
         if survival {
-            let slot = arrow_slot.expect("checked");
-            p.inventory.take(slot, 1);
-            let update = p.inventory.set_slot_packet(slot);
-            self.send(id, update);
+            // Infinity bows keep their arrows.
+            if !infinity {
+                let slot = arrow_slot.expect("checked");
+                p.inventory.take(slot, 1);
+                let update = p.inventory.set_slot_packet(slot);
+                self.send(id, update);
+            }
             self.damage_item(id, bow_slot, 1, ENTITY_EVENT_MAINHAND_BREAK);
         }
         let shot = Shot {
@@ -345,6 +374,14 @@ impl World {
             speed: power * 3.0,
             inaccuracy: 1.0,
             critical: power >= 1.0,
+            base_damage: BASE_DAMAGE
+                + if power_level > 0 {
+                    0.5 * f64::from(power_level) + 0.5
+                } else {
+                    0.0
+                },
+            pickup: survival && !infinity,
+            flaming: bow.level_of("minecraft:flame") > 0,
         };
         self.shoot_arrow(id, true, shot);
     }

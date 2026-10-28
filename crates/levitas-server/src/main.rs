@@ -1,6 +1,7 @@
 mod blocks;
 mod click;
 mod connection;
+mod enchanting;
 mod flat;
 mod inventory;
 mod loot;

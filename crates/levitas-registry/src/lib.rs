@@ -168,6 +168,8 @@ pub struct ItemInfo {
     pub food: Option<Food>,
     /// How the item is eaten or drunk, for items that can be.
     pub consumable: Option<Consumable>,
+    /// How well the item takes enchantments at an enchanting table; 0 if it cannot.
+    pub enchantability: u8,
     pub tool: Option<Tool>,
     /// Durability; 0 for items that do not wear out.
     pub max_damage: i32,

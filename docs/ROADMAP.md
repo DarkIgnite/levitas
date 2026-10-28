@@ -118,7 +118,7 @@ Known gaps are listed under each phase instead of being hidden.
       invulnerability after a hit.
 - [ ] Armor and armor toughness, shields, damage types and immunities. Worn armor
       reduces mob and explosion damage by the wiki's formula and wears down; no
-      shields, enchantments or other damage types yet.
+      shields yet; protection enchantments work.
 - [ ] Bows, crossbows, tridents, arrows, snowballs, eggs, ender pearls. Bows and arrows
       work (`world/arrows.rs`): draw strength, gravity and drag, damage from speed,
       critical shots, sticking in blocks, pickup. The rest is missing.
@@ -210,7 +210,16 @@ Known gaps are listed under each phase instead of being hidden.
       mined without silk touch give experience; levels follow the wiki's costs, are
       saved, and dying drops 7 per level (at most 100). `/xp add|query`. Missing:
       experience from smelting, breeding, fishing and trading.
-- [ ] Enchanting table and bookshelves, enchantment effects
+- [x] Enchanting table and bookshelves, enchantment effects. The table
+      (`world/enchanting_table.rs`, `enchanting.rs`) counts up to 15 bookshelves,
+      offers three slots by the wiki's costs, hints at what each gives, and picks
+      enchantments from the data generator's definitions (weights, cost ranges,
+      supported items, exclusive sets); books become enchanted books. Enchantments are
+      sent to clients and saved. Working effects: sharpness, smite, bane of
+      arthropods, knockback, fire aspect, sweeping edge, efficiency, unbreaking,
+      fortune, silk touch, looting, the protection family, feather falling,
+      respiration, power, flame, infinity and mending. Missing: thorns, punch,
+      frost walker, depth strider (client side), aqua affinity, curses.
 - [ ] Anvil (repair, rename, combine), grindstone
 - [ ] Brewing stand, potions, splash and lingering potions, tipped arrows
 - [ ] Beacons, conduits

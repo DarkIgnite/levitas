@@ -9,6 +9,7 @@ mod combat;
 mod commands;
 mod containers;
 mod effects;
+mod enchanting_table;
 mod experience;
 mod explosion;
 mod falling;
@@ -150,6 +151,12 @@ pub enum Event {
         changed: Vec<(i16, Stack)>,
         carried: Stack,
     },
+    /// One of a window's buttons, such as an enchanting table's slots.
+    ContainerButton {
+        id: i32,
+        window: i32,
+        button: i32,
+    },
     ContainerClose {
         id: i32,
         window: i32,
@@ -290,10 +297,13 @@ struct Player {
     /// Active status effects, and the extra health absorption gives.
     effects: Vec<effects::ActiveEffect>,
     absorption: f32,
+    /// Seeds what enchanting tables offer; changes with every enchanting.
+    enchant_seed: i32,
 }
 
 impl Player {
     fn new(profile: Profile, out: mpsc::Sender<Frame>, spawn: [f64; 3]) -> Self {
+        let profile_seed = profile.uuid as i32;
         Self {
             profile,
             out,
@@ -342,6 +352,7 @@ impl Player {
             last_damage: 0.0,
             effects: Vec::new(),
             absorption: 0.0,
+            enchant_seed: profile_seed,
         }
     }
 
@@ -560,6 +571,9 @@ impl World {
                 carried,
             } => self.container_click(id, window, slot, button, mode, changed, carried),
             Event::ContainerClose { id, window } => self.container_closed(id, window),
+            Event::ContainerButton { id, window, button } => {
+                self.enchant_button(id, window, button)
+            }
             Event::HeldSlot { id, slot } => {
                 if let (Some(p), Ok(slot)) = (self.players.get_mut(&id), usize::try_from(slot)) {
                     if slot < 9 {
@@ -841,7 +855,12 @@ impl World {
                 } else if !survival {
                     self.break_block(id, pos, state);
                 } else {
-                    let progress = survival::break_progress(state, tool)
+                    let efficiency = self.players[&id]
+                        .inventory
+                        .held(self.players[&id].held)
+                        .enchants
+                        .level_of("minecraft:efficiency");
+                    let progress = survival::break_progress_with(state, tool, efficiency)
                         * self.players[&id].dig_speed_factor();
                     let breaks = if status == DIG_START {
                         progress >= 1.0
@@ -895,17 +914,21 @@ impl World {
         if survival {
             p.exhaustion += 0.005;
             let tool = p.inventory.held(p.held).item;
+            let held_enchants = p.inventory.held(p.held).enchants;
             if survival::harvestable(state, tool) {
                 let drops = self.loot.block_drops(&mut LootContext {
                     state,
                     tool,
                     rng: &mut self.rng,
+                    enchants: held_enchants,
                     entity: Default::default(),
                 });
                 for (item, count) in drops {
                     self.drop_at_block(pos, Stack::new(item, count));
                 }
-                self.mined_xp(pos, state);
+                if held_enchants.level_of("minecraft:silk_touch") == 0 {
+                    self.mined_xp(pos, state);
+                }
             }
             self.wear_tool(id, state);
         } else if let Some(other) = crate::blocks::other_part(state, pos) {
@@ -945,6 +968,27 @@ impl World {
         if stack.is_empty() || max <= 0 || amount <= 0 {
             return;
         }
+        // Unbreaking spares each point of wear: tools by level in level + 1, armor less.
+        let unbreaking = stack.enchants.level_of("minecraft:unbreaking");
+        let amount = if unbreaking > 0 {
+            let armor = (5..9).contains(&slot);
+            (0..amount)
+                .filter(|_| {
+                    let r = self.rng.f64();
+                    if armor {
+                        r < 0.6 + 0.4 / f64::from(unbreaking + 1)
+                    } else {
+                        r < 1.0 / f64::from(unbreaking + 1)
+                    }
+                })
+                .count() as i32
+        } else {
+            amount
+        };
+        if amount == 0 {
+            return;
+        }
+        let p = self.players.get_mut(&id).expect("player exists");
         stack.damage += amount;
         let broke = stack.damage >= max;
         p.inventory.slots[slot] = if broke { Stack::EMPTY } else { stack };

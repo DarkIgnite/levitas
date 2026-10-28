@@ -248,7 +248,37 @@ impl World {
             pitch,
             None,
         );
-        self.give_xp(player, orb.value);
+        let left = self.mend(player, orb.value);
+        if left > 0 {
+            self.give_xp(player, left);
+        }
+    }
+
+    /// Mending: experience repairs a damaged mending item in hand or worn, two points of
+    /// durability per experience point. Returns the experience left over.
+    fn mend(&mut self, id: i32, xp: i32) -> i32 {
+        let Some(p) = self.players.get(&id) else {
+            return xp;
+        };
+        let slots = [p.hand_slot(0), OFFHAND, 5, 6, 7, 8];
+        let mendable: Vec<usize> = slots
+            .into_iter()
+            .filter(|&s| {
+                let stack = p.inventory.slots[s];
+                stack.damage > 0 && stack.enchants.level_of("minecraft:mending") > 0
+            })
+            .collect();
+        if mendable.is_empty() {
+            return xp;
+        }
+        let slot = mendable[self.rng.below(mendable.len() as u32) as usize];
+        let p = self.players.get_mut(&id).expect("player exists");
+        let stack = &mut p.inventory.slots[slot];
+        let repair = (xp * 2).min(stack.damage);
+        stack.damage -= repair;
+        let update = p.inventory.set_slot_packet(slot);
+        self.send(id, update);
+        xp - (repair + 1) / 2
     }
 
     /// Orbs lying about, for a player who just joined.

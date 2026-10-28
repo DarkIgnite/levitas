@@ -16,6 +16,7 @@ use tracing::error;
 
 use super::*;
 use crate::blocks::fluid::{fluid_at, Fluid};
+use crate::enchanting::Enchantments;
 use crate::loot::EntityProps;
 
 const GRAVITY: f64 = 0.08;
@@ -229,6 +230,8 @@ pub struct Mob {
     pub fuse: Option<u32>,
     /// Whether a player dealt the last hit (some loot needs it).
     killed_by_player: bool,
+    /// The weapon enchantments of the player who last hit it, for looting.
+    looting: Enchantments,
     /// Negative while a baby (it grows up at 0), positive while resting after breeding.
     pub age: i32,
     /// Ticks of love mode left.
@@ -273,6 +276,7 @@ impl Mob {
             fire_ticks: 0,
             fuse: None,
             killed_by_player: false,
+            looting: Enchantments::NONE,
             age: 0,
             love: 0,
             path: Vec::new(),
@@ -1012,6 +1016,26 @@ impl World {
     /// vector), and panics or, for a monster hit by a player, hunts them. A mob still
     /// recovering from a hit only takes what a harder hit adds. Returns whether the hit
     /// did anything.
+    /// Sets a mob alight for `ticks`, as fire aspect and flaming arrows do.
+    pub(super) fn ignite_mob(&mut self, id: i32, ticks: i32) {
+        if let Some(mob) = self.mobs.get_mut(&id) {
+            mob.fire_ticks = mob.fire_ticks.max(ticks.max(0) as u32);
+        }
+    }
+
+    /// Whether a mob belongs to an entity type tag (`minecraft:undead`, ...).
+    pub(super) fn mob_tagged(&self, id: i32, tag: &str) -> bool {
+        let Some(mob) = self.mobs.get(&id) else {
+            return false;
+        };
+        let name = mob.kind.name();
+        let Some(kind) = entity_type::NAMES.iter().position(|n| *n == name) else {
+            return false;
+        };
+        levitas_registry::TagRegistry::get("minecraft:entity_type")
+            .is_some_and(|t| t.members(tag).contains(&(kind as i64)))
+    }
+
     pub(super) fn hit_mob(
         &mut self,
         target: i32,
@@ -1039,6 +1063,10 @@ impl World {
         mob.health -= dealt;
         if let Some(attacker) = by_player {
             mob.killed_by_player = true;
+            mob.looting = self
+                .players
+                .get(&attacker)
+                .map_or(Enchantments::NONE, |p| p.inventory.held(p.held).enchants);
             if mob.kind.is_monster() {
                 mob.hunting = Some(attacker);
             }
@@ -1093,6 +1121,7 @@ impl World {
                 state: block::AIR,
                 tool: 0,
                 rng: &mut self.rng,
+                enchants: mob.looting,
                 entity: mob.loot_props(),
             },
         );

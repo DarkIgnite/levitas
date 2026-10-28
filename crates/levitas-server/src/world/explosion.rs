@@ -36,6 +36,7 @@ impl World {
                     state,
                     tool: 0,
                     rng: &mut self.rng,
+                    enchants: Default::default(),
                     entity: Default::default(),
                 });
                 for (item, count) in drops {

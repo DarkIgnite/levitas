@@ -203,6 +203,9 @@ impl World {
                 speed: SKELETON_ARROW_SPEED,
                 inaccuracy: SKELETON_INACCURACY,
                 critical: false,
+                base_damage: 2.0,
+                pickup: false,
+                flaming: false,
             },
         );
         mob.attack_cooldown = SKELETON_SHOT_TICKS;

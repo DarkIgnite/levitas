@@ -38,6 +38,8 @@ pub enum Layout {
     Furnace(Cooker),
     /// A chest-like container with this many slots, then main inventory and hotbar.
     Chest(usize),
+    /// An enchanting table: the item, the lapis, then main inventory and hotbar.
+    Enchanting,
 }
 
 impl Layout {
@@ -47,6 +49,7 @@ impl Layout {
             Layout::Crafting => 10,
             Layout::Furnace(_) => 3,
             Layout::Chest(n) => n,
+            Layout::Enchanting => 2,
         }
     }
 
@@ -103,6 +106,7 @@ impl Layout {
             Layout::Inventory if (5..9).contains(&slot) => self.armor_slot(stack) == Some(slot),
             Layout::Furnace(_) if slot == 2 => false,
             Layout::Furnace(_) if slot == 1 => fuel_ticks(stack.item) > 0 || is_bucket(stack),
+            Layout::Enchanting if slot == 1 => is_lapis(stack),
             _ => true,
         }
     }
@@ -111,12 +115,17 @@ impl Layout {
     fn limit(self, slot: usize, stack: &Stack) -> i32 {
         let armor = self == Layout::Inventory && (5..9).contains(&slot);
         let bucket_fuel = matches!(self, Layout::Furnace(_)) && slot == 1 && is_bucket(stack);
-        if armor || bucket_fuel {
+        let enchanted = self == Layout::Enchanting && slot == 0;
+        if armor || bucket_fuel || enchanted {
             1
         } else {
             stack.max_stack()
         }
     }
+}
+
+fn is_lapis(stack: &Stack) -> bool {
+    ItemInfo::get(stack.item).is_some_and(|i| i.name == "minecraft:lapis_lazuli")
 }
 
 fn is_bucket(stack: &Stack) -> bool {
@@ -410,6 +419,19 @@ fn quick_move(w: &mut Window, s: usize) {
                 move_into(w, stack, 0..n, false)
             } else {
                 move_into(w, stack, player, true)
+            }
+        }
+        Layout::Enchanting => {
+            if !in_player {
+                move_into(w, stack, player, true)
+            } else if is_lapis(&stack) {
+                move_into(w, stack, 1..2, false)
+            } else if w.slots[0].is_empty() {
+                move_into(w, stack, 0..1, false)
+            } else if main.contains(&s) {
+                move_into(w, stack, hotbar, false)
+            } else {
+                move_into(w, stack, main, false)
             }
         }
     };

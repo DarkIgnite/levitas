@@ -17,7 +17,14 @@ const VOID_Y: f64 = (MIN_Y - 64) as f64;
 
 /// How much of `state` a survival player breaks per tick with `tool` in hand (vanilla's
 /// destroy progress): 1 or more breaks it at once, 0 means it cannot be broken.
+#[cfg(test)]
 pub fn break_progress(state: u16, tool: i32) -> f32 {
+    break_progress_with(state, tool, 0)
+}
+
+/// [`break_progress`] with an efficiency level on the tool, which adds level squared
+/// plus one to the speed of a tool that suits the block.
+pub fn break_progress_with(state: u16, tool: i32, efficiency: u32) -> f32 {
     let info = BlockInfo::of(state);
     if info.hardness < 0.0 {
         return 0.0;
@@ -25,7 +32,10 @@ pub fn break_progress(state: u16, tool: i32) -> f32 {
     if info.hardness == 0.0 {
         return 1.0;
     }
-    let speed = ItemInfo::get(tool).map_or(1.0, |i| i.mining_speed(state));
+    let mut speed = ItemInfo::get(tool).map_or(1.0, |i| i.mining_speed(state));
+    if efficiency > 0 && speed > 1.0 {
+        speed += (efficiency * efficiency + 1) as f32;
+    }
     let divisor = if harvestable(state, tool) {
         30.0
     } else {
@@ -217,6 +227,7 @@ impl World {
         } else {
             amount
         };
+        let amount = self.through_protection(id, amount, kind);
         let p = self.players.get_mut(&id).expect("player exists");
         // Resistance takes off a fifth per level; absorption hearts go first.
         let amount = if kind.bypasses_creative() {
@@ -281,6 +292,29 @@ impl World {
             }
         }
         after_armor(amount, armor, toughness)
+    }
+
+    /// What is left of `amount` after protection enchantments on the armor: each point
+    /// of protection takes 4% off, up to 80%. Protection counts once per level, the
+    /// specialised kinds twice (fire, blast, projectile) and feather falling three times.
+    fn through_protection(&self, id: i32, amount: f32, kind: Damage) -> f32 {
+        if matches!(kind, Damage::Void | Damage::Kill | Damage::Starve) {
+            return amount;
+        }
+        let p = &self.players[&id];
+        let mut points = 0;
+        for slot in 5..9 {
+            let e = p.inventory.slots[slot].enchants;
+            points += e.level_of("minecraft:protection");
+            points += match kind {
+                k if k.is_fire() => 2 * e.level_of("minecraft:fire_protection"),
+                Damage::Explosion(_) => 2 * e.level_of("minecraft:blast_protection"),
+                Damage::Arrow(_) => 2 * e.level_of("minecraft:projectile_protection"),
+                Damage::Fall => 3 * e.level_of("minecraft:feather_falling"),
+                _ => 0,
+            };
+        }
+        amount * (1.0 - points.min(20) as f32 / 25.0)
     }
 
     fn die(&mut self, id: i32, kind: Damage) {

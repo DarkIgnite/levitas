@@ -285,6 +285,7 @@ impl Player {
                 super::effects::effects_to_nbt(&self.effects),
             )
             .with("AbsorptionAmount", self.absorption)
+            .with("XpSeed", self.enchant_seed)
             .with("Air", self.air.clamp(0, 300) as i16)
             .with("Fire", self.fire_ticks.clamp(0, i32::from(i16::MAX)) as i16)
             .with(
@@ -347,6 +348,9 @@ impl Player {
         self.xp_total = nbt.int("XpTotal").unwrap_or(0).max(0) as i32;
         self.effects = super::effects::effects_from_nbt(nbt.get("active_effects"));
         self.absorption = nbt.float("AbsorptionAmount").unwrap_or(0.0).max(0.0) as f32;
+        if let Some(seed) = nbt.int("XpSeed") {
+            self.enchant_seed = seed as i32;
+        }
         self.air = nbt.int("Air").unwrap_or(300).clamp(0, 300) as i32;
         self.fire_ticks = nbt.int("Fire").unwrap_or(0).max(0) as i32;
         self.respawn = nbt

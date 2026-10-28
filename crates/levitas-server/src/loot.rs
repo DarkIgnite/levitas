@@ -1,13 +1,14 @@
 //! Loot tables: what a broken block or a killed mob drops. Tables are the vanilla JSON
 //! from the data generator, evaluated with the context Levitas tracks so far: the block
-//! state, the tool item and a few mob properties. Enchantments are not tracked yet, so
-//! silk touch, fortune and looting never apply.
+//! state, the tool item and its enchantments (silk touch, fortune, looting) and a few
+//! mob properties.
 
 use std::collections::HashMap;
 
 use levitas_registry::{BlockInfo, ItemInfo, TagRegistry, BLOCK_LOOT_JSON, ENTITY_LOOT_JSON};
 use serde_json::Value;
 
+use crate::enchanting::Enchantments;
 use crate::rng::Rng;
 
 pub struct LootTables {
@@ -23,6 +24,8 @@ pub struct LootContext<'a> {
     /// Item ID of the tool used, 0 for an empty hand.
     pub tool: i32,
     pub rng: &'a mut Rng,
+    /// Enchantments of the tool, or of the weapon that killed the mob.
+    pub enchants: Enchantments,
     /// The mob whose loot is rolled, for `entity_properties` conditions.
     pub entity: EntityProps,
 }
@@ -134,7 +137,7 @@ impl LootTables {
                     .chain(array(&table["functions"]))
                 {
                     if conditions(function, ctx) {
-                        count = apply(function, count, ctx.rng);
+                        count = apply(function, count, ctx);
                     }
                 }
                 if count > 0 {
@@ -191,14 +194,24 @@ fn condition(c: &Value, ctx: &mut LootContext) -> bool {
     match c["condition"].as_str().unwrap_or_default() {
         "minecraft:survives_explosion" => true,
         "minecraft:killed_by_player" => ctx.entity.killed_by_player,
-        "minecraft:match_tool" => match_tool(&c["predicate"], ctx.tool),
+        "minecraft:match_tool" => match_tool(&c["predicate"], ctx.tool, &ctx.enchants),
         "minecraft:random_chance" => ctx.rng.f64() < number(&c["chance"], ctx.rng),
         "minecraft:random_chance_with_enchanted_bonus" => {
-            ctx.rng.f64() < number(&c["unenchanted_chance"], ctx.rng)
+            let level = enchant_level(c, ctx);
+            let chance = if level > 0 {
+                leveled(&c["enchanted_chance"], level, ctx.rng)
+            } else {
+                number(&c["unenchanted_chance"], ctx.rng)
+            };
+            ctx.rng.f64() < chance
         }
-        // No fortune yet: use the chance for enchantment level 0.
         "minecraft:table_bonus" => {
-            let chance = c["chances"][0].as_f64().unwrap_or(0.0);
+            let chances = array(&c["chances"]);
+            let level = enchant_level(c, ctx) as usize;
+            let chance = chances
+                .get(level.min(chances.len().saturating_sub(1)))
+                .and_then(Value::as_f64)
+                .unwrap_or(0.0);
             ctx.rng.f64() < chance
         }
         "minecraft:block_state_property" => block_state_matches(&c["properties"], ctx.state),
@@ -212,11 +225,48 @@ fn condition(c: &Value, ctx: &mut LootContext) -> bool {
     }
 }
 
-/// Matches an item predicate. Predicates on components (enchantments and so on) never
-/// match, since item components are not tracked yet.
-fn match_tool(predicate: &Value, tool: i32) -> bool {
-    if predicate.get("predicates").is_some() {
-        return false;
+/// The level of the enchantment a condition or function names, on the tool or weapon.
+fn enchant_level(holder: &Value, ctx: &LootContext) -> u32 {
+    holder["enchantment"]
+        .as_str()
+        .map_or(0, |e| ctx.enchants.level_of(e))
+}
+
+/// A number provider that may depend on an enchantment level (`minecraft:linear`).
+fn leveled(value: &Value, level: u32, rng: &mut Rng) -> f64 {
+    if value["type"] == "minecraft:linear" {
+        let base = value["base"].as_f64().unwrap_or(0.0);
+        let per = value["per_level_above_first"].as_f64().unwrap_or(0.0);
+        return base + per * f64::from(level.saturating_sub(1));
+    }
+    number(value, rng)
+}
+
+/// Matches an item predicate: the items, and enchantment requirements on them. Other
+/// component predicates never match.
+fn match_tool(predicate: &Value, tool: i32, enchants: &Enchantments) -> bool {
+    if let Some(predicates) = predicate.get("predicates").and_then(Value::as_object) {
+        for (key, wanted) in predicates {
+            if key != "minecraft:enchantments" {
+                return false;
+            }
+            let all = array(wanted).iter().all(|w| {
+                let names: Vec<&str> = match &w["enchantments"] {
+                    Value::String(s) => vec![s.as_str()],
+                    Value::Array(l) => l.iter().filter_map(Value::as_str).collect(),
+                    _ => Vec::new(),
+                };
+                let min = w["levels"]["min"].as_u64().unwrap_or(1) as u32;
+                let max = w["levels"]["max"].as_u64().map_or(u32::MAX, |m| m as u32);
+                names.iter().any(|n| {
+                    let level = enchants.level_of(n);
+                    level > 0 && (min..=max).contains(&level)
+                })
+            });
+            if !all {
+                return false;
+            }
+        }
     }
     let Some(items) = predicate.get("items") else {
         return true;
@@ -285,7 +335,9 @@ fn block_state_matches(properties: &Value, state: u16) -> bool {
     })
 }
 
-fn apply(function: &Value, count: i32, rng: &mut Rng) -> i32 {
+fn apply(function: &Value, count: i32, ctx: &mut LootContext) -> i32 {
+    let level = enchant_level(function, ctx);
+    let rng = &mut *ctx.rng;
     match function["function"].as_str().unwrap_or_default() {
         "minecraft:set_count" => {
             let n = number(&function["count"], rng).floor() as i32;
@@ -295,13 +347,32 @@ fn apply(function: &Value, count: i32, rng: &mut Rng) -> i32 {
                 n
             }
         }
-        // Fortune level 0: only the binomial formula adds anything.
-        "minecraft:apply_bonus" if function["formula"] == "minecraft:binomial_with_bonus_count" => {
-            let extra = function["parameters"]["extra"].as_i64().unwrap_or(0);
-            let p = function["parameters"]["probability"]
-                .as_f64()
-                .unwrap_or(0.0);
-            count + (0..extra).filter(|_| rng.f64() < p).count() as i32
+        "minecraft:apply_bonus" => match function["formula"].as_str().unwrap_or_default() {
+            "minecraft:binomial_with_bonus_count" => {
+                let extra =
+                    function["parameters"]["extra"].as_i64().unwrap_or(0) + i64::from(level);
+                let p = function["parameters"]["probability"]
+                    .as_f64()
+                    .unwrap_or(0.0);
+                count + (0..extra).filter(|_| rng.f64() < p).count() as i32
+            }
+            // Fortune multiplies ore drops by 1 to level + 1, favouring 1.
+            "minecraft:ore_drops" if level > 0 => {
+                let bonus = rng.below(level + 2) as i32 - 1;
+                count * (bonus.max(0) + 1)
+            }
+            "minecraft:uniform_bonus_count" => {
+                let multiplier = function["parameters"]["bonusMultiplier"]
+                    .as_u64()
+                    .unwrap_or(1) as u32;
+                count + rng.below(multiplier * level + 1) as i32
+            }
+            _ => count,
+        },
+        // Looting: each level adds up to the given count.
+        "minecraft:enchanted_count_increase" if level > 0 => {
+            let per = number(&function["count"], rng);
+            count + (per * f64::from(level)).round() as i32
         }
         "minecraft:limit_count" => {
             let limit = &function["limit"];
@@ -339,6 +410,10 @@ mod tests {
     use levitas_registry::block;
 
     fn drops(state: u16, tool: &str) -> Vec<(i32, i32)> {
+        enchanted_drops(state, tool, Enchantments::NONE)
+    }
+
+    fn enchanted_drops(state: u16, tool: &str, enchants: Enchantments) -> Vec<(i32, i32)> {
         let tables = LootTables::load();
         let tool = ItemInfo::id_of(tool).unwrap_or(0);
         let mut rng = Rng::new(1);
@@ -346,6 +421,7 @@ mod tests {
             state,
             tool,
             rng: &mut rng,
+            enchants,
             entity: Default::default(),
         })
     }
@@ -360,6 +436,52 @@ mod tests {
             drops(block::STONE, "minecraft:wooden_pickaxe"),
             [(item("minecraft:cobblestone"), 1)]
         );
+    }
+
+    fn with(name: &str, level: u32) -> Enchantments {
+        let mut e = Enchantments::NONE;
+        e.set(crate::enchanting::enchantment_id(name).unwrap(), level);
+        e
+    }
+
+    #[test]
+    fn silk_touch_keeps_blocks_whole() {
+        let silk = with("minecraft:silk_touch", 1);
+        assert_eq!(
+            enchanted_drops(block::STONE, "minecraft:wooden_pickaxe", silk),
+            [(item("minecraft:stone"), 1)]
+        );
+        let ore = levitas_registry::BlockInfo::by_name("minecraft:diamond_ore")
+            .unwrap()
+            .default_state;
+        assert_eq!(
+            enchanted_drops(ore, "minecraft:iron_pickaxe", silk),
+            [(item("minecraft:diamond_ore"), 1)]
+        );
+    }
+
+    #[test]
+    fn fortune_multiplies_ore_drops() {
+        let ore = levitas_registry::BlockInfo::by_name("minecraft:diamond_ore")
+            .unwrap()
+            .default_state;
+        let fortune = with("minecraft:fortune", 3);
+        let tables = LootTables::load();
+        let mut rng = Rng::new(3);
+        let total: i32 = (0..200)
+            .flat_map(|_| {
+                tables.block_drops(&mut LootContext {
+                    state: ore,
+                    tool: item("minecraft:iron_pickaxe"),
+                    rng: &mut rng,
+                    enchants: fortune,
+                    entity: Default::default(),
+                })
+            })
+            .map(|(_, n)| n)
+            .sum();
+        // Fortune III averages 2.2 diamonds an ore.
+        assert!((350..550).contains(&total), "{total}");
     }
 
     #[test]
@@ -414,6 +536,7 @@ mod tests {
                 state: block::AIR,
                 tool: 0,
                 rng: &mut rng,
+                enchants: Default::default(),
                 entity: props,
             },
         )
