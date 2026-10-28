@@ -8,7 +8,7 @@ use levitas_registry::command_argument;
 use super::*;
 
 const HELP: &str = "Commands: /gamemode <survival|creative>, /give <item> [count], /kill, \
-                    /time <set|add|query> ..., /weather <clear|rain|thunder> [seconds], /summon <mob>, /xp <add|query> ...";
+                    /time <set|add|query> ..., /effect <give|clear> ..., /weather <clear|rain|thunder> [seconds], /summon <mob>, /xp <add|query> ...";
 
 impl World {
     pub(super) fn command(&mut self, id: i32, command: &str) {
@@ -49,6 +49,10 @@ impl World {
                 Some(mob) => self.summon(id, mob),
                 None => format!("Usage: /summon <{}>", mobs::SUMMONABLE.join("|")),
             },
+            Some("effect") => {
+                let rest: Vec<&str> = args.collect();
+                self.effect_command(id, &rest)
+            }
             Some("xp" | "experience") => self.xp_command(id, args.next(), args.next(), args.next()),
             Some("help") => HELP.to_owned(),
             _ => format!("Unknown command: /{command}. {HELP}"),
@@ -311,6 +315,19 @@ pub(super) fn command_tree() -> Writer {
         }
         t.literal(xp, "query", true);
     }
+
+    let effect = t.literal(root, "effect", false);
+    let give = t.literal(effect, "give", false);
+    let mut registry = Vec::new();
+    let name = b"minecraft:mob_effect";
+    registry.push(name.len() as u8);
+    registry.extend_from_slice(name);
+    let which = t.argument(give, "effect", command_argument::RESOURCE, registry.clone());
+    let seconds = t.argument(which, "seconds", integer, at_least(1));
+    t.literal(which, "infinite", true);
+    t.argument(seconds, "amplifier", integer, at_least(0));
+    let clear = t.literal(effect, "clear", true);
+    t.argument(clear, "effect", command_argument::RESOURCE, registry);
 
     let weather = t.literal(root, "weather", false);
     for kind in ["clear", "rain", "thunder"] {

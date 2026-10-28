@@ -1532,11 +1532,14 @@ async fn joining_players_get_the_command_tree() {
             1 => r.string(32767).unwrap().to_owned(),
             _ => {
                 let name = r.string(32767).unwrap().to_owned();
-                if r.varint().unwrap() == levitas_registry::command_argument::BRIGADIER_INTEGER {
+                let parser = r.varint().unwrap();
+                if parser == levitas_registry::command_argument::BRIGADIER_INTEGER {
                     let limits = r.u8().unwrap();
                     for _ in 0..(limits & 1) + (limits >> 1 & 1) {
                         r.i32().unwrap();
                     }
+                } else if parser == levitas_registry::command_argument::RESOURCE {
+                    r.string(32767).unwrap(); // the registry
                 }
                 name
             }
@@ -1550,6 +1553,7 @@ async fn joining_players_get_the_command_tree() {
     assert_eq!(
         top,
         [
+            "effect",
             "experience",
             "gamemode",
             "give",
@@ -1994,4 +1998,60 @@ async fn flint_and_steel_lights_tnt() {
     assert_eq!(block_at(&mut alice, tnt).await, block::AIR);
     spawned(&mut alice, entity_type::TNT).await;
     read_until(&mut alice, play::clientbound::EXPLODE).await;
+}
+
+/// Reads effect updates until one for `effect` arrives; returns its amplifier.
+async fn effect_added(client: &mut TcpStream, effect: i32) -> i32 {
+    loop {
+        let body = read_until(client, play::clientbound::UPDATE_MOB_EFFECT).await;
+        let mut r = Reader::new(&body);
+        r.varint().unwrap();
+        if r.varint().unwrap() == effect {
+            return r.varint().unwrap();
+        }
+    }
+}
+
+#[tokio::test]
+async fn golden_apples_give_effects_and_milk_clears_them() {
+    use levitas_registry::mob_effect;
+    let mut alice = join(server().await, "Alice", 1).await;
+    read_until(&mut alice, play::clientbound::PLAYER_POSITION).await;
+    give(&mut alice, "golden_apple", 1).await;
+    send(&mut alice, use_item(1)).await;
+    assert_eq!(effect_added(&mut alice, mob_effect::REGENERATION).await, 1);
+    assert_eq!(effect_added(&mut alice, mob_effect::ABSORPTION).await, 0);
+
+    give(&mut alice, "milk_bucket", 1).await;
+    send(&mut alice, use_item(2)).await;
+    // The empty bucket is left in hand, then the effects go.
+    loop {
+        let body = read_until(&mut alice, play::clientbound::CONTAINER_SET_SLOT).await;
+        let mut r = Reader::new(&body);
+        r.varint().unwrap();
+        r.varint().unwrap();
+        r.i16().unwrap();
+        if r.varint().unwrap() == 1 {
+            let item = r.varint().unwrap();
+            if ItemInfo::get(item).unwrap().name == "minecraft:bucket" {
+                break;
+            }
+        }
+    }
+    let body = read_until(&mut alice, play::clientbound::REMOVE_MOB_EFFECT).await;
+    let mut r = Reader::new(&body);
+    r.varint().unwrap();
+    assert!([mob_effect::REGENERATION, mob_effect::ABSORPTION].contains(&r.varint().unwrap()));
+}
+
+#[tokio::test]
+async fn poison_hurts_but_never_kills() {
+    let mut alice = join(server().await, "Alice", 1).await;
+    read_until(&mut alice, play::clientbound::PLAYER_POSITION).await;
+    command(&mut alice, "effect give poison 60 4").await;
+    effect_added(&mut alice, levitas_registry::mob_effect::POISON).await;
+    // Level V poison hurts every tick, down to one health and no further (natural
+    // regeneration may lift it a little in between).
+    let health = health_below(&mut alice, 1.5).await;
+    assert!((1.0..1.5).contains(&health), "{health}");
 }

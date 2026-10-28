@@ -122,7 +122,14 @@ Known gaps are listed under each phase instead of being hidden.
 - [ ] Bows, crossbows, tridents, arrows, snowballs, eggs, ender pearls. Bows and arrows
       work (`world/arrows.rs`): draw strength, gravity and drag, damage from speed,
       critical shots, sticking in blocks, pickup. The rest is missing.
-- [ ] Status effects (needed by food, potions and mobs)
+- [x] Status effects on players (`world/effects.rs`): given by food (golden apples,
+      rotten flesh, pufferfish, ...) and `/effect`, cleared by milk and death, removed
+      by honey, shown to the client and saved. Regeneration, poison, wither, hunger,
+      saturation, instant health and damage, absorption, resistance, fire resistance,
+      water breathing, strength, weakness, haste, mining fatigue, jump boost and slow
+      falling act on the server; the rest are carried out by the client. Food leaves
+      its bowl, bucket or bottle behind. Missing: effects on mobs, health boost,
+      chorus fruit teleporting.
 - [ ] Entity framework: tracking, physics, collisions, saving entities to disk.
       Mobs (`world/mobs.rs`) are shown to players who have their chunk loaded, move
       with gravity and block collisions, and are saved in vanilla `entities/` region

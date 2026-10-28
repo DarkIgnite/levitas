@@ -57,6 +57,7 @@ impl World {
         let (damage, speed) = item.map_or((1.0, 4.0), |i| (i.attack_damage, i.attack_speed));
         let cooldown = 20.0 / f64::from(speed);
         let charge = ((self.tick.saturating_sub(p.attack_reset) as f64 + 0.5) / cooldown).min(1.0);
+        let damage = (damage + p.attack_bonus()).max(0.0);
         let mut damage = damage * (0.2 + (charge * charge) as f32 * 0.8);
         let charged = charge > 0.9;
         let critical = charged && p.fall_distance > 0.0 && !p.on_ground && !p.sprinting;

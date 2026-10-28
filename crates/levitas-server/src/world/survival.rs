@@ -1,7 +1,7 @@
 //! Survival rules: health, hunger, damage, death and respawning, and which blocks break
 //! instantly or need the right tool to drop anything.
 
-use levitas_registry::BlockInfo;
+use levitas_registry::{mob_effect, BlockInfo, OnConsume};
 
 use super::*;
 
@@ -64,6 +64,9 @@ pub enum Damage {
     HotFloor,
     /// Hit by another player (their entity id).
     Player(i32),
+    /// Poison and instant damage.
+    Magic,
+    Wither,
 }
 
 impl Damage {
@@ -85,6 +88,8 @@ impl Damage {
             Damage::OnFire => "minecraft:on_fire",
             Damage::HotFloor => "minecraft:hot_floor",
             Damage::Player(_) => "minecraft:player_attack",
+            Damage::Magic => "minecraft:magic",
+            Damage::Wither => "minecraft:wither",
         }
     }
 
@@ -106,6 +111,8 @@ impl Damage {
             Damage::OnFire => format!("{name} burned to death"),
             Damage::HotFloor => format!("{name} discovered the floor was lava"),
             Damage::Player(_) => format!("{name} was slain by a player"),
+            Damage::Magic => format!("{name} was killed by magic"),
+            Damage::Wither => format!("{name} withered away"),
         }
     }
 
@@ -121,6 +128,14 @@ impl Damage {
                 | Damage::Lava
                 | Damage::InFire
                 | Damage::HotFloor
+        )
+    }
+
+    /// Whether fire resistance keeps this damage away.
+    fn is_fire(self) -> bool {
+        matches!(
+            self,
+            Damage::Lava | Damage::InFire | Damage::OnFire | Damage::HotFloor
         )
     }
 
@@ -181,6 +196,9 @@ impl World {
         if !p.alive || (!p.survival() && !kind.bypasses_creative()) {
             return false;
         }
+        if kind.is_fire() && p.effect(mob_effect::FIRE_RESISTANCE).is_some() {
+            return false;
+        }
         // Just after a hit, only a harder one gets through, and only by the difference.
         let amount = if p.hurt_ticks > 0 && !kind.bypasses_creative() {
             let extra = amount - p.last_damage;
@@ -200,6 +218,16 @@ impl World {
             amount
         };
         let p = self.players.get_mut(&id).expect("player exists");
+        // Resistance takes off a fifth per level; absorption hearts go first.
+        let amount = if kind.bypasses_creative() {
+            amount
+        } else {
+            let level = p.effect_level(mob_effect::RESISTANCE) as f32;
+            amount * (1.0 - 0.2 * level).max(0.0)
+        };
+        let absorbed = amount.min(p.absorption);
+        p.absorption -= absorbed;
+        let amount = amount - absorbed;
         p.health = (p.health - amount).max(0.0);
         p.exhaustion += 0.1;
         let dead = p.health <= 0.0;
@@ -220,6 +248,9 @@ impl World {
             None,
         );
         self.send(id, health);
+        if absorbed > 0.0 {
+            self.send_absorption(id);
+        }
         if dead {
             self.die(id, kind);
         }
@@ -254,6 +285,7 @@ impl World {
 
     fn die(&mut self, id: i32, kind: Damage) {
         self.wake_up(id);
+        self.clear_effects(id);
         self.drop_xp_on_death(id);
         self.close_container(id);
         let p = self.players.get_mut(&id).expect("player exists");
@@ -352,10 +384,15 @@ impl World {
             return;
         };
         let stack = p.inventory.slots[p.hand_slot(hand)];
-        let Some(food) = ItemInfo::get(stack.item).and_then(|i| i.food.as_ref()) else {
+        let Some(info) = ItemInfo::get(stack.item).filter(|i| i.consumable.is_some()) else {
             return;
         };
-        if p.alive && !stack.is_empty() && (p.food < 20 || food.can_always_eat) {
+        // Food needs an appetite unless it can always be eaten; drinks never do.
+        let hungry = info
+            .food
+            .as_ref()
+            .is_none_or(|f| p.food < 20 || f.can_always_eat || !p.survival());
+        if p.alive && !stack.is_empty() && hungry {
             p.eating = Some((hand, tick));
         }
     }
@@ -364,23 +401,70 @@ impl World {
         let p = self.players.get_mut(&id).expect("player exists");
         let slot = p.hand_slot(hand);
         let stack = p.inventory.slots[slot];
-        let Some(food) = ItemInfo::get(stack.item).and_then(|i| i.food.as_ref()) else {
+        let Some(info) = ItemInfo::get(stack.item) else {
+            return;
+        };
+        let Some(consumable) = info.consumable.as_ref() else {
             return;
         };
         if stack.is_empty() {
             return;
         }
-        p.food = (p.food + food.nutrition).min(20);
-        p.saturation = (p.saturation + food.saturation).min(p.food as f32);
-        p.health_dirty = true;
-        let update = p.survival().then(|| {
+        if let Some(food) = &info.food {
+            p.food = (p.food + food.nutrition).min(20);
+            p.saturation = (p.saturation + food.saturation).min(p.food as f32);
+            p.health_dirty = true;
+        }
+        if p.survival() {
             p.inventory.take(slot, 1);
-            p.inventory.set_slot_packet(slot)
-        });
-        if let Some(update) = update {
+            // A bowl, bucket or bottle is left behind: in the hand if it is now empty.
+            if let Some(left) = consumable.remainder.and_then(ItemInfo::id_of) {
+                let left = Stack::new(left, 1);
+                if p.inventory.slots[slot].is_empty() {
+                    p.inventory.slots[slot] = left;
+                } else {
+                    let (changed, over) = p.inventory.add(left);
+                    let updates: Vec<Writer> = changed
+                        .into_iter()
+                        .map(|s| p.inventory.set_slot_packet(s))
+                        .collect();
+                    let pos = p.pos;
+                    for update in updates {
+                        self.send(id, update);
+                    }
+                    if over > 0 {
+                        self.scatter_item(pos, Stack::new(left.item, over));
+                    }
+                }
+            }
+            let p = self.players.get_mut(&id).expect("player exists");
+            let update = p.inventory.set_slot_packet(slot);
             self.send(id, update);
         }
         self.send(id, entity_event(id, ENTITY_EVENT_USE_ITEM_COMPLETE));
+        for effect in consumable.effects {
+            match effect {
+                OnConsume::Apply {
+                    probability,
+                    effects,
+                } => {
+                    if self.rng.f64() < f64::from(*probability) {
+                        for &e in *effects {
+                            self.add_effect(id, e);
+                        }
+                    }
+                }
+                OnConsume::ClearAll => {
+                    self.clear_effects(id);
+                }
+                OnConsume::Remove(ids) => {
+                    for &e in *ids {
+                        self.remove_effect(id, e);
+                    }
+                }
+                OnConsume::TeleportRandomly => {}
+            }
+        }
     }
 
     /// Hunger, natural regeneration, starvation, void damage and eating, once per tick.
@@ -393,7 +477,11 @@ impl World {
                 damage.push((id, 4.0, Damage::Void));
             }
             if let Some((hand, start)) = p.eating {
-                if tick - start >= EAT_TICKS {
+                let held = p.inventory.slots[p.hand_slot(hand)].item;
+                let ticks = ItemInfo::get(held)
+                    .and_then(|i| i.consumable.as_ref())
+                    .map_or(EAT_TICKS, |c| u64::from(c.ticks));
+                if tick - start >= ticks {
                     p.eating = None;
                     eaten.push((id, hand));
                 }

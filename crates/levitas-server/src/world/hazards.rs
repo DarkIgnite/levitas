@@ -76,7 +76,10 @@ impl World {
         p.hurt_ticks = p.hurt_ticks.saturating_sub(1);
 
         // Air: used up under water, then drowning; refilled quickly above it.
-        if underwater && survival {
+        let breathes_water = p
+            .effect(levitas_registry::mob_effect::WATER_BREATHING)
+            .is_some();
+        if underwater && survival && !breathes_water {
             p.air -= 1;
             if p.air <= -20 {
                 p.air = 0;

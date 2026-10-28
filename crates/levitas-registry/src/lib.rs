@@ -166,6 +166,8 @@ pub struct ItemInfo {
     /// Default state of the block this item places, or air (0).
     pub block: u16,
     pub food: Option<Food>,
+    /// How the item is eaten or drunk, for items that can be.
+    pub consumable: Option<Consumable>,
     pub tool: Option<Tool>,
     /// Durability; 0 for items that do not wear out.
     pub max_damage: i32,
@@ -213,6 +215,35 @@ impl ItemInfo {
             .find(|(r, _)| r.blocks.binary_search(&block).is_ok())
             .map_or(tool.default_speed, |(_, speed)| speed)
     }
+}
+
+/// Eating or drinking an item: how long it takes, what it does, and what is left.
+pub struct Consumable {
+    pub ticks: u32,
+    pub effects: &'static [OnConsume],
+    /// The item left in hand afterwards (a bowl, a bucket, a bottle).
+    pub remainder: Option<&'static str>,
+}
+
+/// Something that happens on eating or drinking.
+pub enum OnConsume {
+    /// Gives status effects, all at once with this probability.
+    Apply {
+        probability: f32,
+        effects: &'static [Effect],
+    },
+    ClearAll,
+    /// Removes these status effects.
+    Remove(&'static [i32]),
+    TeleportRandomly,
+}
+
+/// A status effect to give: its ID, ticks, and level less one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Effect {
+    pub id: i32,
+    pub duration: i32,
+    pub amplifier: u8,
 }
 
 pub struct Food {

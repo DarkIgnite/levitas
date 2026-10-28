@@ -406,6 +406,7 @@ fn items_and_entities(data: &Path, block_defaults: &HashMap<String, u64>, out: &
             "Item data component type IDs.",
         ),
         ("particle", "minecraft:particle_type", "Particle type IDs."),
+        ("mob_effect", "minecraft:mob_effect", "Status effect IDs."),
         (
             "command_argument",
             "minecraft:command_argument_type",
@@ -413,12 +414,22 @@ fn items_and_entities(data: &Path, block_defaults: &HashMap<String, u64>, out: &
         ),
     ] {
         writeln!(out, "/// {doc}\npub mod {module} {{").unwrap();
-        for (name, id) in entries(registry) {
-            writeln!(out, "pub const {}: i32 = {id};", const_name(&name)).unwrap();
+        let list = entries(registry);
+        for (name, id) in &list {
+            writeln!(out, "pub const {}: i32 = {id};", const_name(name)).unwrap();
         }
+        let names: Vec<String> = list.iter().map(|(n, _)| format!("{n:?}")).collect();
+        writeln!(
+            out,
+            "/// Every name, at the index of its ID.
+pub static NAMES: &[&str] = &[{}];",
+            names.join(", ")
+        )
+        .unwrap();
         out.push_str("}\n\n");
     }
 
+    let effect_ids: HashMap<String, u64> = entries("minecraft:mob_effect").into_iter().collect();
     let block_ids: HashMap<String, i64> = entries("minecraft:block")
         .into_iter()
         .map(|(name, id)| (name, id as i64))
@@ -463,6 +474,59 @@ fn items_and_entities(data: &Path, block_defaults: &HashMap<String, u64>, out: &
                 f["saturation"].as_f64().unwrap() as f32,
                 f["can_always_eat"].as_bool().unwrap_or(false)
             ),
+            None => "None".to_owned(),
+        };
+        let consumable = match c.get("minecraft:consumable") {
+            Some(cons) => {
+                let ticks = (cons["consume_seconds"].as_f64().unwrap_or(1.6) * 20.0).round() as u32;
+                let mut effects = Vec::new();
+                for e in cons["on_consume_effects"].as_array().into_iter().flatten() {
+                    let effect_list = |v: &Value| -> Vec<String> {
+                        v.as_array()
+                            .into_iter()
+                            .flatten()
+                            .map(|x| {
+                                format!(
+                                    "Effect {{ id: {}, duration: {}, amplifier: {} }}",
+                                    effect_ids[x["id"].as_str().unwrap()],
+                                    x["duration"].as_i64().unwrap_or(1),
+                                    x["amplifier"].as_u64().unwrap_or(0)
+                                )
+                            })
+                            .collect()
+                    };
+                    match e["type"].as_str().unwrap() {
+                        "minecraft:apply_effects" => effects.push(format!(
+                            "OnConsume::Apply {{ probability: {:?}f32, effects: &[{}] }}",
+                            e["probability"].as_f64().unwrap_or(1.0) as f32,
+                            effect_list(&e["effects"]).join(", ")
+                        )),
+                        "minecraft:clear_all_effects" => effects.push("OnConsume::ClearAll".into()),
+                        "minecraft:teleport_randomly" => {
+                            effects.push("OnConsume::TeleportRandomly".into())
+                        }
+                        "minecraft:remove_effects" => {
+                            let names: Vec<&str> = match &e["effects"] {
+                                Value::String(s) => vec![s.as_str()],
+                                Value::Array(l) => l.iter().filter_map(|v| v.as_str()).collect(),
+                                _ => Vec::new(),
+                            };
+                            let ids: Vec<String> = names
+                                .iter()
+                                .filter_map(|n| effect_ids.get(*n))
+                                .map(|id| id.to_string())
+                                .collect();
+                            effects.push(format!("OnConsume::Remove(&[{}])", ids.join(", ")));
+                        }
+                        _ => {}
+                    }
+                }
+                let remainder = c["minecraft:use_remainder"]["id"].as_str();
+                format!(
+                    "Some(Consumable {{ ticks: {ticks}, effects: &[{}], remainder: {remainder:?} }})",
+                    effects.join(", ")
+                )
+            }
             None => "None".to_owned(),
         };
         let tool = match c.get("minecraft:tool") {
@@ -512,6 +576,7 @@ fn items_and_entities(data: &Path, block_defaults: &HashMap<String, u64>, out: &
         writeln!(
             out,
             "ItemInfo {{ name: {name:?}, max_stack: {max_stack}, block: {block}, food: {food}, \
+             consumable: {consumable}, \
              tool: {tool}, max_damage: {max_damage}, equip_slot: {equip_slot:?}, \
              attack_damage: {attack_damage:?}f32, attack_speed: {attack_speed:?}f32, \
              armor: {armor:?}f32, toughness: {toughness:?}f32 }},"

@@ -8,6 +8,7 @@ mod building;
 mod combat;
 mod commands;
 mod containers;
+mod effects;
 mod experience;
 mod explosion;
 mod falling;
@@ -286,6 +287,9 @@ struct Player {
     /// started it: only harder hits get through meanwhile, and only by the difference.
     hurt_ticks: u32,
     last_damage: f32,
+    /// Active status effects, and the extra health absorption gives.
+    effects: Vec<effects::ActiveEffect>,
+    absorption: f32,
 }
 
 impl Player {
@@ -336,6 +340,8 @@ impl Player {
             hazard_cooldown: 0,
             hurt_ticks: 0,
             last_damage: 0.0,
+            effects: Vec::new(),
+            absorption: 0.0,
         }
     }
 
@@ -715,6 +721,7 @@ impl World {
         self.send(id, health);
         self.send(id, content);
         self.send(id, xp);
+        self.send_effects(id);
     }
 
     fn move_player(
@@ -806,8 +813,16 @@ impl World {
         {
             let dmg = (fallen * 2.0 - 1.0).floor().max(1.0) as f32;
             self.damage(id, dmg, survival::Damage::FallingStalactite);
-        } else if fallen > 3.0 {
-            self.damage(id, (fallen - 3.0).ceil() as f32, survival::Damage::Fall);
+        } else {
+            // Jump boost lets players fall further unhurt; slow falling saves them.
+            let p = &self.players[&id];
+            let safe = 3.0 + f64::from(p.effect_level(levitas_registry::mob_effect::JUMP_BOOST));
+            let slow = p
+                .effect(levitas_registry::mob_effect::SLOW_FALLING)
+                .is_some();
+            if fallen > safe && !slow {
+                self.damage(id, (fallen - safe).ceil() as f32, survival::Damage::Fall);
+            }
         }
     }
 
@@ -826,7 +841,8 @@ impl World {
                 } else if !survival {
                     self.break_block(id, pos, state);
                 } else {
-                    let progress = survival::break_progress(state, tool);
+                    let progress = survival::break_progress(state, tool)
+                        * self.players[&id].dig_speed_factor();
                     let breaks = if status == DIG_START {
                         progress >= 1.0
                     } else {
@@ -1010,6 +1026,7 @@ impl World {
         self.tick_monster_spawning();
         self.tick_survival();
         self.tick_hazards();
+        self.tick_effects();
         self.tick_items();
         self.tick_furnaces();
         if self.tick.is_multiple_of(AUTOSAVE_TICKS) {

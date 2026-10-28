@@ -280,6 +280,11 @@ impl Player {
             .with("XpLevel", self.xp_level)
             .with("XpP", self.xp_points as f32 / needed as f32)
             .with("XpTotal", self.xp_total)
+            .with(
+                "active_effects",
+                super::effects::effects_to_nbt(&self.effects),
+            )
+            .with("AbsorptionAmount", self.absorption)
             .with("Air", self.air.clamp(0, 300) as i16)
             .with("Fire", self.fire_ticks.clamp(0, i32::from(i16::MAX)) as i16)
             .with(
@@ -340,6 +345,8 @@ impl Player {
         let progress = nbt.float("XpP").unwrap_or(0.0).clamp(0.0, 1.0);
         self.xp_points = ((progress * f64::from(needed)) as i32).min(needed - 1);
         self.xp_total = nbt.int("XpTotal").unwrap_or(0).max(0) as i32;
+        self.effects = super::effects::effects_from_nbt(nbt.get("active_effects"));
+        self.absorption = nbt.float("AbsorptionAmount").unwrap_or(0.0).max(0.0) as f32;
         self.air = nbt.int("Air").unwrap_or(300).clamp(0, 300) as i32;
         self.fire_ticks = nbt.int("Fire").unwrap_or(0).max(0) as i32;
         self.respawn = nbt
