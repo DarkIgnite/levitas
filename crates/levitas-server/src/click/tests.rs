@@ -25,6 +25,7 @@ struct Test {
     creative: bool,
     xp_level: i32,
     used: Option<Used>,
+    choice: Option<usize>,
 }
 
 impl Test {
@@ -38,6 +39,7 @@ impl Test {
             creative: false,
             xp_level: 0,
             used: None,
+            choice: None,
         }
     }
 
@@ -52,9 +54,11 @@ impl Test {
             recipes: recipes(),
             xp_level: self.xp_level,
             used: None,
+            choice: self.choice,
         };
         let thrown = click(&mut w, Click { slot, button, mode });
         self.used = w.used;
+        self.choice = w.choice;
         thrown
     }
 }
@@ -280,4 +284,28 @@ fn grindstones_give_back_experience() {
     assert!(t.slots[0].is_empty());
     assert!(matches!(t.used, Some(Used::Experience(xp)) if xp > 0));
     assert!(t.slots[3..].iter().any(|s| s.item == item("iron_sword")));
+}
+
+#[test]
+fn stonecutters_make_the_picked_recipe_until_the_input_runs_out() {
+    let mut t = Test::new(Layout::Stonecutter);
+    let options = recipes().stonecutting(item("stone"));
+    let slab = options
+        .iter()
+        .position(|s| s.item == item("stone_slab"))
+        .expect("stone makes slabs");
+    t.slots[0] = stack("stone", 3);
+    t.choice = Some(slab);
+    t.click(OUTSIDE, 0, PICKUP);
+    assert_eq!(t.slots[1], stack("stone_slab", 2));
+    t.click(1, 0, QUICK_MOVE);
+    assert!(t.slots[0].is_empty());
+    assert!(t.slots[1].is_empty());
+    assert_eq!(t.choice, None);
+    let slabs: i32 = t.slots[2..]
+        .iter()
+        .filter(|s| s.item == item("stone_slab"))
+        .map(|s| s.count)
+        .sum();
+    assert_eq!(slabs, 6);
 }

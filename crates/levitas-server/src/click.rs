@@ -45,6 +45,8 @@ pub enum Layout {
     Anvil,
     /// A grindstone: two inputs, the result, then main inventory and hotbar.
     Grindstone,
+    /// A stonecutter: the input, the result, then main inventory and hotbar.
+    Stonecutter,
 }
 
 /// What taking a result costs or gives, settled by the world after the click.
@@ -65,6 +67,7 @@ impl Layout {
             Layout::Chest(n) => n,
             Layout::Enchanting => 2,
             Layout::Anvil | Layout::Grindstone => 3,
+            Layout::Stonecutter => 2,
         }
     }
 
@@ -90,6 +93,7 @@ impl Layout {
         match self {
             Layout::Inventory | Layout::Crafting => Some(0),
             Layout::Anvil | Layout::Grindstone => Some(2),
+            Layout::Stonecutter => Some(1),
             _ => None,
         }
     }
@@ -193,6 +197,8 @@ pub struct Window<'a> {
     pub xp_level: i32,
     /// Set when taking a result cost levels or gave experience.
     pub used: Option<Used>,
+    /// The stonecutter recipe picked, as an index into the options for its input.
+    pub choice: Option<usize>,
 }
 
 /// Applies one click. Returns the stacks the player threw out.
@@ -261,6 +267,13 @@ fn refresh_result(w: &mut Window) {
         Layout::Grindstone => {
             w.slots[2] = repair::grindstone(w.slots[0], w.slots[1]).map_or(Stack::EMPTY, |r| r.0);
         }
+        Layout::Stonecutter => {
+            let options = w.recipes.stonecutting(w.slots[0].item);
+            w.slots[1] = match w.choice {
+                Some(i) if !w.slots[0].is_empty() => options.get(i).copied().unwrap_or_default(),
+                _ => Stack::EMPTY,
+            };
+        }
         _ => {
             if let Some((grid, size)) = w.layout.grid() {
                 w.slots[0] = w.recipes.craft(&w.slots[grid], size);
@@ -290,6 +303,18 @@ fn take_result(w: &mut Window) -> Stack {
             w.used = Some(Used::Levels(r.cost));
             refresh_result(w);
             return r.result;
+        }
+        Layout::Stonecutter => {
+            let result = w.slots[1];
+            if result.is_empty() {
+                return Stack::EMPTY;
+            }
+            w.slots[0] = w.slots[0].with_count(w.slots[0].count - 1);
+            if w.slots[0].is_empty() {
+                w.choice = None;
+            }
+            refresh_result(w);
+            return result;
         }
         Layout::Grindstone => {
             let Some((result, xp)) = repair::grindstone(w.slots[0], w.slots[1]) else {
@@ -491,6 +516,17 @@ fn quick_move(w: &mut Window, s: usize) {
                 move_into(w, stack, 0..n, false)
             } else {
                 move_into(w, stack, player, true)
+            }
+        }
+        Layout::Stonecutter => {
+            if !in_player {
+                move_into(w, stack, player, true)
+            } else if !w.recipes.stonecutting(stack.item).is_empty() {
+                move_into(w, stack, 0..1, false)
+            } else if main.contains(&s) {
+                move_into(w, stack, hotbar, false)
+            } else {
+                move_into(w, stack, main, false)
             }
         }
         Layout::Anvil | Layout::Grindstone => {

@@ -2,6 +2,8 @@
 //! simulates item motion itself; the server runs a rough copy so pickups happen where the
 //! item visibly lies.
 
+use levitas_nbt::{Compound, Tag};
+
 use super::*;
 
 /// Ticks before an item can be picked up.
@@ -21,6 +23,47 @@ pub struct ItemEntity {
     on_ground: bool,
     age: u32,
     pickup_delay: u32,
+}
+
+impl ItemEntity {
+    pub fn chunk(&self) -> (i32, i32) {
+        (
+            (self.pos[0] / 16.0).floor() as i32,
+            (self.pos[2] / 16.0).floor() as i32,
+        )
+    }
+
+    /// The item as vanilla saves it in `entities/` region files.
+    pub fn to_nbt(&self) -> Compound {
+        let doubles = |v: [f64; 3]| v.iter().map(|&x| Tag::Double(x)).collect::<Vec<_>>();
+        Compound::new()
+            .with("id", "minecraft:item")
+            .with("Pos", doubles(self.pos))
+            .with("Motion", doubles(self.vel))
+            .with("OnGround", self.on_ground)
+            .with("Age", self.age.min(i16::MAX as u32) as i16)
+            .with("PickupDelay", self.pickup_delay.min(i16::MAX as u32) as i16)
+            .with("Item", self.stack.to_nbt())
+    }
+
+    pub fn from_nbt(nbt: &Compound) -> Option<ItemEntity> {
+        let triple = |key: &str| -> Option<[f64; 3]> {
+            let v: Vec<f64> = nbt.list(key)?.iter().filter_map(Tag::as_f64).collect();
+            <[f64; 3]>::try_from(v).ok()
+        };
+        let stack = Stack::from_nbt(nbt.compound("Item")?);
+        if stack.is_empty() {
+            return None;
+        }
+        Some(ItemEntity {
+            stack,
+            pos: triple("Pos")?,
+            vel: triple("Motion").unwrap_or([0.0; 3]),
+            on_ground: nbt.int("OnGround").unwrap_or(0) != 0,
+            age: nbt.int("Age").unwrap_or(0).max(0) as u32,
+            pickup_delay: nbt.int("PickupDelay").unwrap_or(0).max(0) as u32,
+        })
+    }
 }
 
 pub fn spawn_packets(id: i32, item: &ItemEntity) -> [Writer; 2] {
@@ -257,5 +300,42 @@ impl World {
         item.stack.count = left;
         self.broadcast(item_data(id, item.stack), None);
         false
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn dropped_items_are_saved_with_their_chunk() {
+        let dir = std::env::temp_dir().join(format!(
+            "levitas-items-{}-{}",
+            std::process::id(),
+            next_entity_id()
+        ));
+        let new_world = || {
+            World::new(
+                dir.clone(),
+                NewWorld {
+                    kind: WorldKind::Flat,
+                    seed: Some(0),
+                },
+            )
+            .0
+        };
+        let diamond = ItemInfo::id_of("minecraft:diamond").unwrap();
+        let mut world = new_world();
+        world.chunk(0, 0);
+        world.drop_at_block(BlockPos::new(3, -60, 3), Stack::new(diamond, 5));
+        world.save_mobs();
+
+        // Loading the chunk brings its entities back.
+        let mut world = new_world();
+        world.chunk(0, 0);
+        let items: Vec<&ItemEntity> = world.items.values().collect();
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].stack, Stack::new(diamond, 5));
+        assert!((items[0].pos[0] - 3.5).abs() < 0.5);
     }
 }

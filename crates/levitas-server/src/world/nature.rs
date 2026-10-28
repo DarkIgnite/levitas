@@ -288,6 +288,9 @@ impl World {
             }
             return true;
         }
+        if self.use_on_campfire(id, slot, pos) {
+            return true;
+        }
         if held == "minecraft:flint_and_steel" {
             return self.strike_flint(id, slot, pos, face);
         }

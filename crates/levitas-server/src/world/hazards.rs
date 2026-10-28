@@ -65,6 +65,14 @@ impl World {
         let in_lava = fluid(feet) == Some(Fluid::Lava) || fluid(head) == Some(Fluid::Lava);
         let fire_block = matches!(blocks::name(feet), "minecraft:fire" | "minecraft:soul_fire");
         let on_magma = blocks::name(below) == "minecraft:magma_block" && !sneaking;
+        // Campfires are low, so a player on one stands inside its block.
+        let campfire = [feet, below].into_iter().find(|&s| {
+            matches!(
+                blocks::name(s),
+                "minecraft:campfire" | "minecraft:soul_campfire"
+            ) && blocks::prop(s, "lit") == Some("true")
+        });
+        let on_campfire = campfire.filter(|_| !sneaking);
         let rained_on =
             self.weather.is_raining() && self.light_at(at(eye)).is_some_and(|(sky, _)| sky == 15);
 
@@ -109,6 +117,9 @@ impl World {
                     let soul = blocks::name(feet) == "minecraft:soul_fire";
                     hits.push((if soul { 2.0 } else { 1.0 }, Damage::InFire));
                 }
+            } else if let Some(fire) = on_campfire.filter(|_| block_hit) {
+                let soul = blocks::name(fire) == "minecraft:soul_campfire";
+                hits.push((if soul { 2.0 } else { 1.0 }, Damage::Campfire));
             } else if on_magma && block_hit {
                 hits.push((1.0, Damage::HotFloor));
             }

@@ -28,6 +28,7 @@ const PLAYER_PART: std::ops::Range<usize> = 9..45;
 pub enum BlockEntity {
     Chest(Chest),
     Furnace(Furnace),
+    Campfire(super::campfire::Campfire),
 }
 
 pub struct Chest {
@@ -61,6 +62,8 @@ impl BlockEntity {
             }
             BlockEntity::Chest(c) => ("minecraft:chest", &c.items[..]),
             BlockEntity::Furnace(f) => (cooker_id(f.kind), &f.items[..]),
+            BlockEntity::Campfire(c) if c.soul => ("minecraft:soul_campfire", &c.items[..]),
+            BlockEntity::Campfire(c) => ("minecraft:campfire", &c.items[..]),
         };
         let mut nbt = Compound::new()
             .with("id", id)
@@ -76,7 +79,18 @@ impl BlockEntity {
             nbt.insert("cooking_time_spent", short(f.cook));
             nbt.insert("cooking_total_time", short(f.cook_total));
         }
+        if let BlockEntity::Campfire(c) = self {
+            c.to_nbt(&mut nbt);
+        }
         nbt
+    }
+
+    /// What clients need to draw the block entity, for chunk and update packets.
+    pub fn network_data(&self) -> Option<Compound> {
+        match self {
+            BlockEntity::Campfire(c) => Some(c.network_data()),
+            _ => None,
+        }
     }
 
     /// Reads a saved block entity Levitas understands, with its position.
@@ -93,6 +107,8 @@ impl BlockEntity {
             "minecraft:furnace" => Self::for_block(block::FURNACE)?,
             "minecraft:smoker" => Self::for_block(block::SMOKER)?,
             "minecraft:blast_furnace" => Self::for_block(block::BLAST_FURNACE)?,
+            "minecraft:campfire" => Self::for_block(block::CAMPFIRE)?,
+            "minecraft:soul_campfire" => Self::for_block(block::SOUL_CAMPFIRE)?,
             _ => return None,
         };
         let items = entity.items_mut();
@@ -109,6 +125,9 @@ impl BlockEntity {
             f.burn_total = int("lit_total_time", "BurnTime");
             f.cook = int("cooking_time_spent", "CookTime");
             f.cook_total = int("cooking_total_time", "CookTimeTotal");
+        }
+        if let BlockEntity::Campfire(c) = &mut entity {
+            c.read_nbt(nbt);
         }
         Some((pos, entity))
     }
@@ -135,6 +154,12 @@ impl BlockEntity {
                 kind: Cooker::BlastFurnace,
                 ..Furnace::default()
             })),
+            name @ ("minecraft:campfire" | "minecraft:soul_campfire") => {
+                Some(BlockEntity::Campfire(super::campfire::Campfire {
+                    soul: name == "minecraft:soul_campfire",
+                    ..Default::default()
+                }))
+            }
             _ => None,
         }
     }
@@ -146,7 +171,9 @@ impl BlockEntity {
                 Cooker::Furnace => block_entity_type::FURNACE,
                 Cooker::Smoker => block_entity_type::SMOKER,
                 Cooker::BlastFurnace => block_entity_type::BLAST_FURNACE,
+                Cooker::Campfire => block_entity_type::CAMPFIRE,
             },
+            BlockEntity::Campfire(_) => block_entity_type::CAMPFIRE,
         }
     }
 
@@ -154,6 +181,7 @@ impl BlockEntity {
         match self {
             BlockEntity::Chest(c) => &c.items[..],
             BlockEntity::Furnace(f) => &f.items,
+            BlockEntity::Campfire(c) => &c.items,
         }
     }
 
@@ -161,6 +189,7 @@ impl BlockEntity {
         match self {
             BlockEntity::Chest(c) => &mut c.items[..],
             BlockEntity::Furnace(f) => &mut f.items,
+            BlockEntity::Campfire(c) => &mut c.items,
         }
     }
 
@@ -168,6 +197,7 @@ impl BlockEntity {
         match self {
             BlockEntity::Chest(c) => &mut c.viewers,
             BlockEntity::Furnace(f) => &mut f.viewers,
+            BlockEntity::Campfire(c) => &mut c.viewers,
         }
     }
 }
@@ -187,6 +217,7 @@ pub enum View {
     /// An anvil or a grindstone: two inputs and a result, living in the window.
     Anvil(BlockPos),
     Grindstone(BlockPos),
+    Stonecutter(BlockPos),
 }
 
 impl View {
@@ -200,6 +231,7 @@ impl View {
             View::DoubleChest(..) => 2 * CHEST_SLOTS,
             View::Enchanting(_) => 2,
             View::Anvil(_) | View::Grindstone(_) => 3,
+            View::Stonecutter(_) => 2,
         }
     }
 
@@ -212,7 +244,8 @@ impl View {
             | View::Crafting
             | View::Enchanting(_)
             | View::Anvil(_)
-            | View::Grindstone(_) => Vec::new(),
+            | View::Grindstone(_)
+            | View::Stonecutter(_) => Vec::new(),
         }
     }
 
@@ -226,6 +259,7 @@ impl View {
             View::Enchanting(_) => click::Layout::Enchanting,
             View::Anvil(_) => click::Layout::Anvil,
             View::Grindstone(_) => click::Layout::Grindstone,
+            View::Stonecutter(_) => click::Layout::Stonecutter,
         }
     }
 }
@@ -240,6 +274,8 @@ pub struct Open {
     result: Stack,
     /// What the enchanting table offers in its three slots.
     pub offers: [super::enchanting_table::Offer; 3],
+    /// The stonecutter recipe picked.
+    pub choice: Option<usize>,
 }
 
 impl World {
@@ -256,6 +292,7 @@ impl World {
                 menu::GRINDSTONE,
                 "Repair & Disenchant",
             ),
+            "minecraft:stonecutter" => (View::Stonecutter(pos), menu::STONECUTTER, "Stonecutter"),
             "minecraft:chest" | "minecraft:trapped_chest" => {
                 let partner = blocks::chest_partner(state, pos)
                     .filter(|&q| blocks::same_block(self.block(q), state));
@@ -305,6 +342,7 @@ impl World {
             grid: [Stack::EMPTY; 9],
             result: Stack::EMPTY,
             offers: Default::default(),
+            choice: None,
         });
         self.send(
             id,
@@ -358,6 +396,10 @@ impl World {
                 let open = p.open.as_ref().expect("window is open");
                 open.grid[..3].to_vec()
             }
+            View::Stonecutter(_) => {
+                let open = p.open.as_ref().expect("window is open");
+                open.grid[..2].to_vec()
+            }
             View::Chest(_) | View::Furnace(..) | View::DoubleChest(..) => {
                 let mut slots = vec![Stack::EMPTY; view.container_len()];
                 for (part, first) in view.parts() {
@@ -401,6 +443,11 @@ impl World {
                 let p = self.players.get_mut(&id).expect("player exists");
                 let open = p.open.as_mut().expect("window is open");
                 open.grid[..3].copy_from_slice(&slots[..3]);
+            }
+            View::Stonecutter(_) => {
+                let p = self.players.get_mut(&id).expect("player exists");
+                let open = p.open.as_mut().expect("window is open");
+                open.grid[..2].copy_from_slice(&slots[..2]);
             }
             View::Chest(_) | View::Furnace(..) | View::DoubleChest(..) => {
                 for (part, first) in view.parts() {
@@ -460,9 +507,23 @@ impl World {
             recipes: &self.recipes,
             xp_level: p.xp_level,
             used: None,
+            choice: p.open.as_ref().and_then(|o| o.choice),
         };
         let thrown = click::click(&mut w, click::Click { slot, button, mode });
         let used = w.used;
+        let choice = w.choice;
+        if let Some(open) = p.open.as_mut() {
+            let input_changed = before.first() != slots.first();
+            // A different item in the stonecutter forgets the picked recipe.
+            open.choice = if matches!(view, View::Stonecutter(_))
+                && input_changed
+                && slots.first().is_none_or(|s| !before[0].same_kind(s))
+            {
+                None
+            } else {
+                choice
+            };
+        }
         p.drag = drag;
         p.inventory.carried = cursor;
         if view != View::Inventory {
@@ -604,6 +665,33 @@ impl World {
         );
     }
 
+    /// A button in a window: an enchanting table's slots, or a stonecutter's recipes.
+    pub(super) fn window_button(&mut self, id: i32, window: i32, button: i32) {
+        let view = self
+            .players
+            .get(&id)
+            .and_then(|p| p.open.as_ref())
+            .filter(|o| o.window == window)
+            .map(|o| o.view);
+        match view {
+            Some(View::Enchanting(_)) => self.enchant_button(id, window, button),
+            Some(View::Stonecutter(_)) => {
+                let p = self.players.get_mut(&id).expect("player exists");
+                let open = p.open.as_mut().expect("window is open");
+                let options = self.recipes.stonecutting(open.grid[0].item);
+                let Some(&result) = usize::try_from(button).ok().and_then(|b| options.get(b))
+                else {
+                    return;
+                };
+                open.choice = Some(button as usize);
+                open.grid[1] = result;
+                let update = p.inventory.window_slot_packet(window, 1, result);
+                self.send(id, update);
+            }
+            _ => {}
+        }
+    }
+
     /// Tells the player what the anvil's result costs.
     fn send_anvil_cost(&mut self, id: i32) {
         let Some(open) = self.players.get(&id).and_then(|p| p.open.as_ref()) else {
@@ -691,6 +779,7 @@ impl World {
             View::Crafting => returned.extend(open.grid),
             View::Enchanting(_) => returned.extend(&open.grid[..2]),
             View::Anvil(_) | View::Grindstone(_) => returned.extend(&open.grid[..2]),
+            View::Stonecutter(_) => returned.push(open.grid[0]),
             View::Chest(_) | View::Furnace(..) | View::DoubleChest(..) => {
                 let mut last_viewer = false;
                 for (part, _) in open.view.parts() {
@@ -757,12 +846,17 @@ impl World {
         }
     }
 
-    /// Block entities in a chunk, as `(position, type)`, for the chunk packet.
-    pub(super) fn block_entities_in(&self, cx: i32, cz: i32) -> Vec<(BlockPos, i32)> {
+    /// Block entities in a chunk, as `(position, type, network data)`, for the chunk
+    /// packet.
+    pub(super) fn block_entities_in(
+        &self,
+        cx: i32,
+        cz: i32,
+    ) -> Vec<(BlockPos, i32, Option<Compound>)> {
         self.block_entities
             .iter()
             .filter(|(pos, _)| pos.chunk() == (cx, cz))
-            .map(|(&pos, e)| (pos, e.type_id()))
+            .map(|(&pos, e)| (pos, e.type_id(), e.network_data()))
             .collect()
     }
 
@@ -878,6 +972,7 @@ fn cooker_id(kind: Cooker) -> &'static str {
         Cooker::Furnace => "minecraft:furnace",
         Cooker::Smoker => "minecraft:smoker",
         Cooker::BlastFurnace => "minecraft:blast_furnace",
+        Cooker::Campfire => "minecraft:campfire",
     }
 }
 

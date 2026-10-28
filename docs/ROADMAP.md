@@ -48,7 +48,8 @@ Known gaps are listed under each phase instead of being hidden.
 - [x] level.dat: spawn point and world time (game rules come with Phase 11)
 - [x] Player data: position, rotation, inventory, equipment, health, hunger, game mode
 - [x] Autosave every 5 minutes, save on shutdown (Ctrl-C), unload unused chunks
-- [ ] Dropped items and other entities saved (with Phase 4)
+- [ ] Dropped items and other entities saved (with Phase 4). Dropped items are saved
+      with mobs in `entities/` region files; arrows, orbs and falling blocks are not.
 - [ ] LZ4-compressed region files (vanilla's optional format)
 - [ ] Item components preserved when loading worlds from other servers (with Phase 11)
 
@@ -73,7 +74,10 @@ Known gaps are listed under each phase instead of being hidden.
       cloning; the client is corrected when it predicted something else
 - [x] Blast furnace and smoker: their own recipe lists, cooking twice as fast and
       burning fuel twice as fast
-- [ ] Campfire, stonecutter, smithing table
+- [x] Campfire (`world/campfire.rs`: four foods cook in 30 seconds, shown on top;
+      burns players standing on it; shovels put it out) and stonecutter (recipes sent
+      to clients in the recipe update packet)
+- [ ] Smithing table
 - [ ] Special crafting recipes: dyeing, fireworks, map and book cloning, banners,
       shields, repairing, decorated pots, transmute recipes
 - [ ] Signs (editing text), item frames, armor stands, flower pots, jukebox, note blocks

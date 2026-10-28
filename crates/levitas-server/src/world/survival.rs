@@ -74,6 +74,8 @@ pub enum Damage {
     HotFloor,
     /// Hit by another player (their entity id).
     Player(i32),
+    /// Standing on a lit campfire.
+    Campfire,
     /// Poison and instant damage.
     Magic,
     Wither,
@@ -98,6 +100,7 @@ impl Damage {
             Damage::OnFire => "minecraft:on_fire",
             Damage::HotFloor => "minecraft:hot_floor",
             Damage::Player(_) => "minecraft:player_attack",
+            Damage::Campfire => "minecraft:campfire",
             Damage::Magic => "minecraft:magic",
             Damage::Wither => "minecraft:wither",
         }
@@ -121,6 +124,7 @@ impl Damage {
             Damage::OnFire => format!("{name} burned to death"),
             Damage::HotFloor => format!("{name} discovered the floor was lava"),
             Damage::Player(_) => format!("{name} was slain by a player"),
+            Damage::Campfire => format!("{name} went up in flames"),
             Damage::Magic => format!("{name} was killed by magic"),
             Damage::Wither => format!("{name} withered away"),
         }
@@ -138,6 +142,7 @@ impl Damage {
                 | Damage::Lava
                 | Damage::InFire
                 | Damage::HotFloor
+                | Damage::Campfire
         )
     }
 
@@ -145,7 +150,7 @@ impl Damage {
     fn is_fire(self) -> bool {
         matches!(
             self,
-            Damage::Lava | Damage::InFire | Damage::OnFire | Damage::HotFloor
+            Damage::Lava | Damage::InFire | Damage::OnFire | Damage::HotFloor | Damage::Campfire
         )
     }
 

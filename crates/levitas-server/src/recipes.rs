@@ -4,8 +4,12 @@
 
 use std::collections::HashMap;
 
+use levitas_protocol::Writer;
+use levitas_registry::packet::play::clientbound;
 use levitas_registry::{ItemInfo, TagRegistry, RECIPES_JSON};
 use serde_json::Value;
+
+use crate::inventory::write_stack;
 
 use crate::inventory::Stack;
 
@@ -39,6 +43,8 @@ pub enum Cooker {
     Furnace,
     Smoker,
     BlastFurnace,
+    /// Campfires cook food slowly, without fuel.
+    Campfire,
 }
 
 pub struct Recipes {
@@ -46,7 +52,12 @@ pub struct Recipes {
     shapeless: Vec<Shapeless>,
     /// Cooking recipes by cooker and input item.
     cooking: HashMap<(Cooker, i32), Smelting>,
+    /// Stonecutter recipes, in the order clients list them: what goes in, what comes out.
+    stonecutting: Vec<(Ingredient, Stack)>,
 }
+
+/// Slot display types, as numbered by the `slot_display` registry.
+const SLOT_DISPLAY_ITEM_STACK: i32 = 3;
 
 impl Recipes {
     pub fn load() -> Self {
@@ -56,6 +67,7 @@ impl Recipes {
             shaped: Vec::new(),
             shapeless: Vec::new(),
             cooking: HashMap::new(),
+            stonecutting: Vec::new(),
         };
         for recipe in all.values() {
             // Recipes naming unknown items or tags are skipped rather than half-loaded.
@@ -103,10 +115,14 @@ impl Recipes {
                     result: result(&recipe["result"])?,
                 });
             }
-            kind @ ("minecraft:smelting" | "minecraft:smoking" | "minecraft:blasting") => {
+            kind @ ("minecraft:smelting"
+            | "minecraft:smoking"
+            | "minecraft:blasting"
+            | "minecraft:campfire_cooking") => {
                 let (cooker, default_time) = match kind {
                     "minecraft:smoking" => (Cooker::Smoker, 100),
                     "minecraft:blasting" => (Cooker::BlastFurnace, 100),
+                    "minecraft:campfire_cooking" => (Cooker::Campfire, 600),
                     _ => (Cooker::Furnace, 200),
                 };
                 let smelting = Smelting {
@@ -118,6 +134,10 @@ impl Recipes {
                         .entry((cooker, item))
                         .or_insert(smelting.clone());
                 }
+            }
+            "minecraft:stonecutting" => {
+                let input = ingredient(&recipe["ingredient"])?;
+                self.stonecutting.push((input, result(&recipe["result"])?));
             }
             _ => {}
         }
@@ -155,6 +175,50 @@ impl Recipes {
             }
         }
         Stack::EMPTY
+    }
+
+    /// What a stonecutter can make of `item`, in the order its screen lists them.
+    pub fn stonecutting(&self, item: i32) -> Vec<Stack> {
+        self.stonecutting
+            .iter()
+            .filter(|(input, _)| input.contains(&item))
+            .map(|&(_, result)| result)
+            .collect()
+    }
+
+    /// The recipe data clients need for their own screens: which items each cooker
+    /// takes, and every stonecutter recipe.
+    pub fn update_packet(&self) -> Writer {
+        let sets = [
+            ("minecraft:furnace_input", Cooker::Furnace),
+            ("minecraft:smoker_input", Cooker::Smoker),
+            ("minecraft:blast_furnace_input", Cooker::BlastFurnace),
+            ("minecraft:campfire_input", Cooker::Campfire),
+        ];
+        let mut packet = Writer::packet(clientbound::UPDATE_RECIPES).varint(sets.len() as i32);
+        for (name, cooker) in sets {
+            let mut items: Vec<i32> = self
+                .cooking
+                .keys()
+                .filter(|(c, _)| *c == cooker)
+                .map(|&(_, item)| item)
+                .collect();
+            items.sort_unstable();
+            packet = packet.string(name).varint(items.len() as i32);
+            for item in items {
+                packet = packet.varint(item);
+            }
+        }
+        packet = packet.varint(self.stonecutting.len() as i32);
+        for (input, result) in &self.stonecutting {
+            // A holder set listed directly: its size plus one, then the items.
+            packet = packet.varint(input.len() as i32 + 1);
+            for &item in input {
+                packet = packet.varint(item);
+            }
+            packet = write_stack(packet.varint(SLOT_DISPLAY_ITEM_STACK), *result);
+        }
+        packet
     }
 
     /// What `cooker` makes of `item`.
@@ -410,5 +474,18 @@ mod tests {
         assert!(r
             .cooking(Cooker::BlastFurnace, item("minecraft:beef"))
             .is_none());
+    }
+
+    #[test]
+    fn clients_get_every_stonecutter_recipe() {
+        let r = Recipes::load();
+        assert!(r.stonecutting.len() > 200);
+        let frame = r.update_packet().into_frame();
+        assert!(frame.len() > 1000);
+        let stone = item("minecraft:stone");
+        assert!(r
+            .stonecutting(stone)
+            .iter()
+            .any(|s| s.item == item("minecraft:stone_bricks")));
     }
 }

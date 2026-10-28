@@ -5,6 +5,7 @@
 mod arrows;
 mod breeding;
 mod building;
+mod campfire;
 mod combat;
 mod commands;
 mod containers;
@@ -571,9 +572,7 @@ impl World {
                 carried,
             } => self.container_click(id, window, slot, button, mode, changed, carried),
             Event::ContainerClose { id, window } => self.container_closed(id, window),
-            Event::ContainerButton { id, window, button } => {
-                self.enchant_button(id, window, button)
-            }
+            Event::ContainerButton { id, window, button } => self.window_button(id, window, button),
             Event::HeldSlot { id, slot } => {
                 if let (Some(p), Ok(slot)) = (self.players.get_mut(&id), usize::try_from(slot)) {
                     if slot < 9 {
@@ -664,6 +663,8 @@ impl World {
         self.send_status(id);
         self.send_time_and_weather(id);
         self.send(id, commands::command_tree());
+        let recipes = self.recipes.update_packet();
+        self.send(id, recipes);
         self.send(
             id,
             system_chat(&format!(
@@ -1073,6 +1074,7 @@ impl World {
         self.tick_effects();
         self.tick_items();
         self.tick_furnaces();
+        self.tick_campfires();
         if self.tick.is_multiple_of(AUTOSAVE_TICKS) {
             self.save_all();
         }
@@ -1275,11 +1277,15 @@ impl World {
         self.chunk(x, z).encode_sections(&mut body);
         let entities = self.block_entities_in(x, z);
         varint::write(&mut body, entities.len() as i32);
-        for (pos, kind) in entities {
+        for (pos, kind, data) in entities {
             body.push(((pos.x & 15) << 4 | (pos.z & 15)) as u8);
             body.extend_from_slice(&(pos.y as i16).to_be_bytes());
             varint::write(&mut body, kind);
-            body.extend_from_slice(&[0x0A, 0x00]); // empty NBT compound: no extra data
+            match data {
+                Some(data) => body
+                    .extend_from_slice(&levitas_nbt::to_network(&levitas_nbt::Tag::Compound(data))),
+                None => body.extend_from_slice(&[0x0A, 0x00]), // empty compound: no data
+            }
         }
         self.chunk(x, z).light.encode(&mut body);
         frame(

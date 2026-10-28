@@ -1187,23 +1187,35 @@ impl World {
         }
     }
 
-    /// Mobs in a chunk being saved or unloaded, in the vanilla entity chunk form.
+    /// Mobs and dropped items in a chunk being saved or unloaded, in the vanilla entity
+    /// chunk form.
     fn mob_chunk_nbt(&self, cx: i32, cz: i32) -> Compound {
-        let entities: Vec<Tag> = self
+        let mut entities: Vec<Tag> = self
             .mobs
             .values()
             .filter(|m| m.dying.is_none() && m.chunk() == (cx, cz))
             .map(|m| Tag::Compound(m.to_nbt()))
             .collect();
+        entities.extend(
+            self.items
+                .values()
+                .filter(|i| i.chunk() == (cx, cz))
+                .map(|i| Tag::Compound(i.to_nbt())),
+        );
         Compound::new()
             .with("DataVersion", DATA_VERSION)
             .with("Position", vec![cx, cz])
             .with("Entities", entities)
     }
 
-    /// Saves the mobs of every loaded chunk that has (or had) any.
+    /// Saves the mobs and items of every loaded chunk that has (or had) any.
     pub(super) fn save_mobs(&mut self) {
-        let now: HashSet<(i32, i32)> = self.mobs.values().map(Mob::chunk).collect();
+        let now: HashSet<(i32, i32)> = self
+            .mobs
+            .values()
+            .map(Mob::chunk)
+            .chain(self.items.values().map(items::ItemEntity::chunk))
+            .collect();
         let chunks: Vec<(i32, i32)> = now
             .union(&self.mob_chunks)
             .copied()
@@ -1231,13 +1243,23 @@ impl World {
             .filter(|(_, m)| m.chunk() == (x, z))
             .map(|(&id, _)| id)
             .collect();
-        if ids.is_empty() && !had_mobs {
+        let item_ids: Vec<i32> = self
+            .items
+            .iter()
+            .filter(|(_, i)| i.chunk() == (x, z))
+            .map(|(&id, _)| id)
+            .collect();
+        if ids.is_empty() && item_ids.is_empty() && !had_mobs {
             return;
         }
         self.save_mob_chunk(x, z);
         for id in ids {
             let mob = self.mobs.remove(&id).expect("listed");
             self.send_to_viewers(&mob, items::remove_entity(id));
+        }
+        for id in item_ids {
+            self.items.remove(&id);
+            self.broadcast(items::remove_entity(id), None);
         }
     }
 
@@ -1252,10 +1274,21 @@ impl World {
             }
         };
         for entity in nbt.list("Entities").unwrap_or_default() {
-            if let Some(mob) = entity
-                .as_compound()
-                .and_then(|e| Mob::from_nbt(e, &mut self.rng))
-            {
+            let Some(entity) = entity.as_compound() else {
+                continue;
+            };
+            if entity.str("id") == Some("minecraft:item") {
+                if let Some(item) = items::ItemEntity::from_nbt(entity) {
+                    self.mob_chunks.insert(item.chunk());
+                    let id = next_entity_id();
+                    for packet in items::spawn_packets(id, &item) {
+                        self.broadcast(packet, None);
+                    }
+                    self.items.insert(id, item);
+                }
+                continue;
+            }
+            if let Some(mob) = Mob::from_nbt(entity, &mut self.rng) {
                 self.mob_chunks.insert(mob.chunk());
                 self.mobs.insert(next_entity_id(), mob);
             }
