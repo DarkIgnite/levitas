@@ -509,6 +509,7 @@ impl World {
         for id in ids {
             self.save_player(id);
         }
+        self.save_portals();
         if self.dimension != super::dimension::Dimension::Overworld {
             return; // level.dat is the overworld's to write
         }

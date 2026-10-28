@@ -26,6 +26,7 @@ mod monsters;
 mod nature;
 mod pathfinding;
 mod piston;
+mod portal;
 mod redstone;
 mod storage;
 mod survival;
@@ -334,6 +335,9 @@ struct Player {
     hazard_cooldown: u32,
     /// Where the player's connection sends its events; switched on changing dimension.
     route: Option<travel::Route>,
+    /// Ticks spent standing in a portal, and ticks until one may take them again.
+    portal_ticks: u32,
+    portal_cooldown: u32,
     /// Ticks left of the short invulnerability after being hurt, and the hit that
     /// started it: only harder hits get through meanwhile, and only by the difference.
     hurt_ticks: u32,
@@ -393,6 +397,8 @@ impl Player {
             fire_ticks: 0,
             hazard_cooldown: 0,
             route: None,
+            portal_ticks: 0,
+            portal_cooldown: 0,
             hurt_ticks: 0,
             last_damage: 0.0,
             effects: Vec::new(),
@@ -443,6 +449,8 @@ struct World {
     dimension: Dimension,
     /// The other dimensions' world tasks.
     links: HashMap<Dimension, mpsc::Sender<Event>>,
+    /// Nether portals in this dimension, for travellers to come out of.
+    portals: Vec<portal::KnownPortal>,
     /// The world folder: level.dat, region/ and playerdata/.
     dir: PathBuf,
     storage: RegionStorage,
@@ -538,6 +546,7 @@ impl World {
         let world = Self {
             dimension,
             links: HashMap::new(),
+            portals: Self::load_portals(&folder),
             storage: RegionStorage::new(folder.join("region")),
             entity_storage: RegionStorage::new(folder.join("entities")),
             mobs: HashMap::new(),
@@ -726,7 +735,7 @@ impl World {
         let saved_in = self.load_player(id);
         // A player who logged out in another dimension goes back there.
         if let Some(other) = saved_in.filter(|&d| d != self.dimension) {
-            if self.hand_over(id, other, None, true, false) {
+            if self.hand_over(id, other, None, true, false, false) {
                 return;
             }
         }
@@ -1199,6 +1208,7 @@ impl World {
         }
         self.tick_survival();
         self.tick_hazards();
+        self.tick_portals();
         self.tick_effects();
         self.tick_items();
         self.tick_furnaces();

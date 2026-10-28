@@ -48,6 +48,10 @@ impl World {
 
     /// Places fire and sets it ticking.
     pub(super) fn light_fire(&mut self, pos: BlockPos, fire: u16) {
+        // Fire in an obsidian frame opens a portal instead.
+        if self.try_light_portal(pos) {
+            return;
+        }
         self.set_block_updating(pos, fire);
         self.schedule_fire(pos, fire);
     }

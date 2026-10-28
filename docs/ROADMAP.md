@@ -264,9 +264,16 @@ Known gaps are listed under each phase instead of being hidden.
       (chunks hold the overworld's 24 sections; only y = 0..255 is sent and saved).
       Chat and join/leave/death messages reach every dimension. Dying elsewhere
       respawns in the overworld. `/execute in <dimension> run tp` and `/tp` move
-      players. Missing: the End, portals (next), Nether mobs and rules (water
+      players. Missing: the End, Nether mobs and rules (water
       evaporating, beds exploding), players in other dimensions in the tab list.
-- [ ] Nether portals (lighting, linking, travelling)
+- [x] Nether portals (lighting, linking, travelling). `blocks/portal.rs` finds obsidian
+      frames (2 to 21 wide, 3 to 21 high, corners optional) and fire in one lights it;
+      portals go out when their frame breaks. `world/portal.rs`: standing in a portal
+      for 4 seconds (at once in creative) travels, at coordinates divided or multiplied
+      by 8, out of the nearest known portal within 16 (Nether) or 128 (overworld)
+      blocks, or a new one built on open ground nearby or on a carved-out obsidian
+      ledge. Each dimension lists its portals in `levitas_portals.dat`. Missing: mobs
+      and items going through.
 - [ ] End portals, strongholds' frames, the End and its exit portal
 - [ ] Ender dragon fight, end crystals, end gateways
 - [ ] Wither

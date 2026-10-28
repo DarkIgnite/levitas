@@ -18,6 +18,8 @@ pub struct Arrival {
     pub(super) logging_in: bool,
     /// Coming back from death in another dimension, to respawn here.
     pub(super) respawning: bool,
+    /// Coming through a portal: they come out of one here.
+    pub(super) portal: bool,
 }
 
 /// What the data-kept field of the respawn packet keeps: attributes and entity data.
@@ -26,7 +28,12 @@ const KEEP_ALL_DATA: u8 = 0x03;
 impl World {
     /// Hands player `id` over to `to`, arriving at `pos`. Returns whether they left.
     pub(super) fn travel(&mut self, id: i32, to: Dimension, pos: [f64; 3]) -> bool {
-        self.hand_over(id, to, Some(pos), false, false)
+        self.hand_over(id, to, Some(pos), false, false, false)
+    }
+
+    /// Sends player `id` through a portal to `to`, to come out near `pos`.
+    pub(super) fn hand_over_through_portal(&mut self, id: i32, to: Dimension, pos: [f64; 3]) {
+        self.hand_over(id, to, Some(pos), false, false, true);
     }
 
     pub(super) fn hand_over(
@@ -36,6 +43,7 @@ impl World {
         pos: Option<[f64; 3]>,
         logging_in: bool,
         respawning: bool,
+        portal: bool,
     ) -> bool {
         let Some(link) = self.links.get(&to).cloned() else {
             return false;
@@ -77,6 +85,7 @@ impl World {
             player: Box::new(player),
             logging_in,
             respawning,
+            portal,
         };
         tokio::spawn(async move {
             let _ = link.send(Event::Arrive(Box::new(arrival))).await;
@@ -91,6 +100,7 @@ impl World {
             player,
             logging_in,
             respawning,
+            portal,
         } = arrival;
         self.players.insert(id, *player);
         if logging_in {
@@ -100,6 +110,17 @@ impl World {
         if respawning {
             self.respawn(id);
             return;
+        }
+        if portal {
+            let near = self.players[&id].pos;
+            let exit = self.portal_exit(near);
+            let p = self.players.get_mut(&id).expect("just arrived");
+            p.pos = exit;
+            p.sent_pos = exit;
+            p.center = (
+                (exit[0] / 16.0).floor() as i32,
+                (exit[2] / 16.0).floor() as i32,
+            );
         }
         let p = &self.players[&id];
         let (pos, yaw, pitch, mode) = (p.pos, p.yaw, p.pitch, p.mode);
@@ -119,6 +140,9 @@ impl World {
         self.send_entities_to(id);
         for packet in spawn_player(id, &self.players[&id]) {
             self.broadcast(packet, Some(id));
+        }
+        if portal {
+            self.after_portal_arrival(id);
         }
     }
 

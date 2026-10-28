@@ -9,6 +9,7 @@ pub mod fluid;
 pub mod piston;
 pub mod place;
 pub mod plants;
+pub mod portal;
 pub mod redstone;
 
 use levitas_protocol::BlockPos;
@@ -230,6 +231,9 @@ fn is_soil(state: u16) -> bool {
 pub fn can_survive(state: u16, pos: BlockPos, get: &mut impl FnMut(BlockPos) -> u16) -> bool {
     if fire::is_fire(state) {
         return fire::fire_survives(state, pos, get);
+    }
+    if name(state) == "minecraft:nether_portal" {
+        return portal::portal_survives(state, pos, get);
     }
     // A piston head needs its extended piston behind it.
     if name(state) == "minecraft:piston_head" {
