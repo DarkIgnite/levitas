@@ -109,6 +109,18 @@ impl Damage {
         }
     }
 
+    /// Whether a shield can stop this kind of damage.
+    fn blockable(self) -> bool {
+        matches!(
+            self,
+            Damage::Mob(_)
+                | Damage::Player(_)
+                | Damage::Arrow(_)
+                | Damage::Fireball(_)
+                | Damage::Explosion(_)
+        )
+    }
+
     fn death_message(self, name: &str) -> String {
         match self {
             Damage::Fall => format!("{name} hit the ground too hard"),
@@ -210,6 +222,13 @@ impl World {
         kind: Damage,
         source: Option<i32>,
     ) -> bool {
+        // A raised shield takes hits from mobs, players and their projectiles.
+        if let Some((from, axe)) = source.and_then(|s| self.attacker(s)) {
+            let axe = axe && matches!(kind, Damage::Player(_));
+            if kind.blockable() && self.shield_blocks(id, amount, from, axe) {
+                return false;
+            }
+        }
         let Some(p) = self.players.get_mut(&id) else {
             return false;
         };
@@ -436,6 +455,9 @@ impl World {
             || self.throw_held(id, hand)
             || self.throw_eye(id, hand)
         {
+            return;
+        }
+        if self.raise_shield(id, hand) {
             return;
         }
         let tick = self.tick;

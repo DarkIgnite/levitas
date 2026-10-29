@@ -129,8 +129,11 @@ Known gaps are listed under each phase instead of being hidden.
       sweeping sword blows, weapon wear, attack sounds. Players get vanilla's short
       invulnerability after a hit.
 - [ ] Armor and armor toughness, shields, damage types and immunities. Worn armor
-      reduces mob and explosion damage by the wiki's formula and wears down; no
-      shields yet; protection enchantments work.
+      reduces mob and explosion damage by the wiki's formula and wears down;
+      protection enchantments work. Shields (`world/shields.rs`) block hits, arrows,
+      fireballs and explosions from the front once raised for 5 ticks, wear down on
+      hits of 3 or more, and are knocked down for 5 seconds by an axe; other players
+      see them raised. Missing: blocked arrows bouncing off, attackers knocked back.
 - [ ] Bows, crossbows, tridents, arrows, snowballs, eggs, ender pearls. Bows and arrows
       work (`world/arrows.rs`): draw strength, gravity and drag, damage from speed,
       critical shots, sticking in blocks, pickup. Ender pearls, snowballs and eggs are

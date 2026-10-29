@@ -38,7 +38,7 @@ counts half. The roadmap lists exactly what is done and what is missing in each 
 | 1. Persistence (saving worlds, players, chunks) | 72% | `███████▏░░` |
 | 2. Blocks behave correctly | 78% | `███████▊░░` |
 | 3. Fluids, gravity and light | 80% | `████████░░` |
-| 4. Combat and basic entities | 70% | `███████░░░` |
+| 4. Combat and basic entities | 74% | `███████▍░░` |
 | 5. Mobs | 65% | `██████▌░░░` |
 | 6. Farming, nature and time | 62% | `██████▏░░░` |
 | 7. Redstone | 62% | `██████▏░░░` |

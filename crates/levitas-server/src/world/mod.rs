@@ -32,6 +32,7 @@ mod pathfinding;
 mod piston;
 mod portal;
 mod redstone;
+mod shields;
 mod signs;
 mod spawners;
 mod storage;
@@ -384,6 +385,10 @@ struct Player {
     portal_cooldown: u32,
     /// The tick from which an ender pearl can be thrown again.
     pearl_ready: u64,
+    /// Hand and start tick of a raised shield.
+    blocking: Option<(i32, u64)>,
+    /// Tick from which the shield can be raised again, after an axe knocked it down.
+    shield_ready: u64,
     /// Ticks left of the short invulnerability after being hurt, and the hit that
     /// started it: only harder hits get through meanwhile, and only by the difference.
     hurt_ticks: u32,
@@ -447,6 +452,8 @@ impl Player {
             portal_ticks: 0,
             portal_cooldown: 0,
             pearl_ready: 0,
+            blocking: None,
+            shield_ready: 0,
             hurt_ticks: 0,
             last_damage: 0.0,
             effects: Vec::new(),
@@ -737,6 +744,9 @@ impl World {
                         p.held = slot;
                         p.eating = None;
                         p.attack_reset = self.tick;
+                        if p.blocking.is_some_and(|(hand, _)| hand == 0) {
+                            self.lower_shield(id);
+                        }
                     }
                 }
             }
@@ -1097,6 +1107,7 @@ impl World {
                 if let Some(p) = self.players.get_mut(&id) {
                     p.eating = None;
                 }
+                self.lower_shield(id);
                 self.release_bow(id);
             }
             _ => {}

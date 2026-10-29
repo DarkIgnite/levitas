@@ -197,14 +197,17 @@ impl World {
         if distance <= reach && dy.abs() < 1.5 && mob.attack_cooldown == 0 {
             mob.attack_cooldown = ATTACK_TICKS;
             self.send_to_viewers(mob, Writer::packet(clientbound::ANIMATE).varint(id).u8(0));
-            self.damage_from(
+            let hurt = self.damage_from(
                 pid,
                 mob.attack_damage(),
                 Damage::Mob(mob.kind.display()),
                 Some(id),
             );
-            let yaw = f64::from(yaw_towards(mob.pos, target)).to_radians();
-            self.push_player(pid, [-yaw.sin() * KNOCKBACK, 0.36, yaw.cos() * KNOCKBACK]);
+            // A blocked blow pushes nobody.
+            if hurt {
+                let yaw = f64::from(yaw_towards(mob.pos, target)).to_radians();
+                self.push_player(pid, [-yaw.sin() * KNOCKBACK, 0.36, yaw.cos() * KNOCKBACK]);
+            }
         }
         false
     }

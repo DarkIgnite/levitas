@@ -100,7 +100,10 @@ impl World {
             .filter_map(|(&id, p)| impact(p.pos).map(|(s, push)| (id, s, push)))
             .collect();
         for (id, strength, push) in hit_players {
-            self.damage(id, damage_of(strength), Damage::Explosion(by));
+            let damage = damage_of(strength);
+            if !self.shield_blocks(id, damage, centre, false) {
+                self.damage(id, damage, Damage::Explosion(by));
+            }
             pushed.push((id, push));
         }
         let hit_mobs: Vec<(i32, f64, [f64; 3])> = self
