@@ -10,6 +10,7 @@ use std::ops::Range;
 use levitas_registry::ItemInfo;
 
 use crate::inventory::Stack;
+use crate::potions;
 use crate::recipes::{fuel_ticks, Cooker, Recipes};
 use crate::repair;
 
@@ -50,6 +51,9 @@ pub enum Layout {
     /// A smithing table: template, base, addition, result, then main inventory and
     /// hotbar.
     Smithing,
+    /// A brewing stand: three bottles, the ingredient, the fuel, then main inventory
+    /// and hotbar.
+    Brewing,
 }
 
 /// What taking a result costs or gives, settled by the world after the click.
@@ -72,6 +76,7 @@ impl Layout {
             Layout::Anvil | Layout::Grindstone => 3,
             Layout::Stonecutter => 2,
             Layout::Smithing => 4,
+            Layout::Brewing => 5,
         }
     }
 
@@ -135,6 +140,12 @@ impl Layout {
             Layout::Furnace(_) if slot == 2 => false,
             Layout::Furnace(_) if slot == 1 => fuel_ticks(stack.item) > 0 || is_bucket(stack),
             Layout::Enchanting if slot == 1 => is_lapis(stack),
+            Layout::Brewing => match slot {
+                0..=2 => potions::is_potion(*stack) || is_glass_bottle(stack),
+                3 => potions::is_ingredient(*stack),
+                4 => is_blaze_powder(stack),
+                _ => true,
+            },
             _ => true,
         }
     }
@@ -144,7 +155,8 @@ impl Layout {
         let armor = self == Layout::Inventory && (5..9).contains(&slot);
         let bucket_fuel = matches!(self, Layout::Furnace(_)) && slot == 1 && is_bucket(stack);
         let enchanted = self == Layout::Enchanting && slot == 0;
-        if armor || bucket_fuel || enchanted {
+        let bottle = self == Layout::Brewing && slot < 3;
+        if armor || bucket_fuel || enchanted || bottle {
             1
         } else {
             stack.max_stack()
@@ -158,6 +170,14 @@ fn is_lapis(stack: &Stack) -> bool {
 
 fn is_bucket(stack: &Stack) -> bool {
     ItemInfo::get(stack.item).is_some_and(|i| i.name == "minecraft:bucket")
+}
+
+fn is_glass_bottle(stack: &Stack) -> bool {
+    ItemInfo::get(stack.item).is_some_and(|i| i.name == "minecraft:glass_bottle")
+}
+
+fn is_blaze_powder(stack: &Stack) -> bool {
+    ItemInfo::get(stack.item).is_some_and(|i| i.name == "minecraft:blaze_powder")
 }
 
 /// What a crafting ingredient leaves behind in the grid (a bucket from milk, ...).
@@ -535,6 +555,27 @@ fn quick_move(w: &mut Window, s: usize) {
                 move_into(w, stack, 0..n, false)
             } else {
                 move_into(w, stack, player, true)
+            }
+        }
+        Layout::Brewing => {
+            if !in_player {
+                move_into(w, stack, player, true)
+            } else if is_blaze_powder(&stack) {
+                // Blaze powder fuels first, then brews.
+                let rest = move_into(w, stack, 4..5, false);
+                if rest.is_empty() {
+                    rest
+                } else {
+                    move_into(w, rest, 3..4, false)
+                }
+            } else if potions::is_ingredient(stack) {
+                move_into(w, stack, 3..4, false)
+            } else if potions::is_potion(stack) {
+                move_into(w, stack, 0..3, false)
+            } else if main.contains(&s) {
+                move_into(w, stack, hotbar, false)
+            } else {
+                move_into(w, stack, main, false)
             }
         }
         Layout::Smithing => {

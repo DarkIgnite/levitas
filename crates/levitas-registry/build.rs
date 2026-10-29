@@ -423,6 +423,7 @@ fn items_and_entities(data: &Path, block_defaults: &HashMap<String, u64>, out: &
         ),
         ("particle", "minecraft:particle_type", "Particle type IDs."),
         ("mob_effect", "minecraft:mob_effect", "Status effect IDs."),
+        ("potion", "minecraft:potion", "Potion IDs."),
         (
             "command_argument",
             "minecraft:command_argument_type",

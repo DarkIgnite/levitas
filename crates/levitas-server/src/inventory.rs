@@ -25,6 +25,9 @@ pub struct Stack {
     pub repair_cost: i32,
     /// An armor trim (the `minecraft:trim` component).
     pub trim: Option<Trim>,
+    /// The potion in a bottle or tipped arrow (the `minecraft:potion_contents`
+    /// component), by potion ID.
+    pub potion: Option<u8>,
 }
 
 /// An armor trim: entries of the trim material and trim pattern registries.
@@ -70,6 +73,7 @@ impl Stack {
         enchants: Enchantments::NONE,
         repair_cost: 0,
         trim: None,
+        potion: None,
     };
 
     pub fn new(item: i32, count: i32) -> Self {
@@ -80,6 +84,7 @@ impl Stack {
             enchants: Enchantments::NONE,
             repair_cost: 0,
             trim: None,
+            potion: None,
         }
     }
 
@@ -99,6 +104,7 @@ impl Stack {
             && self.enchants == other.enchants
             && self.repair_cost == other.repair_cost
             && self.trim == other.trim
+            && self.potion == other.potion
     }
 
     pub fn is_empty(&self) -> bool {
@@ -133,6 +139,12 @@ impl Stack {
         }
         if self.repair_cost > 0 {
             components.insert("minecraft:repair_cost", self.repair_cost);
+        }
+        if let Some(name) = self.potion.and_then(crate::potions::name) {
+            components.insert(
+                "minecraft:potion_contents",
+                Compound::new().with("potion", name),
+            );
         }
         if let Some(trim) = self.trim {
             components.insert(
@@ -174,6 +186,14 @@ impl Stack {
             damage: damage.max(0),
             enchants,
             repair_cost,
+            potion: components
+                .and_then(|c| c.get("minecraft:potion_contents"))
+                .and_then(|p| match p {
+                    // A potion name alone is the short form.
+                    Tag::String(name) => crate::potions::id(name),
+                    Tag::Compound(c) => crate::potions::id(c.str("potion")?),
+                    _ => None,
+                }),
             trim: components
                 .and_then(|c| c.compound("minecraft:trim"))
                 .and_then(|t| Trim::named(t.str("material")?, t.str("pattern")?)),
@@ -214,7 +234,12 @@ pub fn write_stack(packet: Writer, stack: Stack) -> Writer {
     let enchanted = !stack.enchants.is_empty();
     let worked = stack.repair_cost > 0;
     let trimmed = stack.trim.is_some();
-    let added = i32::from(damaged) + i32::from(enchanted) + i32::from(worked) + i32::from(trimmed);
+    let brewed = stack.potion.is_some();
+    let added = i32::from(damaged)
+        + i32::from(enchanted)
+        + i32::from(worked)
+        + i32::from(trimmed)
+        + i32::from(brewed);
     let mut packet = packet.varint(added).varint(0);
     if damaged {
         packet = packet.varint(component::DAMAGE).varint(stack.damage);
@@ -231,6 +256,16 @@ pub fn write_stack(packet: Writer, stack: Stack) -> Writer {
         packet = packet
             .varint(component::REPAIR_COST)
             .varint(stack.repair_cost);
+    }
+    if let Some(potion) = stack.potion {
+        // The potion, then no custom colour, no custom effects and no custom name.
+        packet = packet
+            .varint(component::POTION_CONTENTS)
+            .bool(true)
+            .varint(i32::from(potion))
+            .bool(false)
+            .varint(0)
+            .bool(false);
     }
     if let Some(trim) = stack.trim {
         // Registry holders: the entry's ID plus one (zero would be an inline value).

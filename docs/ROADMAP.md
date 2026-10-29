@@ -280,7 +280,15 @@ Known gaps are listed under each phase instead of being hidden.
       more in survival, and wear out. Grindstones strip all but curses, merge two
       items and give experience back. Renaming is missing (item names are not
       tracked yet).
-- [ ] Brewing stand, potions, splash and lingering potions, tipped arrows
+- [ ] Brewing stand, potions, splash and lingering potions, tipped arrows. Potions
+      (`potions.rs`, effects and recipes from the wiki's tables) are carried as the
+      `minecraft:potion_contents` component. Glass bottles fill at water; drinking
+      gives the effects. Brewing stands (`world/brewing.rs`) take blaze powder for 20
+      brews and brew in 20 seconds: base potions, effects, redstone and glowstone,
+      fermented spider eyes, gunpowder (splash) and dragon's breath (lingering), fed
+      by hoppers as in vanilla. Splash potions give players within 4 blocks their
+      effects, weaker with distance. Missing: lingering clouds (they splash for now),
+      effects on mobs, tipped arrows, splash colours.
 - [ ] Beacons, conduits
 - [ ] Maps, compasses, recovery compasses, clocks, spyglass
 

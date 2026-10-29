@@ -9,6 +9,7 @@ mod flat;
 mod inventory;
 mod loot;
 mod play;
+mod potions;
 mod recipes;
 mod repair;
 mod rng;

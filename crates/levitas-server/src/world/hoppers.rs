@@ -34,6 +34,19 @@ impl World {
                 _ => Vec::new(),
             },
             BlockEntity::Chest(c) => (0..c.items.len()).collect(),
+            // Brewing stands take ingredients from above, and fuel and bottles from the
+            // sides.
+            BlockEntity::Brewing(_) => match from {
+                Dir::Up if crate::potions::is_ingredient(*stack) => vec![brewing::INGREDIENT],
+                Dir::Up | Dir::Down => Vec::new(),
+                _ if ItemInfo::get(stack.item)
+                    .is_some_and(|i| i.name == "minecraft:blaze_powder") =>
+                {
+                    vec![brewing::FUEL]
+                }
+                _ if crate::potions::is_potion(*stack) => brewing::BOTTLES.collect(),
+                _ => Vec::new(),
+            },
             BlockEntity::Campfire(_)
             | BlockEntity::Plain(_)
             | BlockEntity::Spawner(_)
@@ -53,6 +66,8 @@ impl World {
                 }
             }
             BlockEntity::Chest(c) => (0..c.items.len()).collect(),
+            // Only finished bottles come out of a brewing stand.
+            BlockEntity::Brewing(_) => brewing::BOTTLES.collect(),
             BlockEntity::Campfire(_)
             | BlockEntity::Plain(_)
             | BlockEntity::Spawner(_)

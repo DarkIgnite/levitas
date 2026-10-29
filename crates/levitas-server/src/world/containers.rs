@@ -33,6 +33,7 @@ pub enum BlockEntity {
     Plain(Plain),
     Spawner(super::spawners::Spawner),
     Sign(Box<super::signs::Sign>),
+    Brewing(Box<super::brewing::Brewer>),
 }
 
 pub struct Plain {
@@ -95,6 +96,7 @@ impl BlockEntity {
             BlockEntity::Plain(_) => ("minecraft:daylight_detector", &[][..]),
             BlockEntity::Spawner(_) => ("minecraft:mob_spawner", &[][..]),
             BlockEntity::Sign(s) => (s.id(), &[][..]),
+            BlockEntity::Brewing(b) => ("minecraft:brewing_stand", &b.items[..]),
         };
         let mut nbt = Compound::new()
             .with("id", id)
@@ -120,6 +122,9 @@ impl BlockEntity {
         }
         if let BlockEntity::Sign(s) = self {
             s.write_nbt(&mut nbt);
+        }
+        if let BlockEntity::Brewing(b) = self {
+            b.write_nbt(&mut nbt);
         }
         nbt
     }
@@ -158,6 +163,7 @@ impl BlockEntity {
                 BlockEntity::Spawner(super::spawners::Spawner::read_nbt(nbt)?)
             }
             "minecraft:daylight_detector" => Self::for_block(block::DAYLIGHT_DETECTOR)?,
+            "minecraft:brewing_stand" => BlockEntity::Brewing(Box::default()),
             id @ ("minecraft:sign" | "minecraft:hanging_sign") => BlockEntity::Sign(Box::new(
                 super::signs::Sign::read_nbt(id == "minecraft:hanging_sign", nbt),
             )),
@@ -180,6 +186,9 @@ impl BlockEntity {
         }
         if let BlockEntity::Campfire(c) = &mut entity {
             c.read_nbt(nbt);
+        }
+        if let BlockEntity::Brewing(b) = &mut entity {
+            b.read_nbt(nbt);
         }
         Some((pos, entity))
     }
@@ -225,6 +234,7 @@ impl BlockEntity {
                     ..Default::default()
                 }))
             }
+            "minecraft:brewing_stand" => Some(BlockEntity::Brewing(Box::default())),
             _ => super::signs::sign_kind(state)
                 .map(|hanging| BlockEntity::Sign(Box::new(super::signs::Sign::new(hanging)))),
         }
@@ -243,6 +253,7 @@ impl BlockEntity {
             BlockEntity::Plain(p) => p.kind,
             BlockEntity::Spawner(_) => block_entity_type::MOB_SPAWNER,
             BlockEntity::Sign(s) => s.type_id(),
+            BlockEntity::Brewing(b) => b.type_id(),
         }
     }
 
@@ -260,6 +271,7 @@ impl BlockEntity {
             BlockEntity::Chest(c) => &c.items[..],
             BlockEntity::Furnace(f) => &f.items,
             BlockEntity::Campfire(c) => &c.items,
+            BlockEntity::Brewing(b) => &b.items,
             BlockEntity::Plain(_) | BlockEntity::Spawner(_) | BlockEntity::Sign(_) => &[],
         }
     }
@@ -269,6 +281,7 @@ impl BlockEntity {
             BlockEntity::Chest(c) => &mut c.items[..],
             BlockEntity::Furnace(f) => &mut f.items,
             BlockEntity::Campfire(c) => &mut c.items,
+            BlockEntity::Brewing(b) => &mut b.items,
             BlockEntity::Plain(_) | BlockEntity::Spawner(_) | BlockEntity::Sign(_) => &mut [],
         }
     }
@@ -281,6 +294,7 @@ impl BlockEntity {
             BlockEntity::Plain(p) => &mut p.viewers,
             BlockEntity::Spawner(s) => &mut s.viewers,
             BlockEntity::Sign(s) => &mut s.viewers,
+            BlockEntity::Brewing(b) => &mut b.viewers,
         }
     }
 }
@@ -303,6 +317,7 @@ pub enum View {
     Grindstone(BlockPos),
     Stonecutter(BlockPos),
     Smithing(BlockPos),
+    Brewing(BlockPos),
 }
 
 impl View {
@@ -318,13 +333,14 @@ impl View {
             View::Anvil(_) | View::Grindstone(_) => 3,
             View::Stonecutter(_) => 2,
             View::Smithing(_) => 4,
+            View::Brewing(_) => super::brewing::SLOTS,
         }
     }
 
     /// The block entities shown in the window, each with its first window slot.
     fn parts(self) -> Vec<(BlockPos, usize)> {
         match self {
-            View::Chest(pos, _) | View::Furnace(pos, _) => vec![(pos, 0)],
+            View::Chest(pos, _) | View::Furnace(pos, _) | View::Brewing(pos) => vec![(pos, 0)],
             View::DoubleChest(first, second) => vec![(first, 0), (second, CHEST_SLOTS)],
             View::Inventory
             | View::Crafting
@@ -348,6 +364,7 @@ impl View {
             View::Grindstone(_) => click::Layout::Grindstone,
             View::Stonecutter(_) => click::Layout::Stonecutter,
             View::Smithing(_) => click::Layout::Smithing,
+            View::Brewing(_) => click::Layout::Brewing,
         }
     }
 }
@@ -382,6 +399,7 @@ impl World {
             ),
             "minecraft:stonecutter" => (View::Stonecutter(pos), menu::STONECUTTER, "Stonecutter"),
             "minecraft:smithing_table" => (View::Smithing(pos), menu::SMITHING, "Upgrade Gear"),
+            "minecraft:brewing_stand" => (View::Brewing(pos), menu::BREWING_STAND, "Brewing Stand"),
             "minecraft:chest" | "minecraft:trapped_chest" => {
                 let partner = blocks::chest_partner(state, pos)
                     .filter(|&q| blocks::same_block(self.block(q), state));
@@ -468,6 +486,14 @@ impl World {
                     }
                 }
             }
+            View::Brewing(pos) => {
+                if let Some(BlockEntity::Brewing(b)) = self.block_entities.get(&pos) {
+                    let data = super::brewing::brewing_data(window, b);
+                    for packet in data {
+                        self.send(id, packet);
+                    }
+                }
+            }
             _ => {}
         }
         // The screen first, then the sound, as vanilla orders them.
@@ -504,7 +530,7 @@ impl World {
                 let open = p.open.as_ref().expect("window is open");
                 open.grid[..4].to_vec()
             }
-            View::Chest(..) | View::Furnace(..) | View::DoubleChest(..) => {
+            View::Chest(..) | View::Furnace(..) | View::DoubleChest(..) | View::Brewing(..) => {
                 let mut slots = vec![Stack::EMPTY; view.container_len()];
                 for (part, first) in view.parts() {
                     if let Some(entity) = self.block_entities.get(&part) {
@@ -558,7 +584,7 @@ impl World {
                 let open = p.open.as_mut().expect("window is open");
                 open.grid[..4].copy_from_slice(&slots[..4]);
             }
-            View::Chest(..) | View::Furnace(..) | View::DoubleChest(..) => {
+            View::Chest(..) | View::Furnace(..) | View::DoubleChest(..) | View::Brewing(..) => {
                 for (part, first) in view.parts() {
                     if let Some(entity) = self.block_entities.get_mut(&part) {
                         let items = entity.items_mut();
@@ -891,7 +917,7 @@ impl World {
             View::Anvil(_) | View::Grindstone(_) => returned.extend(&open.grid[..2]),
             View::Stonecutter(_) => returned.push(open.grid[0]),
             View::Smithing(_) => returned.extend(&open.grid[..3]),
-            View::Chest(..) | View::Furnace(..) | View::DoubleChest(..) => {
+            View::Chest(..) | View::Furnace(..) | View::DoubleChest(..) | View::Brewing(..) => {
                 let mut last_viewer = false;
                 for (part, _) in open.view.parts() {
                     if let Some(entity) = self.block_entities.get_mut(&part) {

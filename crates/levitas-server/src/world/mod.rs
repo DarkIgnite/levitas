@@ -5,6 +5,7 @@
 mod admin;
 mod arrows;
 mod breeding;
+mod brewing;
 mod building;
 mod campfire;
 mod combat;
@@ -1295,6 +1296,7 @@ impl World {
         self.tick_eyes();
         self.tick_orbs();
         self.tick_monster_spawning();
+        self.tick_brewing();
         self.tick_survival();
         self.tick_hazards();
         self.tick_portals();

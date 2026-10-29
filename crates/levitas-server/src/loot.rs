@@ -211,6 +211,9 @@ impl LootTables {
                     stack.damage = ((1.0 - left) * f64::from(info.max_damage)).round() as i32;
                 }
             }
+            "minecraft:set_potion" => {
+                stack.potion = function["id"].as_str().and_then(crate::potions::id);
+            }
             "minecraft:enchant_randomly" => {
                 let picked = enchanting::random_for_loot(ctx.rng, stack.item, &function["options"]);
                 if let Some((id, level)) = picked {

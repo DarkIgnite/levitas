@@ -303,6 +303,59 @@ impl World {
 
     /// Using a bucket: an empty one scoops up the fluid source the player looks at, a
     /// full one pours its fluid out where the player looks.
+    /// A glass bottle used on water fills with it. Returns whether a bottle was used.
+    pub(super) fn fill_bottle(&mut self, id: i32, hand: i32) -> bool {
+        let Some(p) = self.players.get(&id) else {
+            return false;
+        };
+        let slot = p.hand_slot(hand);
+        let stack = p.inventory.slots[slot];
+        if ItemInfo::get(stack.item).is_none_or(|i| i.name != "minecraft:glass_bottle") {
+            return false;
+        }
+        let (eye, look, reach) = p.eye_ray();
+        let survival = p.survival();
+        let Some((pos, _)) = self.ray_cast(eye, look, reach, true) else {
+            return true;
+        };
+        let water = fluid_at(self.block(pos)).is_some_and(|f| f.fluid == Fluid::Water);
+        if !water {
+            return true;
+        }
+        self.play_sound("minecraft:item.bottle.fill", pos, None);
+        let bottle = crate::potions::stack("minecraft:potion", "water");
+        let p = self.players.get_mut(&id).expect("player exists");
+        if !survival {
+            let (changed, _) = p.inventory.add(bottle);
+            let updates: Vec<Writer> = changed
+                .into_iter()
+                .map(|s| p.inventory.set_slot_packet(s))
+                .collect();
+            for update in updates {
+                self.send(id, update);
+            }
+            return true;
+        }
+        if stack.count == 1 {
+            p.inventory.slots[slot] = bottle;
+            let update = p.inventory.set_slot_packet(slot);
+            self.send(id, update);
+            return true;
+        }
+        p.inventory.take(slot, 1);
+        let mut updates = vec![p.inventory.set_slot_packet(slot)];
+        let (changed, over) = p.inventory.add(bottle);
+        updates.extend(changed.into_iter().map(|s| p.inventory.set_slot_packet(s)));
+        let at = p.pos;
+        for update in updates {
+            self.send(id, update);
+        }
+        if over > 0 {
+            self.scatter_item(at, bottle);
+        }
+        true
+    }
+
     pub(super) fn use_bucket(&mut self, id: i32, hand: i32) -> bool {
         let Some(p) = self.players.get(&id) else {
             return false;

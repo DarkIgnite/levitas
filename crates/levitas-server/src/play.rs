@@ -184,6 +184,11 @@ fn decode(id: i32, packet: &[u8]) -> io::Result<Option<Event>> {
                     let data = r.bytes(length)?;
                     if kind == levitas_registry::component::DAMAGE {
                         stack.damage = Reader::new(data).varint()?.max(0);
+                    } else if kind == levitas_registry::component::POTION_CONTENTS {
+                        let mut c = Reader::new(data);
+                        if c.bool()? {
+                            stack.potion = u8::try_from(c.varint()?).ok();
+                        }
                     } else if kind == levitas_registry::component::TRIM {
                         let mut t = Reader::new(data);
                         let (material, pattern) = (t.varint()?, t.varint()?);

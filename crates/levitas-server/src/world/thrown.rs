@@ -3,7 +3,8 @@
 //! They fly from the thrower's eyes at 1.5 blocks per tick, falling 0.03 and keeping 99%
 //! of their speed each tick. A pearl teleports its thrower to where it lands, for 5
 //! damage, and can be thrown once a second. A snowball pushes what it hits and hurts
-//! blazes; an egg hatches a chick one time in eight.
+//! blazes; an egg hatches a chick one time in eight. Splash potions (and, for now,
+//! lingering ones) break where they land and give players near their effects.
 
 use levitas_registry::entity_type;
 
@@ -25,6 +26,8 @@ pub enum ThrownKind {
     EnderPearl,
     Snowball,
     Egg,
+    SplashPotion,
+    LingeringPotion,
 }
 
 impl ThrownKind {
@@ -33,6 +36,8 @@ impl ThrownKind {
             "minecraft:ender_pearl" => Some(ThrownKind::EnderPearl),
             "minecraft:snowball" => Some(ThrownKind::Snowball),
             "minecraft:egg" => Some(ThrownKind::Egg),
+            "minecraft:splash_potion" => Some(ThrownKind::SplashPotion),
+            "minecraft:lingering_potion" => Some(ThrownKind::LingeringPotion),
             _ => None,
         }
     }
@@ -42,6 +47,8 @@ impl ThrownKind {
             ThrownKind::EnderPearl => entity_type::ENDER_PEARL,
             ThrownKind::Snowball => entity_type::SNOWBALL,
             ThrownKind::Egg => entity_type::EGG,
+            ThrownKind::SplashPotion => entity_type::SPLASH_POTION,
+            ThrownKind::LingeringPotion => entity_type::LINGERING_POTION,
         }
     }
 
@@ -50,6 +57,9 @@ impl ThrownKind {
             ThrownKind::EnderPearl => "minecraft:entity.ender_pearl.throw",
             ThrownKind::Snowball => "minecraft:entity.snowball.throw",
             ThrownKind::Egg => "minecraft:entity.egg.throw",
+            ThrownKind::SplashPotion | ThrownKind::LingeringPotion => {
+                "minecraft:entity.splash_potion.throw"
+            }
         }
     }
 }
@@ -60,8 +70,11 @@ pub struct Thrown {
     vel: [f64; 3],
     thrower: i32,
     age: u32,
+    /// The thrown item, shown in flight (a potion's bottle colour).
+    stack: Stack,
 }
 
+#[derive(Clone, Copy)]
 enum Hit {
     Block,
     Player(i32),
@@ -84,6 +97,17 @@ fn spawn_packet(id: i32, t: &Thrown) -> Writer {
         .i16(v(t.vel[0]))
         .i16(v(t.vel[1]))
         .i16(v(t.vel[2]))
+}
+
+/// The thrown item, which the client draws (data index 8, an item stack).
+fn item_data(id: i32, t: &Thrown) -> Writer {
+    const DATA_ITEM: u8 = 8;
+    const SERIALIZER_ITEM_STACK: i32 = 7;
+    let packet = Writer::packet(clientbound::SET_ENTITY_DATA)
+        .varint(id)
+        .u8(DATA_ITEM)
+        .varint(SERIALIZER_ITEM_STACK);
+    crate::inventory::write_stack(packet, t.stack).u8(0xFF)
 }
 
 impl World {
@@ -113,9 +137,11 @@ impl World {
             vel: look.map(|v| v * SPEED),
             thrower: id,
             age: 0,
+            stack: stack.with_count(1),
         };
         let t_id = next_entity_id();
         self.broadcast(spawn_packet(t_id, &thrown), None);
+        self.broadcast(item_data(t_id, &thrown), None);
         self.thrown.insert(t_id, thrown);
         let pitch = 0.4 / (self.rng.f64() as f32 * 0.4 + 0.8);
         self.play_sound_at(kind.sound(), eye, 0.5, pitch, None);
@@ -143,7 +169,7 @@ impl World {
     pub(super) fn thrown_packets(&self) -> Vec<Writer> {
         self.thrown
             .iter()
-            .map(|(&id, t)| spawn_packet(id, t))
+            .flat_map(|(&id, t)| [spawn_packet(id, t), item_data(id, t)])
             .collect()
     }
 
@@ -231,6 +257,20 @@ impl World {
             _ => {}
         }
         match t.kind {
+            ThrownKind::SplashPotion | ThrownKind::LingeringPotion => {
+                let direct = match hit {
+                    Hit::Player(id) => Some(id),
+                    _ => None,
+                };
+                self.play_sound_at(
+                    "minecraft:entity.splash_potion.break",
+                    t.pos,
+                    1.0,
+                    1.0,
+                    None,
+                );
+                self.splash(t.pos, t.stack.potion, direct);
+            }
             ThrownKind::EnderPearl => {
                 let Some(id) = thrower.filter(|id| self.players[id].alive) else {
                     return;

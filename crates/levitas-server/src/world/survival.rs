@@ -484,6 +484,7 @@ impl World {
     pub(super) fn use_item(&mut self, id: i32, hand: i32, sequence: i32) {
         self.ack(id, sequence);
         if self.use_bucket(id, hand)
+            || self.fill_bottle(id, hand)
             || self.start_drawing(id, hand)
             || self.throw_held(id, hand)
             || self.throw_eye(id, hand)
@@ -556,6 +557,13 @@ impl World {
             self.send(id, update);
         }
         self.send(id, entity_event(id, ENTITY_EVENT_USE_ITEM_COMPLETE));
+        for effect in stack
+            .potion
+            .map(crate::potions::effects)
+            .unwrap_or_default()
+        {
+            self.add_effect(id, effect);
+        }
         for effect in consumable.effects {
             match effect {
                 OnConsume::Apply {
