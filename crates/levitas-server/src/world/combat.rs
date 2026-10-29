@@ -36,7 +36,9 @@ enum Target {
 impl World {
     /// A player hits an entity with what they hold.
     pub(super) fn attack(&mut self, attacker: i32, target: i32) {
-        if self.deflect_fireball(attacker, target) {
+        if self.deflect_fireball(attacker, target)
+            || self.attack_dragon_or_crystal(attacker, target)
+        {
             return;
         }
         let Some(p) = self.players.get(&attacker) else {

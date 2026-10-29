@@ -59,6 +59,8 @@ enum Hit {
     Block,
     Player(i32),
     Mob(i32),
+    /// Something that took the arrow and is dealt with already (the dragon, a crystal).
+    Gone,
 }
 
 impl World {
@@ -164,8 +166,13 @@ impl World {
         let speed = arrow.vel.iter().map(|v| v * v).sum::<f64>().sqrt();
         let steps = (speed / SAMPLE).ceil().max(1.0) as usize;
         let step = arrow.vel.map(|v| v / steps as f64);
+        let damage = (speed * arrow.base_damage).ceil() as f32;
         for _ in 0..steps {
             let next = [0, 1, 2].map(|i| arrow.pos[i] + step[i]);
+            if self.dragon_or_crystal_at(next, damage) {
+                arrow.pos = next;
+                return Some(Hit::Gone);
+            }
             if let Some(hit) = self.entity_at(next, arrow) {
                 arrow.pos = next;
                 return Some(hit);
@@ -259,7 +266,7 @@ impl World {
                 }
                 self.hit_mob(id, damage, by, away, "minecraft:arrow");
             }
-            Hit::Block => {}
+            Hit::Block | Hit::Gone => {}
         }
         self.play_sound_at("minecraft:entity.arrow.hit", arrow.pos, 1.0, 1.1, None);
     }

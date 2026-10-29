@@ -564,7 +564,6 @@ mod tests {
         assert!(end_stone > 10, "{end_stone}");
     }
 
-
     #[test]
     fn strongholds_lie_in_the_first_ring() {
         let overworld = PumpkinTerrain::new(1);

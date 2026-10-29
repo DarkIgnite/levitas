@@ -60,6 +60,7 @@ impl World {
         if !logging_in {
             self.wake_up(id);
             self.close_container(id);
+            self.leave_fight(id);
         }
         let Some(mut player) = self.players.remove(&id) else {
             return false;

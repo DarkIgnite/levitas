@@ -11,6 +11,7 @@ mod commands;
 mod containers;
 mod devices;
 pub mod dimension;
+mod dragon;
 mod effects;
 mod enchanting_table;
 mod end_portal;
@@ -111,6 +112,11 @@ static NEXT_ENTITY_ID: AtomicI32 = AtomicI32::new(1);
 
 pub fn next_entity_id() -> i32 {
     NEXT_ENTITY_ID.fetch_add(1, Ordering::Relaxed)
+}
+
+/// `n` entity IDs in a row (the ender dragon's parts follow its own); returns the first.
+pub fn next_entity_ids(n: i32) -> i32 {
+    NEXT_ENTITY_ID.fetch_add(n, Ordering::Relaxed)
 }
 
 /// Something a player did, sent from their connection task to the world.
@@ -483,6 +489,8 @@ struct World {
     /// Ender pearls, snowballs and eggs in flight.
     thrown: HashMap<i32, thrown::Thrown>,
     eyes: HashMap<i32, end_portal::EyeOfEnder>,
+    /// The End's dragon fight, once started.
+    fight: Option<dragon::Fight>,
     /// Blocks changed this tick, for redstone to look around.
     redstone_dirty: Vec<BlockPos>,
     /// Comparators' output levels, which their block states do not hold.
@@ -581,6 +589,7 @@ impl World {
             fireballs: HashMap::new(),
             thrown: HashMap::new(),
             eyes: HashMap::new(),
+            fight: None,
             redstone_dirty: Vec::new(),
             comparators: HashMap::new(),
             landings: Vec::new(),
@@ -861,6 +870,7 @@ impl World {
         packets.extend(self.fireball_packets());
         packets.extend(self.thrown_packets());
         packets.extend(self.eye_packets());
+        packets.extend(self.dragon_packets());
         packets.extend(self.orb_packets());
         for packet in packets {
             self.send(id, packet);
@@ -1230,6 +1240,7 @@ impl World {
         self.tick_hazards();
         self.tick_portals();
         self.tick_end_portals();
+        self.tick_dragon_fight();
         self.tick_effects();
         self.tick_items();
         self.tick_furnaces();
