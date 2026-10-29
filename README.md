@@ -38,7 +38,7 @@ counts half. The roadmap lists exactly what is done and what is missing in each 
 | 1. Persistence (saving worlds, players, chunks) | 72% | `███████▏░░` |
 | 2. Blocks behave correctly | 78% | `███████▊░░` |
 | 3. Fluids, gravity and light | 80% | `████████░░` |
-| 4. Combat and basic entities | 82% | `████████▏░` |
+| 4. Combat and basic entities | 86% | `████████▌░` |
 | 5. Mobs | 65% | `██████▌░░░` |
 | 6. Farming, nature and time | 62% | `██████▏░░░` |
 | 7. Redstone | 68% | `██████▊░░░` |
@@ -73,7 +73,7 @@ counts half. The roadmap lists exactly what is done and what is missing in each 
 - **Saving:** everything is stored in the vanilla Anvil format (`region/`, `entities/`,
   `playerdata/`, `level.dat`), so vanilla and Leaf can open Levitas worlds.
 
-Not there yet: raids, storage and TNT minecarts, item frames and armor stands,
+Not there yet: raids, storage and TNT minecarts, armor stands,
 advancements, tipped arrows and plugins. See the [roadmap](docs/ROADMAP.md) for the
 full list.
 

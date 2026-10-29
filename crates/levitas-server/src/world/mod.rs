@@ -25,6 +25,7 @@ mod fire;
 mod fireballs;
 mod fluids;
 mod golems;
+mod hanging;
 mod hazards;
 mod hoppers;
 mod items;
@@ -564,6 +565,8 @@ struct World {
     thrown: HashMap<i32, thrown::Thrown>,
     boats: HashMap<i32, boats::Boat>,
     carts: HashMap<i32, minecarts::Cart>,
+    /// Item frames and paintings.
+    hanging: HashMap<i32, hanging::Hanging>,
     /// Detector rails a cart is powering.
     detectors: HashSet<BlockPos>,
     eyes: HashMap<i32, end_portal::EyeOfEnder>,
@@ -668,6 +671,7 @@ impl World {
             thrown: HashMap::new(),
             boats: HashMap::new(),
             carts: HashMap::new(),
+            hanging: HashMap::new(),
             detectors: HashSet::new(),
             eyes: HashMap::new(),
             fight: None,
@@ -802,7 +806,10 @@ impl World {
             Event::LeaveBed { id } => self.wake_up(id),
             Event::Attack { id, target } => self.attack(id, target),
             Event::UseEntity { id, target, hand } => {
-                if !self.board_boat(id, target) && !self.board_cart(id, target) {
+                if !self.board_boat(id, target)
+                    && !self.board_cart(id, target)
+                    && !self.use_hanging(id, target, hand)
+                {
                     self.use_on_mob(id, target, hand);
                 }
             }
@@ -987,6 +994,7 @@ impl World {
         packets.extend(self.thrown_packets());
         packets.extend(self.boat_packets());
         packets.extend(self.cart_packets());
+        packets.extend(self.hanging_packets());
         packets.extend(self.eye_packets());
         packets.extend(self.dragon_packets());
         packets.extend(self.orb_packets());
@@ -1354,6 +1362,7 @@ impl World {
         self.tick_thrown();
         self.tick_boats();
         self.tick_minecarts();
+        self.tick_hanging();
         self.tick_eyes();
         self.tick_orbs();
         self.tick_monster_spawning();

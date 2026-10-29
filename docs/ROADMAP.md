@@ -88,7 +88,7 @@ Known gaps are listed under each phase instead of being hidden.
       either side can be edited again by right-clicking it, dyes colour a side's text,
       glow ink sacs make it glow and ink sacs undo that, honeycomb waxes it for good.
       Text is saved in vanilla's format (older worlds' JSON lines are read too). Note
-      blocks work; item frames, armor stands, flower pots and jukeboxes do not yet.
+      blocks and item frames work; armor stands, flower pots and jukeboxes do not yet.
 
 ## Phase 3: Fluids, gravity and light
 
@@ -162,9 +162,13 @@ Known gaps are listed under each phase instead of being hidden.
       straight rails, curves and slopes, pushed by powered rails (and off a wall
       from standing), braked by unpowered ones, and nudged by a rider holding
       forward; off the rails they fall and slide to a stop; saved like boats.
-      Missing: chest boats, two seats, mobs riding, chest, hopper, furnace and TNT
-      minecarts, carts bumping into each other, item frames, paintings and armor
-      stands.
+      Item frames and glow item frames (`world/hanging.rs`) hang on any face, take
+      the held item, turn it an eighth per click, give it back when hit and break on
+      the next hit. Paintings pick at random among the biggest placeable ones that
+      fit the wall. Both fall off when their wall goes and are saved in vanilla's
+      form. Missing: chest boats, two seats, mobs riding, chest, hopper, furnace and
+      TNT minecarts, carts bumping into each other, maps in frames, comparators
+      reading frames, armor stands.
 - [x] TNT and explosions. Explosions (`world/explosion.rs`) cast rays like vanilla,
       break blocks by blast resistance (dropping them 1 in `power` times, containers
       spilling), and damage and push entities; creepers use them. TNT (`world/tnt.rs`)

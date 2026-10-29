@@ -40,6 +40,7 @@ impl World {
             || self.attack_dragon_or_crystal(attacker, target)
             || self.hit_boat(attacker, target)
             || self.hit_cart(attacker, target)
+            || self.hit_hanging(attacker, target)
         {
             return;
         }

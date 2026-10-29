@@ -1658,6 +1658,12 @@ impl World {
                 .filter(|c| c.chunk() == (cx, cz))
                 .map(|c| Tag::Compound(c.to_nbt())),
         );
+        entities.extend(
+            self.hanging
+                .values()
+                .filter(|h| h.chunk() == (cx, cz))
+                .map(|h| Tag::Compound(h.to_nbt())),
+        );
         Compound::new()
             .with("DataVersion", DATA_VERSION)
             .with("Position", vec![cx, cz])
@@ -1673,6 +1679,7 @@ impl World {
             .chain(self.items.values().map(items::ItemEntity::chunk))
             .chain(self.boats.values().map(super::boats::Boat::chunk))
             .chain(self.carts.values().map(super::minecarts::Cart::chunk))
+            .chain(self.hanging.values().map(super::hanging::Hanging::chunk))
             .collect();
         let chunks: Vec<(i32, i32)> = now
             .union(&self.mob_chunks)
@@ -1720,10 +1727,17 @@ impl World {
             .filter(|(_, c)| c.chunk() == (x, z) && c.rider.is_none())
             .map(|(&id, _)| id)
             .collect();
+        let hanging_ids: Vec<i32> = self
+            .hanging
+            .iter()
+            .filter(|(_, h)| h.chunk() == (x, z))
+            .map(|(&id, _)| id)
+            .collect();
         if ids.is_empty()
             && item_ids.is_empty()
             && boat_ids.is_empty()
             && cart_ids.is_empty()
+            && hanging_ids.is_empty()
             && !had_mobs
         {
             return;
@@ -1743,6 +1757,10 @@ impl World {
         }
         for id in cart_ids {
             self.carts.remove(&id);
+            self.broadcast(items::remove_entity(id), None);
+        }
+        for id in hanging_ids {
+            self.hanging.remove(&id);
             self.broadcast(items::remove_entity(id), None);
         }
     }
@@ -1770,6 +1788,15 @@ impl World {
                     }
                     self.items.insert(id, item);
                 }
+                continue;
+            }
+            if let Some(h) = super::hanging::Hanging::from_nbt(entity, &mut self.rng) {
+                self.mob_chunks.insert(h.chunk());
+                let id = next_entity_id();
+                for packet in super::hanging::spawn_packets(id, &h) {
+                    self.broadcast(packet, None);
+                }
+                self.hanging.insert(id, h);
                 continue;
             }
             if let Some(cart) = super::minecarts::Cart::from_nbt(entity, &mut self.rng) {

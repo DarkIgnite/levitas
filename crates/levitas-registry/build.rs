@@ -102,6 +102,14 @@ fn main() {
     embed_json_dir(
         &data,
         &out_dir,
+        "painting_variant",
+        "PAINTING_VARIANTS_JSON",
+        "Painting variants as JSON: their size and picture.",
+        &mut out,
+    );
+    embed_json_dir(
+        &data,
+        &out_dir,
         "worldgen/biome",
         "BIOMES_JSON",
         "Biome definitions as JSON (spawners, spawn probabilities, climate, ...).",
