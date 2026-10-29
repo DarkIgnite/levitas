@@ -18,9 +18,10 @@ use super::*;
 use crate::click::Trade;
 use crate::enchanting;
 
-/// Entity data: the villager's type, profession and level.
+/// Entity data: the villager's type, profession and level. In 1.21.8 the serializers run
+/// ... 15 optional block state, 16 NBT, 17 particle, 18 particles, 19 villager data.
 const DATA_VILLAGER: u8 = 18;
-const SERIALIZER_VILLAGER_DATA: i32 = 18;
+const SERIALIZER_VILLAGER_DATA: i32 = 19;
 /// Experience a villager needs for each level above novice.
 const LEVEL_XP: [i32; 5] = [0, 10, 70, 150, 250];
 /// How far an unemployed villager looks for a workstation, sideways and up or down.
@@ -1181,6 +1182,31 @@ mod tests {
             Profession::of_workstation("minecraft:water_cauldron"),
             Some(Profession::Leatherworker)
         );
+    }
+
+    /// The entity data entry: index 18, serializer 19, then type, profession and level
+    /// as registry IDs (a taiga librarian of level 3 here).
+    #[test]
+    fn villager_data_is_written_as_1_21_8_reads_it() {
+        let mut v = Villager::new("minecraft:taiga");
+        v.profession = Profession::Librarian;
+        v.level = 3;
+        let frame = v.data_packet(5).into_frame();
+        let taiga = villager_type::NAMES
+            .iter()
+            .position(|&n| n == "minecraft:taiga");
+        let librarian = villager_profession::NAMES
+            .iter()
+            .position(|&n| n == "minecraft:librarian");
+        let tail = [
+            18,
+            19,
+            taiga.unwrap() as u8,
+            librarian.unwrap() as u8,
+            3,
+            0xFF,
+        ];
+        assert!(frame.ends_with(&tail), "{frame:?}");
     }
 
     #[test]
