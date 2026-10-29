@@ -152,7 +152,12 @@ pub async fn has_joined(
         .text()
         .await
         .map_err(|e| io::Error::other(format!("session server reply: {e}")))?;
-    let json: serde_json::Value = serde_json::from_str(&text)
+    profile_from_reply(&text, name)
+}
+
+/// The UUID, exact name and properties in a session server reply.
+fn profile_from_reply(text: &str, name: &str) -> io::Result<Option<(u128, String, Vec<Property>)>> {
+    let json: serde_json::Value = serde_json::from_str(text)
         .map_err(|e| invalid(format!("session server reply is not JSON: {e}")))?;
     let Some(uuid) = json["id"]
         .as_str()
@@ -230,6 +235,26 @@ mod tests {
             hash_of_name("simon"),
             "88e16a1019277b15d58faf0541e11910eb756f6"
         );
+    }
+
+    /// A reply shaped like the session server's (values shortened).
+    #[test]
+    fn session_server_replies_give_the_profile() {
+        let reply = r#"{"id":"069a79f444e94726a5befca90e38aaf5","name":"Notch",
+            "properties":[{"name":"textures","value":"ZXlK","signature":"c2ln"}],
+            "profileActions":[]}"#;
+        let (uuid, name, properties) = profile_from_reply(reply, "notch").unwrap().unwrap();
+        assert_eq!(uuid, 0x069a79f444e94726a5befca90e38aaf5);
+        assert_eq!(name, "Notch");
+        assert_eq!(
+            properties,
+            vec![Property {
+                name: "textures".to_owned(),
+                value: "ZXlK".to_owned(),
+                signature: Some("c2ln".to_owned()),
+            }]
+        );
+        assert!(profile_from_reply("{}", "x").unwrap().is_none());
     }
 
     #[test]
