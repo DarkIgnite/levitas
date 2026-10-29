@@ -371,6 +371,7 @@ impl World {
     }
 
     fn die(&mut self, id: i32, kind: Damage) {
+        self.get_off(id);
         self.wake_up(id);
         self.clear_effects(id);
         let keep = crate::rules::bool("keepInventory");
@@ -484,6 +485,7 @@ impl World {
     pub(super) fn use_item(&mut self, id: i32, hand: i32, sequence: i32) {
         self.ack(id, sequence);
         if self.use_bucket(id, hand)
+            || self.place_boat(id, hand)
             || self.fill_bottle(id, hand)
             || self.start_drawing(id, hand)
             || self.throw_held(id, hand)

@@ -54,6 +54,9 @@ impl World {
         via: Via,
     ) -> bool {
         let logging_in = via == Via::Login;
+        if !logging_in {
+            self.get_off(id);
+        }
         let Some(link) = self.links.get(&to).cloned() else {
             return false;
         };

@@ -26,6 +26,11 @@ pub struct ItemEntity {
 }
 
 impl ItemEntity {
+    #[cfg(test)]
+    pub fn stack(&self) -> Stack {
+        self.stack
+    }
+
     pub fn chunk(&self) -> (i32, i32) {
         (
             (self.pos[0] / 16.0).floor() as i32,

@@ -4,6 +4,7 @@
 
 mod admin;
 mod arrows;
+mod boats;
 mod breeding;
 mod brewing;
 mod building;
@@ -259,6 +260,17 @@ pub enum Event {
         id: i32,
         sneaking: bool,
     },
+    /// Where a player's client moved the boat they ride.
+    MoveVehicle {
+        id: i32,
+        pos: [f64; 3],
+        yaw: f32,
+    },
+    PaddleBoat {
+        id: i32,
+        left: bool,
+        right: bool,
+    },
     Respawn {
         id: i32,
     },
@@ -392,6 +404,8 @@ struct Player {
     portal_cooldown: u32,
     /// The tick from which an ender pearl can be thrown again.
     pearl_ready: u64,
+    /// The boat the player sits in.
+    riding: Option<i32>,
     /// Hand and start tick of a raised shield.
     blocking: Option<(i32, u64)>,
     /// Tick from which the shield can be raised again, after an axe knocked it down.
@@ -459,6 +473,7 @@ impl Player {
             portal_ticks: 0,
             portal_cooldown: 0,
             pearl_ready: 0,
+            riding: None,
             blocking: None,
             shield_ready: 0,
             hurt_ticks: 0,
@@ -536,6 +551,7 @@ struct World {
     fireballs: HashMap<i32, fireballs::Fireball>,
     /// Ender pearls, snowballs and eggs in flight.
     thrown: HashMap<i32, thrown::Thrown>,
+    boats: HashMap<i32, boats::Boat>,
     eyes: HashMap<i32, end_portal::EyeOfEnder>,
     /// The End's dragon fight, once started.
     fight: Option<dragon::Fight>,
@@ -636,6 +652,7 @@ impl World {
             tnt: HashMap::new(),
             fireballs: HashMap::new(),
             thrown: HashMap::new(),
+            boats: HashMap::new(),
             eyes: HashMap::new(),
             fight: None,
             redstone_dirty: Vec::new(),
@@ -767,7 +784,11 @@ impl World {
             }
             Event::LeaveBed { id } => self.wake_up(id),
             Event::Attack { id, target } => self.attack(id, target),
-            Event::UseEntity { id, target, hand } => self.use_on_mob(id, target, hand),
+            Event::UseEntity { id, target, hand } => {
+                if !self.board_boat(id, target) {
+                    self.use_on_mob(id, target, hand);
+                }
+            }
             Event::Sprint { id, sprinting } => {
                 if let Some(p) = self.players.get_mut(&id) {
                     p.sprinting = sprinting;
@@ -777,7 +798,13 @@ impl World {
                 if let Some(p) = self.players.get_mut(&id) {
                     p.sneaking = sneaking;
                 }
+                // Sneaking gets a rider out of their boat.
+                if sneaking {
+                    self.get_off(id);
+                }
             }
+            Event::MoveVehicle { id, pos, yaw } => self.boat_moved(id, pos, yaw),
+            Event::PaddleBoat { id, left, right } => self.paddle(id, left, right),
             Event::Respawn { id } => self.respawn(id),
             Event::Chat { id, message } => {
                 if let Some(p) = self.players.get(&id) {
@@ -890,6 +917,7 @@ impl World {
     }
 
     fn leave(&mut self, id: i32) {
+        self.get_off(id);
         self.wake_up(id);
         self.close_container(id);
         self.save_player(id);
@@ -935,6 +963,7 @@ impl World {
         packets.extend(self.arrow_packets());
         packets.extend(self.fireball_packets());
         packets.extend(self.thrown_packets());
+        packets.extend(self.boat_packets());
         packets.extend(self.eye_packets());
         packets.extend(self.dragon_packets());
         packets.extend(self.orb_packets());
@@ -1300,6 +1329,7 @@ impl World {
         self.tick_arrows();
         self.tick_fireballs();
         self.tick_thrown();
+        self.tick_boats();
         self.tick_eyes();
         self.tick_orbs();
         self.tick_monster_spawning();

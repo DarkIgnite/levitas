@@ -1589,6 +1589,12 @@ impl World {
                 .filter(|i| i.chunk() == (cx, cz))
                 .map(|i| Tag::Compound(i.to_nbt())),
         );
+        entities.extend(
+            self.boats
+                .values()
+                .filter(|b| b.chunk() == (cx, cz))
+                .map(|b| Tag::Compound(b.to_nbt())),
+        );
         Compound::new()
             .with("DataVersion", DATA_VERSION)
             .with("Position", vec![cx, cz])
@@ -1602,6 +1608,7 @@ impl World {
             .values()
             .map(Mob::chunk)
             .chain(self.items.values().map(items::ItemEntity::chunk))
+            .chain(self.boats.values().map(super::boats::Boat::chunk))
             .collect();
         let chunks: Vec<(i32, i32)> = now
             .union(&self.mob_chunks)
@@ -1636,7 +1643,14 @@ impl World {
             .filter(|(_, i)| i.chunk() == (x, z))
             .map(|(&id, _)| id)
             .collect();
-        if ids.is_empty() && item_ids.is_empty() && !had_mobs {
+        // Boats with a rider go along with them.
+        let boat_ids: Vec<i32> = self
+            .boats
+            .iter()
+            .filter(|(_, b)| b.chunk() == (x, z) && b.rider.is_none())
+            .map(|(&id, _)| id)
+            .collect();
+        if ids.is_empty() && item_ids.is_empty() && boat_ids.is_empty() && !had_mobs {
             return;
         }
         self.save_mob_chunk(x, z);
@@ -1646,6 +1660,10 @@ impl World {
         }
         for id in item_ids {
             self.items.remove(&id);
+            self.broadcast(items::remove_entity(id), None);
+        }
+        for id in boat_ids {
+            self.boats.remove(&id);
             self.broadcast(items::remove_entity(id), None);
         }
     }
@@ -1673,6 +1691,15 @@ impl World {
                     }
                     self.items.insert(id, item);
                 }
+                continue;
+            }
+            if let Some(boat) = super::boats::Boat::from_nbt(entity, &mut self.rng) {
+                self.mob_chunks.insert(boat.chunk());
+                let id = next_entity_id();
+                for packet in super::boats::spawn_packets(id, &boat) {
+                    self.broadcast(packet, None);
+                }
+                self.boats.insert(id, boat);
                 continue;
             }
             if let Some(mob) = Mob::from_nbt(entity, &mut self.rng) {

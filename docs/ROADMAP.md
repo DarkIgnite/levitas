@@ -152,7 +152,13 @@ Known gaps are listed under each phase instead of being hidden.
       Mobs (`world/mobs.rs`) are shown to players who have their chunk loaded, move
       with gravity and block collisions, and are saved in vanilla `entities/` region
       files. Items and falling blocks are not tracked per player yet.
-- [ ] Minecarts, boats, item frames, paintings, armor stands, experience orbs
+- [ ] Minecarts, boats, item frames, paintings, armor stands, experience orbs.
+      Experience orbs work. Boats and rafts of every wood (`world/boats.rs`) are
+      placed on water or ground, ridden (the rider's client steers, the server checks
+      each move and shows it to others, paddles included), left by sneaking, broken
+      by hits into their item, float up to the surface when empty, and are saved
+      with the chunk's entities. Missing: chest boats, two seats, mobs riding,
+      minecarts, item frames, paintings and armor stands.
 - [x] TNT and explosions. Explosions (`world/explosion.rs`) cast rays like vanilla,
       break blocks by blast resistance (dropping them 1 in `power` times, containers
       spilling), and damage and push entities; creepers use them. TNT (`world/tnt.rs`)

@@ -497,7 +497,7 @@ impl World {
     /// The first block along a ray, and the face the ray entered it through. With
     /// `sources`, fluid sources are hit and other fluid passed through; without, all
     /// fluid is passed through. Any other block that is not air stops the ray.
-    fn ray_cast(
+    pub(super) fn ray_cast(
         &mut self,
         from: [f64; 3],
         dir: [f64; 3],

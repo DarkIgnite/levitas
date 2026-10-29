@@ -241,6 +241,16 @@ fn decode(id: i32, packet: &[u8]) -> io::Result<Option<Event>> {
             window: r.varint()?,
             button: r.varint()?,
         },
+        serverbound::MOVE_VEHICLE => Event::MoveVehicle {
+            id,
+            pos: [r.f64()?, r.f64()?, r.f64()?],
+            yaw: r.f32()?,
+        },
+        serverbound::PADDLE_BOAT => Event::PaddleBoat {
+            id,
+            left: r.bool()?,
+            right: r.bool()?,
+        },
         serverbound::SELECT_TRADE => Event::SelectTrade {
             id,
             index: r.varint()?,
