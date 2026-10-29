@@ -82,6 +82,7 @@ pub enum MobKind {
     Blaze,
     Enderman,
     Villager,
+    IronGolem,
 }
 
 impl MobKind {
@@ -101,6 +102,7 @@ impl MobKind {
             "minecraft:blaze" => Some(MobKind::Blaze),
             "minecraft:enderman" => Some(MobKind::Enderman),
             "minecraft:villager" => Some(MobKind::Villager),
+            "minecraft:iron_golem" => Some(MobKind::IronGolem),
             _ => None,
         }
     }
@@ -121,6 +123,7 @@ impl MobKind {
             MobKind::Blaze => "minecraft:blaze",
             MobKind::Enderman => "minecraft:enderman",
             MobKind::Villager => "minecraft:villager",
+            MobKind::IronGolem => "minecraft:iron_golem",
         }
     }
 
@@ -141,6 +144,7 @@ impl MobKind {
             MobKind::Blaze => "Blaze",
             MobKind::Enderman => "Enderman",
             MobKind::Villager => "Villager",
+            MobKind::IronGolem => "Iron Golem",
         }
     }
 
@@ -215,6 +219,7 @@ impl MobKind {
             MobKind::Blaze => entity_type::BLAZE,
             MobKind::Enderman => entity_type::ENDERMAN,
             MobKind::Villager => entity_type::VILLAGER,
+            MobKind::IronGolem => entity_type::IRON_GOLEM,
         }
     }
 
@@ -232,6 +237,7 @@ impl MobKind {
             MobKind::Blaze => 20.0,
             MobKind::Enderman => 40.0,
             MobKind::Villager => 20.0,
+            MobKind::IronGolem => 100.0,
         }
     }
 
@@ -252,6 +258,7 @@ impl MobKind {
             MobKind::Blaze => (0.6, 1.8),
             MobKind::Enderman => (0.6, 2.9),
             MobKind::Villager => (0.6, 1.95),
+            MobKind::IronGolem => (1.4, 2.7),
         }
     }
 
@@ -289,6 +296,7 @@ impl MobKind {
             MobKind::Blaze => "blaze",
             MobKind::Enderman => "enderman",
             MobKind::Villager => "villager",
+            MobKind::IronGolem => "iron_golem",
         }
     }
 }
@@ -353,6 +361,9 @@ pub struct Mob {
     viewers: HashSet<i32>,
     /// A villager's profession, trades and workstation.
     pub villager: Option<Box<super::villagers::Villager>>,
+    /// Iron golems: the monster being fought, and whether a player built it.
+    pub prey: Option<i32>,
+    pub player_created: bool,
 }
 
 impl Mob {
@@ -413,6 +424,8 @@ impl Mob {
             viewers: HashSet::new(),
             villager: (kind == MobKind::Villager)
                 .then(|| Box::new(super::villagers::Villager::new("minecraft:plains"))),
+            prey: None,
+            player_created: false,
         }
     }
 
@@ -480,6 +493,9 @@ impl Mob {
         }
         if let Some(v) = &self.villager {
             packets.push(v.data_packet(id));
+        }
+        if self.kind == MobKind::IronGolem {
+            packets.push(super::golems::golem_data(id, self.player_created));
         }
         if self.age < 0 {
             packets.push(super::breeding::baby_data(id, true));
@@ -567,6 +583,9 @@ impl Mob {
         if let Some(v) = &self.villager {
             v.write_nbt(&mut nbt);
         }
+        if self.kind == MobKind::IronGolem {
+            nbt.insert("PlayerCreated", self.player_created);
+        }
         nbt
     }
 
@@ -612,6 +631,7 @@ impl Mob {
         if kind == MobKind::Villager {
             mob.villager = Some(Box::new(super::villagers::Villager::read_nbt(nbt)));
         }
+        mob.player_created = nbt.int("PlayerCreated").unwrap_or(0) != 0;
         mob.sent_pos = mob.pos;
         Some(mob)
     }
@@ -652,7 +672,7 @@ struct SpawnList {
 }
 
 /// Mobs `/summon` knows.
-pub const SUMMONABLE: [&str; 14] = [
+pub const SUMMONABLE: [&str; 15] = [
     "cow",
     "pig",
     "sheep",
@@ -667,6 +687,7 @@ pub const SUMMONABLE: [&str; 14] = [
     "blaze",
     "enderman",
     "villager",
+    "iron_golem",
 ];
 
 fn spawners(list: &Value) -> Vec<Spawner> {
@@ -840,7 +861,9 @@ impl World {
                     mob.path.clear();
                 }
             }
-            if !mob.kind.is_monster() {
+            if mob.kind == MobKind::IronGolem {
+                self.tick_golem(id, &mut mob);
+            } else if !mob.kind.is_monster() {
                 self.tick_breeding(id, &mut mob);
             }
             if mob.kind.is_monster() && self.hunt(id, &mut mob) {
@@ -1106,7 +1129,10 @@ impl World {
             let fallen = std::mem::take(&mut mob.fall_distance);
             if !in_water
                 && fallen > 3.0
-                && !matches!(mob.kind, MobKind::Chicken | MobKind::MagmaCube)
+                && !matches!(
+                    mob.kind,
+                    MobKind::Chicken | MobKind::MagmaCube | MobKind::IronGolem
+                )
             {
                 mob.health -= (fallen - 3.0).ceil() as f32;
             }
@@ -1424,14 +1450,21 @@ impl World {
                 mob.hunting = Some(attacker);
             }
         }
-        if !mob.kind.is_monster() {
-            mob.panic = PANIC_TICKS;
-            mob.target = None;
-        }
-        mob.knockback[0] = mob.knockback[0] / 2.0 + away[0] * KNOCKBACK;
-        mob.knockback[1] = mob.knockback[1] / 2.0 + away[1] * KNOCKBACK;
-        if mob.on_ground {
-            mob.vel[1] = (mob.vel[1] / 2.0 + KNOCKBACK).min(KNOCKBACK);
+        if mob.kind == MobKind::IronGolem {
+            // Golems fight back instead of fleeing, and do not get knocked back.
+            if let Some(attacker) = by_player {
+                World::golem_hit_by(&mut mob, attacker);
+            }
+        } else {
+            if !mob.kind.is_monster() {
+                mob.panic = PANIC_TICKS;
+                mob.target = None;
+            }
+            mob.knockback[0] = mob.knockback[0] / 2.0 + away[0] * KNOCKBACK;
+            mob.knockback[1] = mob.knockback[1] / 2.0 + away[1] * KNOCKBACK;
+            if mob.on_ground {
+                mob.vel[1] = (mob.vel[1] / 2.0 + KNOCKBACK).min(KNOCKBACK);
+            }
         }
         let kind = SyncedRegistry::get("minecraft:damage_type")
             .and_then(|r| r.id_of(damage_type))
@@ -1543,6 +1576,12 @@ impl World {
         let held = ItemInfo::get(p.inventory.slots[slot].item).map_or("", |i| i.name);
         if mob.kind == MobKind::Villager {
             self.open_trading(id, target);
+            return;
+        }
+        if mob.kind == MobKind::IronGolem {
+            if held == "minecraft:iron_ingot" {
+                self.repair_golem(id, target, slot);
+            }
             return;
         }
         if super::breeding::is_food(mob.kind, held) {
@@ -1745,7 +1784,7 @@ fn feet(pos: [f64; 3]) -> BlockPos {
 }
 
 /// The yaw (degrees, Minecraft's convention) that faces from `from` towards `to`.
-fn yaw_towards(from: [f64; 3], to: [f64; 3]) -> f32 {
+pub(super) fn yaw_towards(from: [f64; 3], to: [f64; 3]) -> f32 {
     let (dx, dz) = (to[0] - from[0], to[2] - from[2]);
     (-dx.atan2(dz)).to_degrees() as f32
 }

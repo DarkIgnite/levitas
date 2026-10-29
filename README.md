@@ -44,7 +44,7 @@ counts half. The roadmap lists exactly what is done and what is missing in each 
 | 7. Redstone | 62% | `██████▏░░░` |
 | 8. Progression (enchanting, brewing, ...) | 58% | `█████▊░░░░` |
 | 9. Dimensions (Nether, End) | 60% | `██████░░░░` |
-| 10. Villagers and raids | 25% | `██▌░░░░░░░` |
+| 10. Villagers and raids | 32% | `███▏░░░░░░` |
 | 11. Everything else (commands, config, ...) | 48% | `████▊░░░░░` |
 | 12. World generation | 60% | `██████░░░░` |
 | 13. Plugins and economy | 0% | `░░░░░░░░░░` |
@@ -73,7 +73,7 @@ counts half. The roadmap lists exactly what is done and what is missing in each 
 - **Saving:** everything is stored in the vanilla Anvil format (`region/`, `entities/`,
   `playerdata/`, `level.dat`), so vanilla and Leaf can open Levitas worlds.
 
-Not there yet: raids, iron golems, minecarts, item frames and armor stands,
+Not there yet: raids, minecarts, item frames and armor stands,
 advancements, tipped arrows and plugins. See the [roadmap](docs/ROADMAP.md) for the
 full list.
 

@@ -24,6 +24,7 @@ mod falling;
 mod fire;
 mod fireballs;
 mod fluids;
+mod golems;
 mod hazards;
 mod hoppers;
 mod items;

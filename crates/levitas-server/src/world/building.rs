@@ -86,6 +86,7 @@ impl World {
                     }
                     if let Some(&(q, _)) = blocks.first() {
                         self.sign_placed(id, q);
+                        self.try_build_golem(q);
                     }
                     if survival {
                         let p = self.players.get_mut(&id).expect("player exists");

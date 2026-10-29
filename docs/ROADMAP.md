@@ -349,7 +349,13 @@ Known gaps are listed under each phase instead of being hidden.
       from the inventory. Saved in vanilla's format. Missing: gossip and prices that
       change with demand or reputation, breeding, sleeping in beds, schedules and
       walking to work, explorer maps, iron golems and cats.
-- [ ] Wandering traders, iron golems, zombie villagers and curing
+- [ ] Wandering traders, iron golems, zombie villagers and curing. Iron golems
+      (`world/golems.rs`) come with villages and are built from four iron blocks
+      and a carved pumpkin; they go after monsters (not creepers) within 16 blocks
+      and fling them up, turn on players who hit them unless a player built them,
+      are mended by iron ingots, take no fall damage or knockback and drop iron and
+      poppies. Missing: golems spawning when villagers gather, monsters attacking
+      golems and villagers, wandering traders, zombie villagers.
 - [ ] Raids and bad omen
 
 ## Phase 11: Everything else
