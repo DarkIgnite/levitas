@@ -288,6 +288,7 @@ pub enum View {
     Anvil(BlockPos),
     Grindstone(BlockPos),
     Stonecutter(BlockPos),
+    Smithing(BlockPos),
 }
 
 impl View {
@@ -302,6 +303,7 @@ impl View {
             View::Enchanting(_) => 2,
             View::Anvil(_) | View::Grindstone(_) => 3,
             View::Stonecutter(_) => 2,
+            View::Smithing(_) => 4,
         }
     }
 
@@ -315,7 +317,8 @@ impl View {
             | View::Enchanting(_)
             | View::Anvil(_)
             | View::Grindstone(_)
-            | View::Stonecutter(_) => Vec::new(),
+            | View::Stonecutter(_)
+            | View::Smithing(_) => Vec::new(),
         }
     }
 
@@ -330,6 +333,7 @@ impl View {
             View::Anvil(_) => click::Layout::Anvil,
             View::Grindstone(_) => click::Layout::Grindstone,
             View::Stonecutter(_) => click::Layout::Stonecutter,
+            View::Smithing(_) => click::Layout::Smithing,
         }
     }
 }
@@ -363,6 +367,7 @@ impl World {
                 "Repair & Disenchant",
             ),
             "minecraft:stonecutter" => (View::Stonecutter(pos), menu::STONECUTTER, "Stonecutter"),
+            "minecraft:smithing_table" => (View::Smithing(pos), menu::SMITHING, "Upgrade Gear"),
             "minecraft:chest" | "minecraft:trapped_chest" => {
                 let partner = blocks::chest_partner(state, pos)
                     .filter(|&q| blocks::same_block(self.block(q), state));
@@ -481,6 +486,10 @@ impl World {
                 let open = p.open.as_ref().expect("window is open");
                 open.grid[..2].to_vec()
             }
+            View::Smithing(_) => {
+                let open = p.open.as_ref().expect("window is open");
+                open.grid[..4].to_vec()
+            }
             View::Chest(..) | View::Furnace(..) | View::DoubleChest(..) => {
                 let mut slots = vec![Stack::EMPTY; view.container_len()];
                 for (part, first) in view.parts() {
@@ -529,6 +538,11 @@ impl World {
                 let p = self.players.get_mut(&id).expect("player exists");
                 let open = p.open.as_mut().expect("window is open");
                 open.grid[..2].copy_from_slice(&slots[..2]);
+            }
+            View::Smithing(_) => {
+                let p = self.players.get_mut(&id).expect("player exists");
+                let open = p.open.as_mut().expect("window is open");
+                open.grid[..4].copy_from_slice(&slots[..4]);
             }
             View::Chest(..) | View::Furnace(..) | View::DoubleChest(..) => {
                 for (part, first) in view.parts() {
@@ -862,6 +876,7 @@ impl World {
             View::Enchanting(_) => returned.extend(&open.grid[..2]),
             View::Anvil(_) | View::Grindstone(_) => returned.extend(&open.grid[..2]),
             View::Stonecutter(_) => returned.push(open.grid[0]),
+            View::Smithing(_) => returned.extend(&open.grid[..3]),
             View::Chest(..) | View::Furnace(..) | View::DoubleChest(..) => {
                 let mut last_viewer = false;
                 for (part, _) in open.view.parts() {

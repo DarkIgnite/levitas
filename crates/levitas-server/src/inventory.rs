@@ -3,7 +3,7 @@
 
 use levitas_nbt::{Compound, Tag};
 use levitas_protocol::Writer;
-use levitas_registry::{component, ItemInfo};
+use levitas_registry::{component, ItemInfo, SyncedRegistry};
 
 use crate::enchanting::Enchantments;
 
@@ -23,6 +23,43 @@ pub struct Stack {
     pub enchants: Enchantments,
     /// The anvil's prior work penalty (the `minecraft:repair_cost` component).
     pub repair_cost: i32,
+    /// An armor trim (the `minecraft:trim` component).
+    pub trim: Option<Trim>,
+}
+
+/// An armor trim: entries of the trim material and trim pattern registries.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Trim {
+    pub material: u16,
+    pub pattern: u16,
+}
+
+impl Trim {
+    fn registry(name: &str) -> Option<&'static SyncedRegistry> {
+        SyncedRegistry::get(name)
+    }
+
+    /// A trim from its material and pattern names (`minecraft:gold`, `minecraft:bolt`).
+    pub fn named(material: &str, pattern: &str) -> Option<Trim> {
+        Some(Trim {
+            material: Self::registry("minecraft:trim_material")?.id_of(material)? as u16,
+            pattern: Self::registry("minecraft:trim_pattern")?.id_of(pattern)? as u16,
+        })
+    }
+
+    pub fn material_name(self) -> &'static str {
+        Self::registry("minecraft:trim_material")
+            .and_then(|r| r.entries.get(usize::from(self.material)))
+            .copied()
+            .unwrap_or("minecraft:iron")
+    }
+
+    pub fn pattern_name(self) -> &'static str {
+        Self::registry("minecraft:trim_pattern")
+            .and_then(|r| r.entries.get(usize::from(self.pattern)))
+            .copied()
+            .unwrap_or("minecraft:coast")
+    }
 }
 
 impl Stack {
@@ -32,6 +69,7 @@ impl Stack {
         damage: 0,
         enchants: Enchantments::NONE,
         repair_cost: 0,
+        trim: None,
     };
 
     pub fn new(item: i32, count: i32) -> Self {
@@ -41,6 +79,7 @@ impl Stack {
             damage: 0,
             enchants: Enchantments::NONE,
             repair_cost: 0,
+            trim: None,
         }
     }
 
@@ -59,6 +98,7 @@ impl Stack {
             && self.damage == other.damage
             && self.enchants == other.enchants
             && self.repair_cost == other.repair_cost
+            && self.trim == other.trim
     }
 
     pub fn is_empty(&self) -> bool {
@@ -94,6 +134,14 @@ impl Stack {
         if self.repair_cost > 0 {
             components.insert("minecraft:repair_cost", self.repair_cost);
         }
+        if let Some(trim) = self.trim {
+            components.insert(
+                "minecraft:trim",
+                Compound::new()
+                    .with("material", trim.material_name())
+                    .with("pattern", trim.pattern_name()),
+            );
+        }
         if !components.is_empty() {
             nbt.insert("components", components);
         }
@@ -126,6 +174,9 @@ impl Stack {
             damage: damage.max(0),
             enchants,
             repair_cost,
+            trim: components
+                .and_then(|c| c.compound("minecraft:trim"))
+                .and_then(|t| Trim::named(t.str("material")?, t.str("pattern")?)),
         }
     }
 }
@@ -162,9 +213,9 @@ pub fn write_stack(packet: Writer, stack: Stack) -> Writer {
     let damaged = stack.damage > 0;
     let enchanted = !stack.enchants.is_empty();
     let worked = stack.repair_cost > 0;
-    let mut packet = packet
-        .varint(i32::from(damaged) + i32::from(enchanted) + i32::from(worked))
-        .varint(0);
+    let trimmed = stack.trim.is_some();
+    let added = i32::from(damaged) + i32::from(enchanted) + i32::from(worked) + i32::from(trimmed);
+    let mut packet = packet.varint(added).varint(0);
     if damaged {
         packet = packet.varint(component::DAMAGE).varint(stack.damage);
     }
@@ -180,6 +231,13 @@ pub fn write_stack(packet: Writer, stack: Stack) -> Writer {
         packet = packet
             .varint(component::REPAIR_COST)
             .varint(stack.repair_cost);
+    }
+    if let Some(trim) = stack.trim {
+        // Registry holders: the entry's ID plus one (zero would be an inline value).
+        packet = packet
+            .varint(component::TRIM)
+            .varint(i32::from(trim.material) + 1)
+            .varint(i32::from(trim.pattern) + 1);
     }
     packet
 }

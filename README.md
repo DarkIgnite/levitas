@@ -36,7 +36,7 @@ counts half. The roadmap lists exactly what is done and what is missing in each 
 | Phase | Progress | |
 |---|---|---|
 | 1. Persistence (saving worlds, players, chunks) | 72% | `███████▏░░` |
-| 2. Blocks behave correctly | 72% | `███████▏░░` |
+| 2. Blocks behave correctly | 75% | `███████▌░░` |
 | 3. Fluids, gravity and light | 80% | `████████░░` |
 | 4. Combat and basic entities | 70% | `███████░░░` |
 | 5. Mobs | 65% | `██████▌░░░` |

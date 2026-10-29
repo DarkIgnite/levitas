@@ -574,6 +574,7 @@ pub static NAMES: &[&str] = &[{}];",
         };
         let max_damage = c["minecraft:max_damage"].as_i64().unwrap_or(0);
         let equip_slot = c["minecraft:equippable"]["slot"].as_str();
+        let trim_material = c["minecraft:provides_trim_material"].as_str();
         // Main-hand attack modifiers: a player's base damage is 1 and speed 4.
         let modifier_in = |kind: &str, mainhand: bool| {
             c["minecraft:attribute_modifiers"]
@@ -597,7 +598,8 @@ pub static NAMES: &[&str] = &[{}];",
              consumable: {consumable}, enchantability: {enchantability}, repair_with: {repair_with:?}, \
              tool: {tool}, max_damage: {max_damage}, equip_slot: {equip_slot:?}, \
              attack_damage: {attack_damage:?}f32, attack_speed: {attack_speed:?}f32, \
-             armor: {armor:?}f32, toughness: {toughness:?}f32 }},"
+             armor: {armor:?}f32, toughness: {toughness:?}f32, \
+             trim_material: {trim_material:?} }},"
         )
         .unwrap();
     }

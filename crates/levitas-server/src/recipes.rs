@@ -1,6 +1,6 @@
 //! Crafting and smelting recipes, loaded from the vanilla recipe JSON. Shaped (including
-//! mirrored), shapeless and smelting recipes are supported; special recipes (fireworks,
-//! map cloning, dyeing, ...), transmute recipes, stonecutting and smithing are not yet.
+//! mirrored), shapeless, smelting, stonecutting and smithing recipes are supported;
+//! special recipes (fireworks, map cloning, dyeing, ...) and transmute recipes are not yet.
 
 use std::collections::HashMap;
 
@@ -9,12 +9,28 @@ use levitas_registry::packet::play::clientbound;
 use levitas_registry::{ItemInfo, TagRegistry, RECIPES_JSON};
 use serde_json::Value;
 
-use crate::inventory::write_stack;
-
-use crate::inventory::Stack;
+use crate::inventory::{write_stack, Stack, Trim};
 
 /// Item IDs an ingredient slot accepts, sorted.
 type Ingredient = Vec<i32>;
+
+/// Picks one part of a smithing recipe.
+type Part = fn(&Smithing) -> &Ingredient;
+
+/// A smithing table recipe.
+struct Smithing {
+    template: Ingredient,
+    base: Ingredient,
+    addition: Ingredient,
+    outcome: Outcome,
+}
+
+enum Outcome {
+    /// The base becomes this item (netherite upgrades).
+    Becomes(i32),
+    /// The base armor gets a trim of this pattern, in the addition's material.
+    Trim(String),
+}
 
 struct Shaped {
     width: usize,
@@ -54,6 +70,7 @@ pub struct Recipes {
     cooking: HashMap<(Cooker, i32), Smelting>,
     /// Stonecutter recipes, in the order clients list them: what goes in, what comes out.
     stonecutting: Vec<(Ingredient, Stack)>,
+    smithing: Vec<Smithing>,
 }
 
 /// Slot display types, as numbered by the `slot_display` registry.
@@ -68,6 +85,7 @@ impl Recipes {
             shapeless: Vec::new(),
             cooking: HashMap::new(),
             stonecutting: Vec::new(),
+            smithing: Vec::new(),
         };
         for recipe in all.values() {
             // Recipes naming unknown items or tags are skipped rather than half-loaded.
@@ -139,6 +157,19 @@ impl Recipes {
                 let input = ingredient(&recipe["ingredient"])?;
                 self.stonecutting.push((input, result(&recipe["result"])?));
             }
+            kind @ ("minecraft:smithing_transform" | "minecraft:smithing_trim") => {
+                let outcome = if kind == "minecraft:smithing_transform" {
+                    Outcome::Becomes(ItemInfo::id_of(recipe["result"]["id"].as_str()?)?)
+                } else {
+                    Outcome::Trim(recipe["pattern"].as_str()?.to_owned())
+                };
+                self.smithing.push(Smithing {
+                    template: ingredient(&recipe["template"])?,
+                    base: ingredient(&recipe["base"])?,
+                    addition: ingredient(&recipe["addition"])?,
+                    outcome,
+                });
+            }
             _ => {}
         }
         Some(())
@@ -186,8 +217,55 @@ impl Recipes {
             .collect()
     }
 
+    /// What a smithing table makes of a template, a base item and an addition: the base
+    /// upgraded (diamond gear to netherite) or trimmed, keeping its enchantments and
+    /// wear. Empty if no recipe fits, or the armor already has that very trim.
+    pub fn smithing(&self, template: Stack, base: Stack, addition: Stack) -> Stack {
+        let fits = |list: &Ingredient, s: Stack| !s.is_empty() && list.contains(&s.item);
+        let Some(recipe) = self.smithing.iter().find(|r| {
+            fits(&r.template, template) && fits(&r.base, base) && fits(&r.addition, addition)
+        }) else {
+            return Stack::EMPTY;
+        };
+        let mut result = base.with_count(1);
+        match &recipe.outcome {
+            Outcome::Becomes(item) => result.item = *item,
+            Outcome::Trim(pattern) => {
+                let material = ItemInfo::get(addition.item).and_then(|i| i.trim_material);
+                let trim = material.and_then(|m| Trim::named(m, pattern));
+                if trim.is_none() || trim == base.trim {
+                    return Stack::EMPTY;
+                }
+                result.trim = trim;
+            }
+        }
+        result
+    }
+
+    /// Which smithing slot (0 template, 1 base, 2 addition) an item may go in first.
+    pub fn smithing_slot(&self, item: i32) -> Option<usize> {
+        let in_any = |part: Part| self.smithing.iter().any(|r| part(r).contains(&item));
+        if in_any(|r| &r.template) {
+            Some(0)
+        } else if in_any(|r| &r.base) {
+            Some(1)
+        } else if in_any(|r| &r.addition) {
+            Some(2)
+        } else {
+            None
+        }
+    }
+
+    /// Every item that fits a part of some smithing recipe, sorted.
+    fn smithing_items(&self, part: Part) -> Vec<i32> {
+        let mut items: Vec<i32> = self.smithing.iter().flat_map(|r| part(r).clone()).collect();
+        items.sort_unstable();
+        items.dedup();
+        items
+    }
+
     /// The recipe data clients need for their own screens: which items each cooker
-    /// takes, and every stonecutter recipe.
+    /// and smithing slot takes, and every stonecutter recipe.
     pub fn update_packet(&self) -> Writer {
         let sets = [
             ("minecraft:furnace_input", Cooker::Furnace),
@@ -195,7 +273,20 @@ impl Recipes {
             ("minecraft:blast_furnace_input", Cooker::BlastFurnace),
             ("minecraft:campfire_input", Cooker::Campfire),
         ];
-        let mut packet = Writer::packet(clientbound::UPDATE_RECIPES).varint(sets.len() as i32);
+        let smithing: [(&str, Part); 3] = [
+            ("minecraft:smithing_template", |r| &r.template),
+            ("minecraft:smithing_base", |r| &r.base),
+            ("minecraft:smithing_addition", |r| &r.addition),
+        ];
+        let mut packet = Writer::packet(clientbound::UPDATE_RECIPES)
+            .varint((sets.len() + smithing.len()) as i32);
+        let write_set = |packet: Writer, name: &str, items: Vec<i32>| {
+            let mut packet = packet.string(name).varint(items.len() as i32);
+            for item in items {
+                packet = packet.varint(item);
+            }
+            packet
+        };
         for (name, cooker) in sets {
             let mut items: Vec<i32> = self
                 .cooking
@@ -204,10 +295,10 @@ impl Recipes {
                 .map(|&(_, item)| item)
                 .collect();
             items.sort_unstable();
-            packet = packet.string(name).varint(items.len() as i32);
-            for item in items {
-                packet = packet.varint(item);
-            }
+            packet = write_set(packet, name, items);
+        }
+        for (name, part) in smithing {
+            packet = write_set(packet, name, self.smithing_items(part));
         }
         packet = packet.varint(self.stonecutting.len() as i32);
         for (input, result) in &self.stonecutting {
@@ -487,5 +578,31 @@ mod tests {
             .stonecutting(stone)
             .iter()
             .any(|s| s.item == item("minecraft:stone_bricks")));
+    }
+
+    #[test]
+    fn smithing_tables_trim_armor_once() {
+        let r = Recipes::load();
+        let template = Stack::new(item("minecraft:bolt_armor_trim_smithing_template"), 1);
+        let gold = Stack::new(item("minecraft:gold_ingot"), 1);
+        let armor = Stack::new(item("minecraft:iron_chestplate"), 1);
+        let trimmed = r.smithing(template, armor, gold);
+        let trim = trimmed.trim.expect("a trim");
+        assert_eq!(trimmed.item, armor.item);
+        assert_eq!(trim.material_name(), "minecraft:gold");
+        assert_eq!(trim.pattern_name(), "minecraft:bolt");
+        assert!(
+            r.smithing(template, trimmed, gold).is_empty(),
+            "already trimmed so"
+        );
+        let lapis = Stack::new(item("minecraft:lapis_lazuli"), 1);
+        assert!(r.smithing(template, trimmed, lapis).trim.is_some());
+        // Swords take no trims.
+        let sword = Stack::new(item("minecraft:iron_sword"), 1);
+        assert!(r.smithing(template, sword, gold).is_empty());
+        // A trim survives saving.
+        assert_eq!(Stack::from_nbt(&trimmed.to_nbt()), trimmed);
+        assert_eq!(r.smithing_slot(template.item), Some(0));
+        assert_eq!(r.smithing_slot(gold.item), Some(2));
     }
 }

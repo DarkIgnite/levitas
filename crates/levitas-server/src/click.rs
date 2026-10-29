@@ -47,6 +47,9 @@ pub enum Layout {
     Grindstone,
     /// A stonecutter: the input, the result, then main inventory and hotbar.
     Stonecutter,
+    /// A smithing table: template, base, addition, result, then main inventory and
+    /// hotbar.
+    Smithing,
 }
 
 /// What taking a result costs or gives, settled by the world after the click.
@@ -68,6 +71,7 @@ impl Layout {
             Layout::Enchanting => 2,
             Layout::Anvil | Layout::Grindstone => 3,
             Layout::Stonecutter => 2,
+            Layout::Smithing => 4,
         }
     }
 
@@ -94,6 +98,7 @@ impl Layout {
             Layout::Inventory | Layout::Crafting => Some(0),
             Layout::Anvil | Layout::Grindstone => Some(2),
             Layout::Stonecutter => Some(1),
+            Layout::Smithing => Some(3),
             _ => None,
         }
     }
@@ -267,6 +272,9 @@ fn refresh_result(w: &mut Window) {
         Layout::Grindstone => {
             w.slots[2] = repair::grindstone(w.slots[0], w.slots[1]).map_or(Stack::EMPTY, |r| r.0);
         }
+        Layout::Smithing => {
+            w.slots[3] = w.recipes.smithing(w.slots[0], w.slots[1], w.slots[2]);
+        }
         Layout::Stonecutter => {
             let options = w.recipes.stonecutting(w.slots[0].item);
             w.slots[1] = match w.choice {
@@ -303,6 +311,17 @@ fn take_result(w: &mut Window) -> Stack {
             w.used = Some(Used::Levels(r.cost));
             refresh_result(w);
             return r.result;
+        }
+        Layout::Smithing => {
+            let result = w.slots[3];
+            if result.is_empty() {
+                return Stack::EMPTY;
+            }
+            for s in 0..3 {
+                w.slots[s] = w.slots[s].with_count(w.slots[s].count - 1);
+            }
+            refresh_result(w);
+            return result;
         }
         Layout::Stonecutter => {
             let result = w.slots[1];
@@ -516,6 +535,17 @@ fn quick_move(w: &mut Window, s: usize) {
                 move_into(w, stack, 0..n, false)
             } else {
                 move_into(w, stack, player, true)
+            }
+        }
+        Layout::Smithing => {
+            if !in_player {
+                move_into(w, stack, player, true)
+            } else if let Some(slot) = w.recipes.smithing_slot(stack.item) {
+                move_into(w, stack, slot..slot + 1, false)
+            } else if main.contains(&s) {
+                move_into(w, stack, hotbar, false)
+            } else {
+                move_into(w, stack, main, false)
             }
         }
         Layout::Stonecutter => {

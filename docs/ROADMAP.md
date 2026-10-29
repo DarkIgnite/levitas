@@ -77,7 +77,10 @@ Known gaps are listed under each phase instead of being hidden.
 - [x] Campfire (`world/campfire.rs`: four foods cook in 30 seconds, shown on top;
       burns players standing on it; shovels put it out) and stonecutter (recipes sent
       to clients in the recipe update packet)
-- [ ] Smithing table
+- [x] Smithing table. Smithing recipes come from the data (`recipes.rs`): netherite
+      upgrades keep the item's enchantments and wear; armor trims take their material
+      from the addition (`minecraft:trim` on the stack, saved and sent to clients).
+      Template, base and addition are each used up once.
 - [ ] Special crafting recipes: dyeing, fireworks, map and book cloning, banners,
       shields, repairing, decorated pots, transmute recipes
 - [ ] Signs (editing text), item frames, armor stands, flower pots, jukebox, note blocks

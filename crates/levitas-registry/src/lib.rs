@@ -184,6 +184,8 @@ pub struct ItemInfo {
     /// Armor points and armor toughness given while worn.
     pub armor: f32,
     pub toughness: f32,
+    /// The armor trim material this item gives at a smithing table.
+    pub trim_material: Option<&'static str>,
 }
 
 impl ItemInfo {

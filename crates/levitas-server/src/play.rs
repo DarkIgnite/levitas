@@ -184,6 +184,16 @@ fn decode(id: i32, packet: &[u8]) -> io::Result<Option<Event>> {
                     let data = r.bytes(length)?;
                     if kind == levitas_registry::component::DAMAGE {
                         stack.damage = Reader::new(data).varint()?.max(0);
+                    } else if kind == levitas_registry::component::TRIM {
+                        let mut t = Reader::new(data);
+                        let (material, pattern) = (t.varint()?, t.varint()?);
+                        // Only trims that name registry entries are kept.
+                        if material > 0 && pattern > 0 {
+                            stack.trim = Some(crate::inventory::Trim {
+                                material: (material - 1) as u16,
+                                pattern: (pattern - 1) as u16,
+                            });
+                        }
                     } else if kind == levitas_registry::component::REPAIR_COST {
                         stack.repair_cost = Reader::new(data).varint()?.max(0);
                     } else if kind == levitas_registry::component::ENCHANTMENTS

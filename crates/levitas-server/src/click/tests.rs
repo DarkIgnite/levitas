@@ -309,3 +309,34 @@ fn stonecutters_make_the_picked_recipe_until_the_input_runs_out() {
         .sum();
     assert_eq!(slabs, 6);
 }
+
+#[test]
+fn smithing_tables_upgrade_gear_using_up_one_of_each_input() {
+    let mut t = Test::new(Layout::Smithing);
+    let mut sword = stack("diamond_sword", 1);
+    sword.damage = 100;
+    sword.enchants.set(
+        crate::enchanting::enchantment_id("minecraft:sharpness").unwrap(),
+        4,
+    );
+    t.slots[0] = stack("netherite_upgrade_smithing_template", 2);
+    t.slots[1] = sword;
+    t.slots[2] = stack("netherite_ingot", 3);
+    t.click(OUTSIDE, 0, PICKUP);
+    let result = t.slots[3];
+    assert_eq!(result.item, item("netherite_sword"));
+    assert_eq!((result.damage, result.enchants), (100, sword.enchants));
+    t.click(3, 0, QUICK_MOVE);
+    assert_eq!(t.slots[0].count, 1);
+    assert!(t.slots[1].is_empty());
+    assert_eq!(t.slots[2].count, 2);
+    assert!(t.slots[3].is_empty(), "nothing left to upgrade");
+    assert!(t.slots[4..]
+        .iter()
+        .any(|s| s.item == item("netherite_sword")));
+    // Shift-clicking puts each input in its own slot.
+    let at = t.slots.len() - 1;
+    t.slots[at] = stack("diamond_chestplate", 1);
+    t.click(at as i16, 0, QUICK_MOVE);
+    assert_eq!(t.slots[1].item, item("diamond_chestplate"));
+}
