@@ -3,13 +3,41 @@
 The plan: make every vanilla survival feature work, then the plugin API for
 survival-economy servers. Real terrain came early (Phase 12, through Pumpkin's generator)
 so the owner can play a normal world while the remaining phases land. Each phase ends with
-something that can be tested in a real 1.21.8 client.
+something that can be tested in a real 26.3 client.
+
+The target version is **Minecraft: Java Edition 26.3** (protocol 777). It was 1.21.8
+(protocol 772) until 2026-10-29; everything ticked off below was built and checked against
+1.21.8, and the migration milestone right below brings it to 26.3.
+
+## Migration to 26.3
+
+The current milestone: nothing else lands before it. Until it is done the server speaks
+1.21.8.
+
+- [ ] Data: `tools/datagen.py` downloads the 26.3 server.jar and generates
+      `generated/26.3`; `levitas-registry` builds from it; DataVersion taken from the
+      jar's `version.json`
+- [ ] Protocol 777: handshake, status, login, configuration and play packets checked
+      against the 26.3 protocol pages (packet IDs come from the data; field layouts by
+      hand)
+- [ ] Entity data: every serializer ID and field index re-checked against the 26.3
+      entity metadata page, with byte-level tests
+- [ ] Item components, chunk and light format, registries sent in configuration
+- [ ] Saved data: `level.dat` (with `version_history`), chunks, entities and player data
+      written as 26.3 writes them; 1.21.8 worlds (the owner's included) load and upgrade
+- [ ] Game rules, loot functions (`condition`), recipes and advancements as 26.3 has them
+- [ ] Terrain: Pumpkin's 26.x blocks and biomes used as they are; drop the 1.21.8
+      fallbacks (`older_name`) that are no longer needed
+- [ ] New 26.3 blocks behave (poplar wood set, red shrub, shelf mushroom, wool and
+      concrete stairs and slabs, straw beds, cushions)
+- [ ] Every end-to-end test passes against the new protocol; tried in a real 26.3
+      client
 
 ## Definition of done
 
 A feature is only ticked off when:
 
-- it behaves like vanilla 1.21.8, checked against public documentation (minecraft.wiki),
+- it behaves like vanilla 26.3, checked against public documentation (minecraft.wiki),
   the data generator output, and by observing a real server, never by translating
   Mojang, Paper or Leaf code (see [CLEAN_ROOM.md](CLEAN_ROOM.md));
 - it has automated tests: unit tests for the rules, and an end-to-end test that drives
@@ -385,7 +413,7 @@ Known gaps are listed under each phase instead of being hidden.
       no command framework or console input yet.
 - [ ] Vanilla commands: /tp, /time, /weather, /gamerule, /give with components,
       /effect, /enchant, /summon, /setblock, /fill, /kill, /clear, /spawnpoint, ...
-- [x] Game rules and difficulty. Every 1.21.8 game rule is kept and saved in
+- [x] Game rules and difficulty. Every 1.21.8 game rule (26.3's to follow in the migration) is kept and saved in
       `level.dat` as vanilla saves it (`rules.rs`), set with `/gamerule` in game or
       at the console. Enforced: keepInventory, doDaylightCycle, doWeatherCycle,
       doMobSpawning, doMobLoot, doTileDrops, doFireTick, mobGriefing (creeper and
@@ -422,7 +450,8 @@ Known gaps are listed under each phase instead of being hidden.
       other features crossing chunk borders come out whole. New worlds use it by default;
       `LEVITAS_WORLD_TYPE=flat` makes the flat test world, `LEVITAS_SEED` picks the seed.
       Pumpkin targets a newer Minecraft version, so its newer blocks and biomes become
-      their closest 1.21.8 relatives (poplar wood as birch, sulfur as sandstone, ...).
+      their closest 1.21.8 relatives (poplar wood as birch, sulfur as sandstone, ...)
+      until the migration to 26.3, which has most of them.
 - [x] Features: trees, ores, flowers, lakes, ...
 - [x] Structures: villages, strongholds, mineshafts, temples, monuments, ...
       Pumpkin places them along with their block entities, which come out with each

@@ -1,7 +1,9 @@
 # Levitas: notes for AI agents
 
 Start with [docs/HANDOFF.md](docs/HANDOFF.md): the full context, what works, what to do
-next and the pitfalls. The project rules are in [CLAUDE.md](CLAUDE.md) and apply to every
+next and the pitfalls. The target version is Minecraft: Java Edition **26.3** (protocol
+777); the code is being migrated from 1.21.8 (see the migration milestone at the top of
+[docs/ROADMAP.md](docs/ROADMAP.md)). The project rules are in [CLAUDE.md](CLAUDE.md) and apply to every
 agent, not only Claude:
 
 - Reply to the owner (DarkIgnite) in casual Indonesian; code, comments, commits and docs

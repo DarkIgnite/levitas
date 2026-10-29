@@ -7,10 +7,14 @@ together with [ROADMAP.md](ROADMAP.md), [ARCHITECTURE.md](ARCHITECTURE.md),
 
 ## 1. What Levitas is and who it is for
 
-- A from-scratch Rust server for **Minecraft: Java Edition 1.21.8** (protocol **772**,
-  DataVersion **4440**), license **GPL-3.0-only**, repo
-  <https://github.com/DarkIgnite/levitas> (public).
-- Owner: **DarkIgnite**. They run a Leaf 1.21.8 survival-economy server today and want
+- A from-scratch Rust server for **Minecraft: Java Edition 26.3** (protocol **777**),
+  license **GPL-3.0-only**, repo <https://github.com/DarkIgnite/levitas> (public).
+- **Version change (2026-10-29):** the owner moved the target from 1.21.8 (protocol 772,
+  DataVersion 4440) to **26.3**. The code still speaks 1.21.8 until the
+  [migration milestone](ROADMAP.md#migration-to-263) is done, and that migration comes
+  first. 26.3's DataVersion is whatever its server.jar's `version.json` says; read it
+  from there when regenerating the data rather than from memory.
+- Owner: **DarkIgnite**. They run a Leaf survival-economy server today and want
   Levitas to be much lighter than Leaf while staying vanilla-compatible, then grow a
   plugin/economy layer on top.
 - **North star:** the owner wants to *play* on Levitas like a normal, working vanilla
@@ -26,6 +30,35 @@ together with [ROADMAP.md](ROADMAP.md), [ARCHITECTURE.md](ARCHITECTURE.md),
   "grass ngambang"). Find the root cause, add a test that fails without the fix, fix,
   redeploy.
 - Tick items off in ROADMAP.md as they land; list known gaps there rather than hiding them.
+
+## Migrating to 26.3
+
+The next piece of work, before any feature. The checklist is in
+[ROADMAP.md](ROADMAP.md#migration-to-263). What to know going in:
+
+- **Data first.** Point `tools/datagen.py` at 26.3, regenerate `generated/26.3`, and point
+  `levitas-registry`'s `build.rs` there. Packet IDs, block states, items, registries,
+  tags, sounds, loot tables and recipes all come from that output, so most tables follow
+  on their own; the build errors show what moved or was renamed.
+- **The protocol changed between 772 and 777.** Check every packet Levitas writes or
+  reads against the current minecraft.wiki page `Java Edition protocol/Packets` (it
+  documents 777) and keep the revision IDs you used in commit messages. The 1.21.8
+  revisions used so far: packets `oldid=3150432`, entity metadata `oldid=3076794`.
+- **Entity data moved.** Serializer IDs and field indices differ between versions (the
+  villager data disconnect on 1.21.8 came from one off-by-one). The current
+  `Java Edition protocol/Entity metadata` page documents 26.3; re-check every
+  `SET_ENTITY_DATA` writer (mobs, villagers, golems, boats, minecarts, item frames,
+  paintings, armor stands, potions, shields, names) against it, and keep the
+  byte-for-byte tests in step.
+- **Game rules and saved data changed.** Game rules, `level.dat` (26.3 adds a
+  `version_history` list), item components, loot functions (`conditions` became
+  `condition`) and entity NBT need checking against 26.3; worlds saved by Levitas on
+  1.21.8 must still load and be upgraded on save.
+- **New content** (poplar wood, dappled forest, red shrub, shelf mushroom, wool and
+  concrete stairs and slabs, straw beds, cushions, the abandoned camp) arrives with the
+  data; Pumpkin's generator already places some of it, so `older_name` fallbacks can go.
+- The owner's world in `C:\dev\levitas-server` was made on 1.21.8. Back it up before
+  the first 26.3 deploy.
 
 ## 2. Hard rules
 
@@ -60,7 +93,7 @@ together with [ROADMAP.md](ROADMAP.md), [ARCHITECTURE.md](ARCHITECTURE.md),
 ## 4. Build, run, deploy
 
 ```sh
-python tools/datagen.py            # once: downloads server.jar 1.21.8, runs the data generator into generated/1.21.8
+python tools/datagen.py            # once: downloads the server.jar (VERSION in the script; 1.21.8 until the migration), runs its data generator into generated/<version>
 cargo build --release
 cargo test --workspace             # ~100 tests, about a minute after the first build
 cargo clippy --all-targets -- -D warnings
@@ -89,9 +122,9 @@ Workspace crates in `crates/`:
 |---|---|
 | `levitas-protocol` | VarInt, `Reader`/`Writer` packet codec, `BlockPos`, angles |
 | `levitas-nbt` | NBT (file, network, gzip), modified UTF-8 |
-| `levitas-registry` | `build.rs` turns `generated/1.21.8` into tables: packet IDs, blocks/states (`block::*` consts, `BlockInfo`, properties, hardness, light emission/filter, requires_tool), items (`ItemInfo`, tools, food, durability), tags, synced registries, collision shapes, sound events, loot tables JSON, recipes JSON. Hardness/shapes/light come from PrismarineJS minecraft-data (MIT, pinned commit) because the data generator lacks them. |
+| `levitas-registry` | `build.rs` turns `generated/<version>` (1.21.8 until the migration to 26.3) into tables: packet IDs, blocks/states (`block::*` consts, `BlockInfo`, properties, hardness, light emission/filter, requires_tool), items (`ItemInfo`, tools, food, durability), tags, synced registries, collision shapes, sound events, loot tables JSON, recipes JSON. Hardness/shapes/light come from PrismarineJS minecraft-data (MIT, pinned commit) because the data generator lacks them. |
 | `levitas-world` | Paletted containers, `Chunk`/`Section` (y -64..320, 24 sections), `light.rs` (`ChunkLight`, 26 light sections incl. one below/above), `lighting.rs` (`LightEngine`: incremental BFS relight), `anvil.rs` (vanilla chunk NBT incl. light, block_ticks, fluid_ticks), `region.rs` (.mca files) |
-| `levitas-pumpkin` | `PumpkinTerrain`: drives Pumpkin's generation steps over 8x8-chunk areas and translates results to 1.21.8 states/biomes/light. Contains the Pumpkin→1.21.8 block fallback table (`older_name`) and plant placement rules (`Portals::can_place_at`, adapted from Pumpkin with attribution). |
+| `levitas-pumpkin` | `PumpkinTerrain`: drives Pumpkin's generation steps over 8x8-chunk areas and translates results to the target version's states/biomes/light. Contains the Pumpkin→1.21.8 block fallback table (`older_name`), which the move to 26.3 should mostly make unnecessary (Pumpkin itself targets 26.x), and plant placement rules (`Portals::can_place_at`, adapted from Pumpkin with attribution). |
 | `levitas-server` | The binary (`levitas`). See below. |
 
 `levitas-server/src`:

@@ -8,7 +8,7 @@
 <p align="center"><b>A lightweight, extensible survival game server, written in Rust.</b></p>
 
 <p align="center">
-  <img alt="Java Edition 1.21.8" src="https://img.shields.io/badge/Java%20Edition-1.21.8-f74c00">
+  <img alt="Java Edition 26.3" src="https://img.shields.io/badge/Java%20Edition-26.3-f74c00">
   <img alt="Written in Rust" src="https://img.shields.io/badge/written%20in-Rust-b7410e?logo=rust">
   <img alt="License: GPL-3.0-only" src="https://img.shields.io/badge/license-GPL--3.0--only-blue">
   <img alt="Progress: about 59%" src="https://img.shields.io/badge/progress-~66%25-orange">
@@ -18,7 +18,7 @@
 
 *Latin: "lightness".*
 
-Levitas is a lightweight game server for Minecraft: Java Edition **1.21.8** (protocol 772),
+Levitas is a lightweight game server for Minecraft: Java Edition **26.3** (protocol 777),
 written from scratch in Rust. The goal is a server that plays like vanilla survival and
 runs on a fraction of the memory and CPU a JVM-based server (Paper, Purpur, Leaf, ...)
 needs, with a plugin API for survival-economy servers on top.
@@ -27,6 +27,9 @@ needs, with a plugin API for survival-economy servers on top.
 > farm, fight monsters, enchant, brew, build redstone, trade with villagers, and go to
 > the Nether and the End to fight the dragon. Raids, minecarts and plugins are still to
 > come. Overall progress: **about 66%** of the [roadmap](docs/ROADMAP.md).
+>
+> **Moving to 26.3.** The target is now Minecraft 26.3. Until the migration is done, the
+> server still speaks 1.21.8 and needs a 1.21.8 client.
 
 ## Progress
 
@@ -82,8 +85,10 @@ full list.
    separate server folder (`../levitas-server`) with a `start.bat`.
 2. Start `levitas` (or `start.bat`). It listens on `127.0.0.1:25565`; pass another
    address as the first argument to change it.
-3. Join with a Minecraft **1.21.8** client. Online mode is not implemented yet, so only
-   run it where you trust everyone who can connect.
+3. Join with a Minecraft client of the version the server speaks. The target is
+   **26.3**; until the [migration](docs/ROADMAP.md#migration-to-263) is done, builds still
+   speak **1.21.8**, so join with a 1.21.8 client for now. Set `online-mode=true` in
+   `server.properties` before opening the server to others.
 4. Stop the server with **Ctrl-C**: it saves the world before exiting (it also saves
    every five minutes).
 
@@ -103,7 +108,8 @@ Requires Rust 1.96 or newer (install via [rustup](https://rustup.rs)), plus Pyth
 and Java 21+ for the one-time data generation step.
 
 ```sh
-# Downloads the official 1.21.8 server.jar and runs its data generator into generated/
+# Downloads the official server.jar and runs its data generator into generated/
+# (1.21.8 until the migration to 26.3 lands)
 python tools/datagen.py
 cargo build --release
 cargo run --release -p levitas-server
@@ -121,7 +127,7 @@ real server through the network protocol like a client would.
 | `levitas-nbt` | NBT, the format of saves and some packets |
 | `levitas-registry` | Blocks, items, packets, tags, loot tables, recipes, biomes: generated at build time from the official data generator's output |
 | `levitas-world` | Chunks, paletted storage, light and its engine, Anvil region files |
-| `levitas-pumpkin` | Terrain generation through Pumpkin's generator, translated to 1.21.8 |
+| `levitas-pumpkin` | Terrain generation through Pumpkin's generator, translated to the target version |
 | `levitas-server` | The server: connections, and the world task that owns all game state |
 
 One task owns the whole world and ticks it 20 times a second; each connection is its

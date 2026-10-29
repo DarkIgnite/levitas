@@ -12,7 +12,8 @@ disagrees with the code, the code wins and this file should be fixed.
    world. Ownership is by region; cross-region effects go through message queues.
 3. **Allocate rarely.** Packet encoding writes into reused buffers; chunks use paletted
    storage; hot paths avoid per-tick allocation.
-4. **Measure everything.** Benchmarks run against a Leaf 1.21.8 baseline on the same machine.
+4. **Measure everything.** Benchmarks run against a Leaf baseline of the same Minecraft
+   version (26.3) on the same machine.
 
 ## Crate layout
 

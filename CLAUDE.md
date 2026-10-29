@@ -1,9 +1,15 @@
 # Levitas: notes for Claude
 
-Levitas is a from-scratch Rust server for Minecraft: Java Edition 1.21.8 (protocol 772),
-GPL-3.0-only. The owner (DarkIgnite) runs a Leaf 1.21.8 survival-economy server today and
-wants Levitas to be much lighter while staying vanilla-compatible. They speak Indonesian;
-reply in casual Indonesian. Code, comments, commits and docs are in English.
+Levitas is a from-scratch Rust server for Minecraft: Java Edition **26.3** (protocol 777),
+GPL-3.0-only. The owner (DarkIgnite) runs a Leaf survival-economy server today and wants
+Levitas to be much lighter while staying vanilla-compatible. They speak Indonesian; reply
+in casual Indonesian. Code, comments, commits and docs are in English.
+
+**Target version: 26.3.** On 2026-10-29 the owner moved the target from 1.21.8 to 26.3.
+The code still speaks 1.21.8 (protocol 772) until the migration milestone at the top of
+docs/ROADMAP.md is done; that migration comes before any new feature. Check packet and
+entity data layouts against the minecraft.wiki protocol pages for 26.3 (the current
+revisions), not 1.21.8 ones.
 
 ## Before writing code
 
