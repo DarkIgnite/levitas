@@ -6,11 +6,9 @@ use std::time::Duration;
 
 use levitas_protocol::{Reader, Writer};
 use levitas_registry::packet::play::{clientbound, serverbound};
-use tokio::io::BufReader;
-use tokio::net::tcp::OwnedReadHalf;
 use tokio::sync::mpsc;
 
-use crate::connection::{invalid, read_packet, Conn, Outgoing, Profile};
+use crate::connection::{invalid, read_packet, ClientReader, Conn, Outgoing, Profile};
 use crate::inventory::Stack;
 use crate::world::{self, Event, Frame, OUTGOING_CAPACITY};
 
@@ -82,7 +80,7 @@ async fn write_loop(mut out: Outgoing, mut frames: mpsc::Receiver<Frame>) -> io:
 }
 
 async fn read_loop(
-    reader: &mut BufReader<OwnedReadHalf>,
+    reader: &mut ClientReader,
     id: i32,
     route: &tokio::sync::watch::Receiver<mpsc::Sender<Event>>,
     compressed: bool,

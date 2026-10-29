@@ -1651,10 +1651,8 @@ fn player_info(players: &[&Player]) -> Writer {
         .u8(PLAYER_INFO_ACTIONS)
         .varint(players.len() as i32);
     for p in players {
-        packet = packet
-            .uuid(p.profile.uuid)
-            .string(&p.profile.name)
-            .varint(0) // add player: no profile properties
+        packet = packet.uuid(p.profile.uuid).string(&p.profile.name);
+        packet = crate::connection::write_properties(packet, &p.profile.properties)
             .varint(i32::from(p.mode)) // update game mode
             .bool(true) // update listed
             .varint(0); // update latency

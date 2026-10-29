@@ -328,9 +328,12 @@ Known gaps are listed under each phase instead of being hidden.
 - [ ] Game rules and difficulty
 - [ ] Scoreboards, teams, boss bars, titles
 - [ ] Item components on the network (enchantments, names, damage, ...)
-- [ ] Online mode (encryption and Mojang session check), compression. Compression
-      works (zlib above `network-compression-threshold`, 256 by default); online mode
-      does not yet, so players are trusted by name.
+- [x] Online mode (encryption and Mojang session check), compression. Compression
+      works (zlib above `network-compression-threshold`, 256 by default). With
+      `online-mode=true` (`auth.rs`) the server sends its RSA key and a token, takes
+      the client's shared secret, encrypts the connection with AES-128-CFB8, and asks
+      Mojang's session server for the player's real UUID and skin, which other
+      players then see.
 - [x] Server configuration file, whitelist, bans, operators. `server.properties`
       (`config.rs`, vanilla keys, written with defaults if missing), `ops.json`,
       `whitelist.json` and `banned-players.json` (`access.rs`, vanilla formats).

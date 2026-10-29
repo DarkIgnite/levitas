@@ -1866,6 +1866,7 @@ mod path_tests {
         let profile = crate::connection::Profile {
             name: "Alice".to_owned(),
             uuid: 1,
+            properties: Vec::new(),
         };
         let (out, _frames) = mpsc::channel(1000);
         world
@@ -1922,6 +1923,7 @@ mod path_tests {
         let profile = crate::connection::Profile {
             name: "Alice".to_owned(),
             uuid: 1,
+            properties: Vec::new(),
         };
         let (out, _frames) = mpsc::channel(1000);
         let mut alice = Player::new(profile, out, [0.5, -60.0, 0.5]);

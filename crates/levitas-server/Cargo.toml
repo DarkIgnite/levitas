@@ -17,7 +17,13 @@ levitas-protocol.workspace = true
 levitas-pumpkin.workspace = true
 levitas-registry.workspace = true
 levitas-world.workspace = true
+aes = "0.8.4"
+cfb8 = "0.8.1"
 flate2 = "1.1.10"
+reqwest = { version = "0.13.5", default-features = false, features = ["rustls-no-provider"] }
+rsa = "0.9.8"
+rustls = { version = "0.23.46", default-features = false, features = ["ring", "std"] }
+sha1 = "0.10.6"
 serde_json = "1.0.154"
 tokio = { version = "1.53.3", features = ["rt-multi-thread", "macros", "net", "io-util", "time", "sync", "signal"] }
 tracing = "0.1.44"

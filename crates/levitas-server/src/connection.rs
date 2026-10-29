@@ -18,6 +18,7 @@ use tokio::net::TcpStream;
 use tokio::sync::mpsc;
 use tracing::info;
 
+use crate::auth::{self, encrypt, Decrypting, Encryptor, Property};
 use crate::play;
 use crate::world::Event;
 
@@ -26,9 +27,12 @@ const INTENT_STATUS: i32 = 1;
 const INTENT_LOGIN: i32 = 2;
 const INTENT_TRANSFER: i32 = 3;
 
-/// A client connection, compressed once login sets that up (no encryption yet).
+/// What packets are read from: decrypted once online mode sets that up.
+pub type ClientReader = Decrypting<BufReader<OwnedReadHalf>>;
+
+/// A client connection, encrypted and compressed once login sets that up.
 pub struct Conn {
-    pub reader: BufReader<OwnedReadHalf>,
+    pub reader: ClientReader,
     pub out: Outgoing,
     /// Whether packets from the client come compressed.
     pub compressed: bool,
@@ -38,10 +42,11 @@ impl Conn {
     fn new(stream: TcpStream) -> Self {
         let (read, write) = stream.into_split();
         Self {
-            reader: BufReader::new(read),
+            reader: Decrypting::new(BufReader::new(read)),
             out: Outgoing {
                 writer: BufWriter::new(write),
                 compression: None,
+                cipher: None,
             },
             compressed: false,
         }
@@ -65,6 +70,8 @@ pub struct Outgoing {
     writer: BufWriter<OwnedWriteHalf>,
     /// Packets at least this long go out compressed, once compression is on.
     compression: Option<usize>,
+    /// Encrypts everything sent, once online mode sets it up.
+    cipher: Option<Encryptor>,
 }
 
 impl Outgoing {
@@ -75,14 +82,14 @@ impl Outgoing {
 
     /// Queues an already length-prefixed packet, compressing it if that is on.
     pub async fn write_frame(&mut self, frame: &[u8]) -> io::Result<()> {
-        match self.compression {
-            Some(threshold) => {
-                self.writer
-                    .write_all(&compress_frame(frame, threshold)?)
-                    .await
-            }
-            None => self.writer.write_all(frame).await,
+        let mut bytes = match self.compression {
+            Some(threshold) => compress_frame(frame, threshold)?,
+            None => frame.to_vec(),
+        };
+        if let Some(cipher) = self.cipher.as_mut() {
+            encrypt(cipher, &mut bytes);
         }
+        self.writer.write_all(&bytes).await
     }
 
     pub async fn flush(&mut self) -> io::Result<()> {
@@ -99,6 +106,8 @@ impl Outgoing {
 pub struct Profile {
     pub name: String,
     pub uuid: u128,
+    /// The skin, from Mojang in online mode.
+    pub properties: Vec<Property>,
 }
 
 pub async fn handle(stream: TcpStream, world: mpsc::Sender<Event>) -> io::Result<()> {
@@ -175,6 +184,25 @@ async fn login(conn: &mut Conn, protocol: i32) -> io::Result<Option<Profile>> {
         return Ok(None);
     }
 
+    // Online mode: the client proves who it is through Mojang, and from here on all
+    // goes encrypted. Offline, the name and UUID it sent are trusted.
+    let (name, uuid, properties) = if crate::config::get().online_mode {
+        match authenticate(conn, &name).await? {
+            Some(profile) => profile,
+            None => {
+                let message = json!({ "text": "Failed to verify username!" }).to_string();
+                conn.send(
+                    Writer::packet(login_ids::clientbound::LOGIN_DISCONNECT).string(&message),
+                )
+                .await?;
+                info!(name, "failed to verify with Mojang");
+                return Ok(None);
+            }
+        }
+    } else {
+        (name, uuid, Vec::new())
+    };
+
     // Banned, not on the whitelist, or no room: turned away.
     let full = crate::world::online() >= crate::config::get().max_players as i32
         && !crate::access::is_op(&name, uuid);
@@ -197,14 +225,11 @@ async fn login(conn: &mut Conn, protocol: i32) -> io::Result<Option<Profile>> {
         conn.compressed = true;
     }
 
-    // Offline mode: trust the name and UUID the client sent.
-    conn.send(
-        Writer::packet(login_ids::clientbound::LOGIN_FINISHED)
-            .uuid(uuid)
-            .string(&name)
-            .varint(0), // no profile properties (skins come with online mode)
-    )
-    .await?;
+    let mut packet = Writer::packet(login_ids::clientbound::LOGIN_FINISHED)
+        .uuid(uuid)
+        .string(&name);
+    packet = write_properties(packet, &properties);
+    conn.send(packet).await?;
     let packet = conn.read().await?;
     expect_id(
         &mut Reader::new(&packet),
@@ -212,7 +237,11 @@ async fn login(conn: &mut Conn, protocol: i32) -> io::Result<Option<Profile>> {
         "login acknowledged",
     )?;
     info!(name, "logged in");
-    Ok(Some(Profile { name, uuid }))
+    Ok(Some(Profile {
+        name,
+        uuid,
+        properties,
+    }))
 }
 
 /// Sends registries and tags, then waits for the client to finish configuration.
@@ -264,6 +293,56 @@ async fn configure(conn: &mut Conn) -> io::Result<()> {
     conn.send(Writer::packet(clientbound::FINISH_CONFIGURATION))
         .await?;
     wait_for(conn, serverbound::FINISH_CONFIGURATION).await
+}
+
+/// Online mode's handshake: the encryption request and response, then the session
+/// server's word. The player's real UUID, name and skin if Mojang knows them.
+async fn authenticate(
+    conn: &mut Conn,
+    name: &str,
+) -> io::Result<Option<(String, u128, Vec<Property>)>> {
+    let keys = auth::keys();
+    let token = auth::verify_token();
+    conn.send(
+        Writer::packet(login_ids::clientbound::HELLO)
+            .string("") // server ID, empty since 1.7
+            .varint(keys.public_der.len() as i32)
+            .bytes(&keys.public_der)
+            .varint(token.len() as i32)
+            .bytes(&token)
+            .bool(true), // the client should authenticate with Mojang
+    )
+    .await?;
+    let packet = conn.read().await?;
+    let mut r = Reader::new(&packet);
+    expect_id(&mut r, login_ids::serverbound::KEY, "encryption response")?;
+    let secret_len = r.varint()?;
+    let secret = keys.decrypt(r.bytes(usize::try_from(secret_len).unwrap_or(0))?)?;
+    let token_len = r.varint()?;
+    let echoed = keys.decrypt(r.bytes(usize::try_from(token_len).unwrap_or(0))?)?;
+    if echoed != token {
+        return Err(invalid("the verify token does not match".to_owned()));
+    }
+    let (encryptor, decryptor) = auth::ciphers(&secret)?;
+    conn.out.cipher = Some(encryptor);
+    conn.reader.cipher = Some(decryptor);
+    let hash = auth::server_hash(&secret, &keys.public_der);
+    Ok(auth::has_joined(name, &hash)
+        .await?
+        .map(|(uuid, name, properties)| (name, uuid, properties)))
+}
+
+/// A profile's properties as the login and player list packets carry them.
+pub fn write_properties(mut packet: Writer, properties: &[Property]) -> Writer {
+    packet = packet.varint(properties.len() as i32);
+    for p in properties {
+        packet = packet.string(&p.name).string(&p.value);
+        packet = match &p.signature {
+            Some(signature) => packet.bool(true).string(signature),
+            None => packet.bool(false),
+        };
+    }
+    packet
 }
 
 /// A length-prefixed packet in the compressed format: the uncompressed length (0 if

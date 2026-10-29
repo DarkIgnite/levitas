@@ -1,4 +1,5 @@
 mod access;
+mod auth;
 mod blocks;
 mod click;
 mod config;

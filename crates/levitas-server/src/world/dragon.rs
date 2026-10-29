@@ -740,6 +740,7 @@ mod tests {
         let profile = Profile {
             name: "Alice".to_owned(),
             uuid: 1,
+            properties: Vec::new(),
         };
         end.players
             .insert(player, Player::new(profile, out, [100.5, 49.0, 0.5]));

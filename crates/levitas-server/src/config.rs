@@ -30,7 +30,8 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Self {
         Config {
-            // Localhost until online mode is in; set it to 0.0.0.0 to open the server.
+            // Localhost by default; set it to 0.0.0.0 (with online-mode=true) to open
+            // the server to others.
             server_ip: "127.0.0.1".to_owned(),
             server_port: 25565,
             motd: "A Levitas Server".to_owned(),
@@ -109,9 +110,6 @@ pub fn load(dir: &Path) -> &'static Config {
         } else {
             info!("wrote {} with default settings", path.display());
         }
-    }
-    if config.online_mode {
-        warn!("online-mode is not supported yet; players are not checked with Mojang");
     }
     CONFIG.get_or_init(|| config)
 }

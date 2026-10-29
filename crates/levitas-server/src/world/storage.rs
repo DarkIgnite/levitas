@@ -619,6 +619,7 @@ mod tests {
         let profile = Profile {
             name: "Alice".into(),
             uuid: 1,
+            properties: Vec::new(),
         };
         let mut p = Player::new(profile, out, [0.5, -60.0, 0.5]);
         p.pos = [10.5, -40.0, -3.25];
@@ -639,6 +640,7 @@ mod tests {
         let profile = Profile {
             name: "Alice".into(),
             uuid: 1,
+            properties: Vec::new(),
         };
         let mut q = Player::new(profile, out, [0.5, -60.0, 0.5]);
         q.load_nbt(&nbt);

@@ -132,6 +132,7 @@ mod tests {
         let profile = Profile {
             name: "Alice".to_owned(),
             uuid: 1,
+            properties: Vec::new(),
         };
         nether
             .players
