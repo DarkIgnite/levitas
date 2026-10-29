@@ -172,7 +172,13 @@ Known gaps are listed under each phase instead of being hidden.
       blocks hunts the attacker for 20 to 39 seconds; golden swords) and magma cubes
       (hop towards players, three sizes, split when they die, no fall damage); both
       ignore fire and lava and spawn by the Nether biomes' lists regardless of light.
-      Missing: baby/husk/drowned/stray variants, ghasts, blazes, piglins, and the rest.
+      Ghasts and blazes fly (`world/fireballs.rs` for their fireballs): ghasts charge
+      for a second when they see a player and spit large fireballs (power 1 explosions
+      with fire) that players can hit back; blazes glow, then throw three small
+      fireballs that set things alight, and hit in melee up close. Ghasts spawn in the
+      Nether one time in twenty; blazes only by `/summon` until fortresses spawn them.
+      Missing: baby/husk/drowned/stray variants, piglins, hoglins, striders, wither
+      skeletons, endermen, and the rest.
 - [ ] Mob drops, experience, equipment, babies, riding. Drops come from the vanilla
       entity loot tables (sheep drop their colour's wool); no experience yet.
 - [ ] Breeding, taming, leashes, name tags. Breeding works (`world/breeding.rs`): food

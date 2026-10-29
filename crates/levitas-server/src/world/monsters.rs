@@ -138,8 +138,8 @@ impl World {
         if mob.kind == MobKind::Spider {
             // Spiders climb over whatever is in the way.
             mob.target = Some(([target[0], target[2]], 20));
-        } else if mob.kind == MobKind::MagmaCube {
-            // Magma cubes hop towards their prey instead of walking.
+        } else if mob.kind == MobKind::MagmaCube || mob.kind.flies() {
+            // Magma cubes hop towards their prey, ghasts and blazes fly.
         } else {
             let goal = BlockPos::new(
                 target[0].floor() as i32,
@@ -174,6 +174,14 @@ impl World {
             self.shoot_at(id, mob, target, distance);
             return false;
         }
+        if mob.kind == MobKind::Ghast {
+            self.ghast_attack(id, mob, target);
+            return false;
+        }
+        if mob.kind == MobKind::Blaze && distance > 2.0 {
+            self.blaze_attack(id, mob, target, distance);
+            return false;
+        }
 
         let (width, _) = mob.size();
         let reach = ((width * 2.0).powi(2) + 0.6).sqrt();
@@ -190,6 +198,76 @@ impl World {
             self.push_player(pid, [-yaw.sin() * KNOCKBACK, 0.36, yaw.cos() * KNOCKBACK]);
         }
         false
+    }
+
+    /// A ghast that sees its target charges for a second, crying out halfway, then
+    /// spits a fireball, and waits two seconds before charging again.
+    fn ghast_attack(&mut self, id: i32, mob: &mut Mob, target: [f64; 3]) {
+        let (_, height) = mob.size();
+        let eye = [mob.pos[0], mob.pos[1] + height / 2.0, mob.pos[2]];
+        let chest = [target[0], target[1] + 0.9, target[2]];
+        mob.yaw = yaw_towards(mob.pos, target);
+        let sees = self.line_of_sight(eye, [target[0], target[1] + 1.62, target[2]]);
+        if !sees {
+            if mob.charge > 0 {
+                mob.charge -= 1;
+            }
+        } else {
+            mob.charge += 1;
+        }
+        if mob.charge == 10 {
+            self.play_sound_at("minecraft:entity.ghast.warn", mob.pos, 10.0, 1.0, None);
+            self.send_to_viewers(mob, ghast_charging(id, true));
+        }
+        if mob.charge >= 20 {
+            let dir = [0, 1, 2].map(|i| chest[i] - eye[i]);
+            let horizontal = dir[0].hypot(dir[2]).max(1e-9);
+            // From the front of the ghast's face.
+            let from = [
+                eye[0] + dir[0] / horizontal * 4.0 * 0.5,
+                eye[1],
+                eye[2] + dir[2] / horizontal * 4.0 * 0.5,
+            ];
+            self.shoot_fireball(id, "Ghast", from, dir, true);
+            self.play_sound_at("minecraft:entity.ghast.shoot", mob.pos, 10.0, 1.0, None);
+            self.send_to_viewers(mob, ghast_charging(id, false));
+            mob.charge = -40;
+        }
+    }
+
+    /// A blaze in range glows for three seconds, then throws three small fireballs a
+    /// third of a second apart, and rests for five seconds.
+    fn blaze_attack(&mut self, id: i32, mob: &mut Mob, target: [f64; 3], distance: f64) {
+        let eye = [mob.pos[0], mob.pos[1] + 1.5, mob.pos[2]];
+        let sees = self.line_of_sight(eye, [target[0], target[1] + 1.62, target[2]]);
+        mob.charge -= 1;
+        if mob.charge > 0 || !sees {
+            return;
+        }
+        match mob.volley {
+            0 => {
+                mob.volley = 3;
+                mob.charge = 60;
+                self.send_to_viewers(mob, blaze_glowing(id, true));
+            }
+            left => {
+                let spread = distance.sqrt() * 0.5 * 0.1;
+                let mut dir =
+                    [0, 1, 2].map(|i| target[i] + if i == 1 { 0.9 } else { 0.0 } - eye[i]);
+                for v in &mut dir {
+                    *v += (self.rng.f64() * 2.0 - 1.0) * spread * 4.0;
+                }
+                self.shoot_fireball(id, "Blaze", eye, dir, false);
+                self.play_sound_at("minecraft:entity.blaze.shoot", mob.pos, 1.0, 1.0, None);
+                mob.volley = left - 1;
+                if mob.volley == 0 {
+                    mob.charge = 100;
+                    self.send_to_viewers(mob, blaze_glowing(id, false));
+                } else {
+                    mob.charge = 6;
+                }
+            }
+        }
     }
 
     /// A skeleton keeps its distance and shoots when it can see its target.
@@ -429,6 +507,10 @@ impl World {
         let Some((kind, size)) = self.biome_spawns.pick_monster(&biome, &mut self.rng) else {
             return;
         };
+        // Ghasts turn up only one time in twenty.
+        if kind == MobKind::Ghast && self.rng.below(20) != 0 {
+            return;
+        }
         let (mut gx, mut gz) = (x, z);
         for _ in 0..size {
             gx += self.rng.below(11) as i32 - 5;
@@ -512,6 +594,26 @@ fn horizontal_distance(a: [f64; 3], b: [f64; 3]) -> f64 {
 fn yaw_towards(from: [f64; 3], to: [f64; 3]) -> f32 {
     let (dx, dz) = (to[0] - from[0], to[2] - from[2]);
     (-dx.atan2(dz)).to_degrees() as f32
+}
+
+/// A ghast's face opening or closing as it charges a fireball.
+fn ghast_charging(id: i32, charging: bool) -> Writer {
+    Writer::packet(clientbound::SET_ENTITY_DATA)
+        .varint(id)
+        .u8(16)
+        .varint(8) // boolean
+        .bool(charging)
+        .u8(0xFF)
+}
+
+/// A blaze glowing as it gets ready to throw fireballs.
+fn blaze_glowing(id: i32, glowing: bool) -> Writer {
+    Writer::packet(clientbound::SET_ENTITY_DATA)
+        .varint(id)
+        .u8(16)
+        .varint(SERIALIZER_BYTE)
+        .u8(u8::from(glowing))
+        .u8(0xFF)
 }
 
 /// A creeper starting or stopping to swell.

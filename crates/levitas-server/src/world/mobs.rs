@@ -76,6 +76,8 @@ pub enum MobKind {
     Skeleton,
     ZombifiedPiglin,
     MagmaCube,
+    Ghast,
+    Blaze,
 }
 
 impl MobKind {
@@ -91,6 +93,8 @@ impl MobKind {
             "minecraft:skeleton" => Some(MobKind::Skeleton),
             "minecraft:zombified_piglin" => Some(MobKind::ZombifiedPiglin),
             "minecraft:magma_cube" => Some(MobKind::MagmaCube),
+            "minecraft:ghast" => Some(MobKind::Ghast),
+            "minecraft:blaze" => Some(MobKind::Blaze),
             _ => None,
         }
     }
@@ -107,6 +111,8 @@ impl MobKind {
             MobKind::Skeleton => "minecraft:skeleton",
             MobKind::ZombifiedPiglin => "minecraft:zombified_piglin",
             MobKind::MagmaCube => "minecraft:magma_cube",
+            MobKind::Ghast => "minecraft:ghast",
+            MobKind::Blaze => "minecraft:blaze",
         }
     }
 
@@ -123,6 +129,8 @@ impl MobKind {
             MobKind::Skeleton => "Skeleton",
             MobKind::ZombifiedPiglin => "Zombified Piglin",
             MobKind::MagmaCube => "Magma Cube",
+            MobKind::Ghast => "Ghast",
+            MobKind::Blaze => "Blaze",
         }
     }
 
@@ -135,12 +143,22 @@ impl MobKind {
                 | MobKind::Skeleton
                 | MobKind::ZombifiedPiglin
                 | MobKind::MagmaCube
+                | MobKind::Ghast
+                | MobKind::Blaze
         )
     }
 
     /// Whether fire and lava leave it unhurt.
     pub fn fire_immune(self) -> bool {
-        matches!(self, MobKind::ZombifiedPiglin | MobKind::MagmaCube)
+        matches!(
+            self,
+            MobKind::ZombifiedPiglin | MobKind::MagmaCube | MobKind::Ghast | MobKind::Blaze
+        )
+    }
+
+    /// Whether it flies instead of walking.
+    pub fn flies(self) -> bool {
+        matches!(self, MobKind::Ghast | MobKind::Blaze)
     }
 
     /// Melee damage on Normal difficulty.
@@ -150,6 +168,7 @@ impl MobKind {
             MobKind::Spider => 2.0,
             // With its golden sword.
             MobKind::ZombifiedPiglin => 8.0,
+            MobKind::Blaze => 6.0,
             _ => 0.0,
         }
     }
@@ -158,6 +177,8 @@ impl MobKind {
     pub fn follow_range(self) -> f64 {
         match self {
             MobKind::Zombie | MobKind::ZombifiedPiglin => 35.0,
+            MobKind::Ghast => 64.0,
+            MobKind::Blaze => 48.0,
             _ => 16.0,
         }
     }
@@ -178,6 +199,8 @@ impl MobKind {
             MobKind::Skeleton => entity_type::SKELETON,
             MobKind::ZombifiedPiglin => entity_type::ZOMBIFIED_PIGLIN,
             MobKind::MagmaCube => entity_type::MAGMA_CUBE,
+            MobKind::Ghast => entity_type::GHAST,
+            MobKind::Blaze => entity_type::BLAZE,
         }
     }
 
@@ -191,6 +214,8 @@ impl MobKind {
             MobKind::Spider => 16.0,
             // A magma cube's health is its size squared; this is the smallest's.
             MobKind::MagmaCube => 1.0,
+            MobKind::Ghast => 10.0,
+            MobKind::Blaze => 20.0,
         }
     }
 
@@ -207,6 +232,8 @@ impl MobKind {
             MobKind::Skeleton => (0.6, 1.99),
             MobKind::ZombifiedPiglin => (0.6, 1.95),
             MobKind::MagmaCube => (0.52, 0.52),
+            MobKind::Ghast => (4.0, 4.0),
+            MobKind::Blaze => (0.6, 1.8),
         }
     }
 
@@ -220,6 +247,8 @@ impl MobKind {
             MobKind::Skeleton | MobKind::ZombifiedPiglin => 0.12,
             // Magma cubes only move by hopping.
             MobKind::MagmaCube => 0.0,
+            MobKind::Ghast => 0.08,
+            MobKind::Blaze => 0.06,
             _ => 0.1,
         }
     }
@@ -237,6 +266,8 @@ impl MobKind {
             MobKind::Skeleton => "skeleton",
             MobKind::ZombifiedPiglin => "zombified_piglin",
             MobKind::MagmaCube => "magma_cube",
+            MobKind::Ghast => "ghast",
+            MobKind::Blaze => "blaze",
         }
     }
 }
@@ -289,6 +320,11 @@ pub struct Mob {
     /// Magma cubes: size (1, 2 or 4) and ticks until the next hop.
     pub slime_size: u8,
     jump_cooldown: u32,
+    /// Ghasts and blazes: where they are flying to, how their attack is coming on, and
+    /// how many fireballs of a blaze's volley are still to come.
+    pub fly_goal: Option<[f64; 3]>,
+    pub charge: i32,
+    pub volley: u8,
     /// What players were last told.
     sent_pos: [f64; 3],
     sent_angles: (u8, u8),
@@ -346,6 +382,9 @@ impl Mob {
             anger: 0,
             slime_size,
             jump_cooldown: 0,
+            fly_goal: None,
+            charge: 0,
+            volley: 0,
             sent_pos: pos,
             sent_angles: (0, 0),
             viewers: HashSet::new(),
@@ -574,7 +613,7 @@ struct SpawnList {
 }
 
 /// Mobs `/summon` knows.
-pub const SUMMONABLE: [&str; 10] = [
+pub const SUMMONABLE: [&str; 12] = [
     "cow",
     "pig",
     "sheep",
@@ -585,6 +624,8 @@ pub const SUMMONABLE: [&str; 10] = [
     "skeleton",
     "zombified_piglin",
     "magma_cube",
+    "ghast",
+    "blaze",
 ];
 
 fn spawners(list: &Value) -> Vec<Spawner> {
@@ -758,7 +799,11 @@ impl World {
             if mob.kind == MobKind::MagmaCube {
                 self.hop(&mut mob);
             }
-            self.step(&mut mob);
+            if mob.kind.flies() {
+                self.fly_mob(&mut mob);
+            } else {
+                self.step(&mut mob);
+            }
             self.burn_in_daylight(id, &mut mob);
             self.animal_chores(id, &mut mob);
             self.mobs.insert(id, mob);
@@ -836,6 +881,65 @@ impl World {
         let wait = 10 + self.rng.below(20);
         mob.jump_cooldown = if prey.is_some() { wait / 3 } else { wait };
         self.mob_sound(mob, "minecraft:entity.magma_cube.jump");
+    }
+
+    /// Flying mobs drift towards their goal, picking a new one now and then; with prey
+    /// they keep near it (a blaze a little above, a ghast at a distance).
+    fn fly_mob(&mut self, mob: &mut Mob) {
+        mob.target = None;
+        let (wander, speed) = match mob.kind {
+            MobKind::Ghast => (16.0, mob.kind.speed()),
+            _ => (6.0, mob.kind.speed()),
+        };
+        let prey = mob
+            .hunting
+            .and_then(|pid| self.players.get(&pid))
+            .map(|p| p.pos);
+        let reached = mob
+            .fly_goal
+            .is_none_or(|g| (0..3).map(|i| (g[i] - mob.pos[i]).powi(2)).sum::<f64>() < 1.0);
+        if let (MobKind::Blaze, Some(p)) = (mob.kind, prey) {
+            mob.fly_goal = Some([p[0], p[1] + 1.0 + self.rng.f64() * 2.0, p[2]]);
+        } else if reached || self.rng.below(100) == 0 {
+            let r = |rng: &mut Rng| (rng.f64() * 2.0 - 1.0) * wander;
+            mob.fly_goal = Some([
+                mob.pos[0] + r(&mut self.rng),
+                mob.pos[1] + r(&mut self.rng) / 2.0,
+                mob.pos[2] + r(&mut self.rng),
+            ]);
+        }
+        let goal = mob.fly_goal.unwrap_or(mob.pos);
+        let d = [0, 1, 2].map(|i| goal[i] - mob.pos[i]);
+        let length = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt();
+        let move_by = if length < 0.5 {
+            [0.0; 3]
+        } else {
+            d.map(|v| v / length * speed)
+        };
+        if prey.is_none() && length >= 0.5 {
+            mob.yaw = yaw_towards(mob.pos, goal);
+        }
+        let (width, height) = mob.size();
+        let half = width / 2.0;
+        let mut pos = mob.pos;
+        for axis in 0..3 {
+            let push = match axis {
+                0 => mob.knockback[0],
+                2 => mob.knockback[1],
+                _ => 0.0,
+            };
+            let delta = self.clip_move(pos, half, height, axis, move_by[axis] + push);
+            if (delta - (move_by[axis] + push)).abs() > 1e-9 {
+                mob.fly_goal = None; // something in the way: pick another goal
+            }
+            pos[axis] += delta;
+        }
+        for k in &mut mob.knockback {
+            *k *= 0.91;
+        }
+        mob.pos = pos;
+        mob.on_ground = false;
+        mob.fall_distance = 0.0;
     }
 
     /// Moves the mob one tick: walking, jumping, swimming, gravity and collisions.

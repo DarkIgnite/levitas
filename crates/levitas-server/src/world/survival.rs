@@ -76,6 +76,8 @@ pub enum Damage {
     Player(i32),
     /// Standing on a lit campfire.
     Campfire,
+    /// Hit by a fireball from what is named.
+    Fireball(&'static str),
     /// Poison and instant damage.
     Magic,
     Wither,
@@ -101,6 +103,7 @@ impl Damage {
             Damage::HotFloor => "minecraft:hot_floor",
             Damage::Player(_) => "minecraft:player_attack",
             Damage::Campfire => "minecraft:campfire",
+            Damage::Fireball(_) => "minecraft:fireball",
             Damage::Magic => "minecraft:magic",
             Damage::Wither => "minecraft:wither",
         }
@@ -125,6 +128,7 @@ impl Damage {
             Damage::HotFloor => format!("{name} discovered the floor was lava"),
             Damage::Player(_) => format!("{name} was slain by a player"),
             Damage::Campfire => format!("{name} went up in flames"),
+            Damage::Fireball(by) => format!("{name} was fireballed by {by}"),
             Damage::Magic => format!("{name} was killed by magic"),
             Damage::Wither => format!("{name} withered away"),
         }
@@ -143,6 +147,7 @@ impl Damage {
                 | Damage::InFire
                 | Damage::HotFloor
                 | Damage::Campfire
+                | Damage::Fireball(_)
         )
     }
 

@@ -17,6 +17,7 @@ mod experience;
 mod explosion;
 mod falling;
 mod fire;
+mod fireballs;
 mod fluids;
 mod hazards;
 mod hoppers;
@@ -471,6 +472,7 @@ struct World {
     falling_blocks: HashMap<i32, falling::FallingBlock>,
     /// Lit TNT waiting to explode.
     tnt: HashMap<i32, tnt::PrimedTnt>,
+    fireballs: HashMap<i32, fireballs::Fireball>,
     /// Blocks changed this tick, for redstone to look around.
     redstone_dirty: Vec<BlockPos>,
     /// Comparators' output levels, which their block states do not hold.
@@ -566,6 +568,7 @@ impl World {
             items: HashMap::new(),
             falling_blocks: HashMap::new(),
             tnt: HashMap::new(),
+            fireballs: HashMap::new(),
             redstone_dirty: Vec::new(),
             comparators: HashMap::new(),
             landings: Vec::new(),
@@ -842,6 +845,7 @@ impl World {
             packets.extend(tnt::spawn_packets(tnt_id, tnt));
         }
         packets.extend(self.arrow_packets());
+        packets.extend(self.fireball_packets());
         packets.extend(self.orb_packets());
         for packet in packets {
             self.send(id, packet);
@@ -1202,6 +1206,7 @@ impl World {
         self.tick_tnt();
         self.tick_mobs();
         self.tick_arrows();
+        self.tick_fireballs();
         self.tick_orbs();
         self.tick_monster_spawning();
         self.tick_survival();
