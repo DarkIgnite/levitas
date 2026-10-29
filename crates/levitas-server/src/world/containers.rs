@@ -386,6 +386,8 @@ pub struct Open {
     pub offers: [super::enchanting_table::Offer; 3],
     /// The stonecutter recipe picked.
     pub choice: Option<usize>,
+    /// The name typed into an anvil's box.
+    pub rename: Option<String>,
 }
 
 impl World {
@@ -466,6 +468,7 @@ impl World {
             result: Stack::EMPTY,
             offers: Default::default(),
             choice: None,
+            rename: None,
         });
         self.send(
             id,
@@ -652,6 +655,11 @@ impl World {
         };
         let before = self.window_slots(id, view);
         let mut slots = before.clone();
+        let rename = self
+            .players
+            .get(&id)
+            .and_then(|p| p.open.as_ref())
+            .and_then(|o| o.rename.clone());
         let p = self.players.get_mut(&id).expect("player exists");
         let mut cursor = p.inventory.carried;
         let mut offhand = p.inventory.slots[OFFHAND];
@@ -668,6 +676,7 @@ impl World {
             used: None,
             choice: p.open.as_ref().and_then(|o| o.choice),
             trades,
+            rename: rename.as_deref(),
         };
         let thrown = click::click(&mut w, click::Click { slot, button, mode });
         let used = w.used;
@@ -856,11 +865,31 @@ impl World {
     }
 
     /// Tells the player what the anvil's result costs.
+    /// The player typed a name into an anvil's box: the result and its cost follow.
+    pub(super) fn rename_item(&mut self, id: i32, name: &str) {
+        let Some(p) = self.players.get_mut(&id) else {
+            return;
+        };
+        let (creative, level) = (p.mode == GAME_MODE_CREATIVE, p.xp_level);
+        let Some(open) = p.open.as_mut().filter(|o| matches!(o.view, View::Anvil(_))) else {
+            return;
+        };
+        open.rename = Some(crate::names::clean(name));
+        let result = crate::repair::anvil_named(open.grid[0], open.grid[1], open.rename.as_deref())
+            .filter(|r| creative || (r.cost < crate::repair::TOO_EXPENSIVE && r.cost <= level))
+            .map_or(Stack::EMPTY, |r| r.result);
+        open.grid[2] = result;
+        let window = open.window;
+        let update = p.inventory.window_slot_packet(window, 2, result);
+        self.send(id, update);
+        self.send_anvil_cost(id);
+    }
+
     fn send_anvil_cost(&mut self, id: i32) {
         let Some(open) = self.players.get(&id).and_then(|p| p.open.as_ref()) else {
             return;
         };
-        let cost = click::anvil_cost(&open.grid[..3]);
+        let cost = click::anvil_cost(&open.grid[..3], open.rename.as_deref());
         let packet = Writer::packet(clientbound::CONTAINER_SET_DATA)
             .varint(open.window)
             .i16(0)

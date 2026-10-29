@@ -5,8 +5,10 @@
 //! the same kind (plus 12%); enchantments from the second item or a book are merged,
 //! equal levels going up one; every enchantment added and every unit used costs levels,
 //! on top of both items' prior work penalty, which doubles plus one each time. Survival
-//! players cannot pay 40 levels or more. A grindstone strips all but curses, merging two
-//! of the same item (plus 5%), and gives back some experience.
+//! players cannot pay 40 levels or more. Renaming costs a level more, or just one level
+//! and the prior work penalty when renaming alone, which is always allowed. A grindstone
+//! strips all but curses, merging two of the same item (plus 5%), and gives back some
+//! experience.
 
 use levitas_registry::{ItemInfo, TagRegistry};
 
@@ -53,10 +55,43 @@ fn repairs(stack: &Stack, material: &Stack) -> bool {
 }
 
 /// The anvil's result for `left` and `right`, if any.
+#[cfg(test)]
 pub fn anvil(left: Stack, right: Stack) -> Option<AnvilResult> {
-    if left.is_empty() || right.is_empty() {
-        return None; // renaming alone is not supported yet
+    anvil_named(left, right, None)
+}
+
+/// The anvil's result for `left` and `right` with the name typed in its box: `Some("")`
+/// takes a custom name off, `None` leaves names alone.
+pub fn anvil_named(left: Stack, right: Stack, rename: Option<&str>) -> Option<AnvilResult> {
+    if left.is_empty() {
+        return None;
     }
+    let new_name = match rename.map(crate::names::clean) {
+        Some(n) if n.trim().is_empty() => left.name.map(|_| None),
+        Some(n) if Some(n.as_str()) != left.name => Some(crate::names::intern(&n)),
+        _ => None,
+    };
+    if right.is_empty() {
+        // Renaming alone: the whole stack, never too expensive.
+        let name = new_name?;
+        let result = Stack { name, ..left };
+        let cost = (left.repair_cost + 1).min(TOO_EXPENSIVE - 1);
+        return Some(AnvilResult {
+            result,
+            cost,
+            uses: 0,
+        });
+    }
+    let mut found = combine(left, right)?;
+    if let Some(name) = new_name {
+        found.result.name = name;
+        found.cost += 1;
+    }
+    Some(found)
+}
+
+/// Repairing or enchanting `left` with `right`.
+fn combine(left: Stack, right: Stack) -> Option<AnvilResult> {
     let mut result = left.with_count(1);
     let mut cost = left.repair_cost + right.repair_cost;
     let mut uses = 1;
@@ -222,6 +257,16 @@ mod tests {
         assert_eq!(r.uses, 4);
         assert_eq!(r.result.damage, 0);
         assert!(anvil(pick, stack("minecraft:gold_ingot")).is_none());
+        // Naming a stack names all of it, for a level and the work penalty.
+        let dirt = Stack::new(ItemInfo::id_of("minecraft:dirt").unwrap(), 12);
+        let named = anvil_named(dirt, Stack::EMPTY, Some("Soil")).unwrap();
+        assert_eq!((named.result.name, named.result.count), (Some("Soil"), 12));
+        assert_eq!((named.cost, named.uses), (1, 0));
+        // An unchanged name is no work, and an empty box takes the name off.
+        assert!(anvil_named(named.result, Stack::EMPTY, Some("Soil")).is_none());
+        let plain = anvil_named(named.result, Stack::EMPTY, Some("")).unwrap();
+        assert_eq!(plain.result.name, None);
+        assert!(anvil_named(dirt, Stack::EMPTY, Some("")).is_none());
     }
 
     #[test]

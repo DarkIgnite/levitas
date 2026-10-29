@@ -184,6 +184,11 @@ fn decode(id: i32, packet: &[u8]) -> io::Result<Option<Event>> {
                     let data = r.bytes(length)?;
                     if kind == levitas_registry::component::DAMAGE {
                         stack.damage = Reader::new(data).varint()?.max(0);
+                    } else if kind == levitas_registry::component::CUSTOM_NAME {
+                        if let Ok(tag) = levitas_nbt::from_network(data) {
+                            let name = crate::names::clean(&crate::names::plain_text(&tag));
+                            stack.name = crate::names::intern(&name);
+                        }
                     } else if kind == levitas_registry::component::POTION_CONTENTS {
                         let mut c = Reader::new(data);
                         if c.bool()? {
@@ -250,6 +255,10 @@ fn decode(id: i32, packet: &[u8]) -> io::Result<Option<Event>> {
             id,
             left: r.bool()?,
             right: r.bool()?,
+        },
+        serverbound::RENAME_ITEM => Event::RenameItem {
+            id,
+            name: r.string(32767)?.to_owned(),
         },
         serverbound::SELECT_TRADE => Event::SelectTrade {
             id,

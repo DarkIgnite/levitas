@@ -8,6 +8,7 @@ mod enchanting;
 mod flat;
 mod inventory;
 mod loot;
+mod names;
 mod play;
 mod potions;
 mod recipes;

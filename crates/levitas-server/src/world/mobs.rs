@@ -364,6 +364,8 @@ pub struct Mob {
     /// Iron golems: the monster being fought, and whether a player built it.
     pub prey: Option<i32>,
     pub player_created: bool,
+    /// A name given by a name tag.
+    pub name: Option<&'static str>,
 }
 
 impl Mob {
@@ -426,6 +428,7 @@ impl Mob {
                 .then(|| Box::new(super::villagers::Villager::new("minecraft:plains"))),
             prey: None,
             player_created: false,
+            name: None,
         }
     }
 
@@ -496,6 +499,9 @@ impl Mob {
         }
         if self.kind == MobKind::IronGolem {
             packets.push(super::golems::golem_data(id, self.player_created));
+        }
+        if let Some(name) = self.name {
+            packets.push(name_data(id, name));
         }
         if self.age < 0 {
             packets.push(super::breeding::baby_data(id, true));
@@ -586,6 +592,9 @@ impl Mob {
         if self.kind == MobKind::IronGolem {
             nbt.insert("PlayerCreated", self.player_created);
         }
+        if let Some(name) = self.name {
+            nbt.insert("CustomName", name);
+        }
         nbt
     }
 
@@ -632,6 +641,11 @@ impl Mob {
             mob.villager = Some(Box::new(super::villagers::Villager::read_nbt(nbt)));
         }
         mob.player_created = nbt.int("PlayerCreated").unwrap_or(0) != 0;
+        mob.name = nbt
+            .get("CustomName")
+            .map(crate::names::plain_text)
+            .filter(|n| !n.is_empty())
+            .and_then(|n| crate::names::intern(&n));
         mob.sent_pos = mob.pos;
         Some(mob)
     }
@@ -1574,6 +1588,10 @@ impl World {
         }
         let slot = p.hand_slot(hand);
         let held = ItemInfo::get(p.inventory.slots[slot].item).map_or("", |i| i.name);
+        if held == "minecraft:name_tag" {
+            self.name_mob(id, target, slot);
+            return;
+        }
         if mob.kind == MobKind::Villager {
             self.open_trading(id, target);
             return;
@@ -1784,6 +1802,46 @@ fn feet(pos: [f64; 3]) -> BlockPos {
 }
 
 /// The yaw (degrees, Minecraft's convention) that faces from `from` towards `to`.
+/// Entity data showing a mob's custom name: index 2, an optional text component.
+fn name_data(id: i32, name: &str) -> Writer {
+    const DATA_CUSTOM_NAME: u8 = 2;
+    const SERIALIZER_OPTIONAL_COMPONENT: i32 = 6;
+    Writer::packet(clientbound::SET_ENTITY_DATA)
+        .varint(id)
+        .u8(DATA_CUSTOM_NAME)
+        .varint(SERIALIZER_OPTIONAL_COMPONENT)
+        .bool(true)
+        .text(name)
+        .u8(0xFF)
+}
+
+impl World {
+    /// A named name tag used on a mob gives it the name, and is used up.
+    fn name_mob(&mut self, id: i32, target: i32, slot: usize) {
+        let Some(p) = self.players.get(&id) else {
+            return;
+        };
+        let tag = p.inventory.slots[slot];
+        let survival = p.survival();
+        let Some(name) = tag.name else {
+            return; // an unnamed tag does nothing
+        };
+        let Some(mob) = self.mobs.get_mut(&target) else {
+            return;
+        };
+        mob.name = Some(name);
+        let mob = self.mobs.remove(&target).expect("checked above");
+        self.send_to_viewers(&mob, name_data(target, name));
+        self.mobs.insert(target, mob);
+        if survival {
+            let p = self.players.get_mut(&id).expect("checked above");
+            p.inventory.take(slot, 1);
+            let update = p.inventory.set_slot_packet(slot);
+            self.send(id, update);
+        }
+    }
+}
+
 pub(super) fn yaw_towards(from: [f64; 3], to: [f64; 3]) -> f32 {
     let (dx, dz) = (to[0] - from[0], to[2] - from[2]);
     (-dx.atan2(dz)).to_degrees() as f32

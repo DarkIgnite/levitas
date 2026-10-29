@@ -87,39 +87,7 @@ impl Side {
     }
 }
 
-/// The plain text of a saved message: a text component as NBT (1.21.5 and later), or
-/// as JSON in a string (older worlds).
-fn plain_text(tag: &Tag) -> String {
-    fn of_json(v: &serde_json::Value) -> String {
-        match v {
-            serde_json::Value::String(s) => s.clone(),
-            serde_json::Value::Array(parts) => parts.iter().map(of_json).collect(),
-            serde_json::Value::Object(o) => {
-                let mut text = o.get("text").map(of_json).unwrap_or_default();
-                if let Some(extra) = o.get("extra") {
-                    text.push_str(&of_json(extra));
-                }
-                text
-            }
-            _ => String::new(),
-        }
-    }
-    match tag {
-        Tag::String(s) if s.starts_with('{') || s.starts_with('"') || s.starts_with('[') => {
-            serde_json::from_str(s).map_or_else(|_| s.clone(), |v| of_json(&v))
-        }
-        Tag::String(s) => s.clone(),
-        Tag::Compound(c) => {
-            let mut text = c.str("text").unwrap_or("").to_owned();
-            for part in c.list("extra").unwrap_or_default() {
-                text.push_str(&plain_text(part));
-            }
-            text
-        }
-        Tag::List(parts) => parts.iter().map(plain_text).collect(),
-        _ => String::new(),
-    }
-}
+use crate::names::plain_text;
 
 pub struct Sign {
     pub hanging: bool,

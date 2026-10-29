@@ -276,6 +276,8 @@ pub struct Window<'a> {
     pub choice: Option<usize>,
     /// A villager's trades, for its trading screen.
     pub trades: Vec<Trade>,
+    /// The name typed into an anvil's box.
+    pub rename: Option<&'a str>,
 }
 
 /// Applies one click. Returns the stacks the player threw out.
@@ -337,7 +339,7 @@ fn refresh_result(w: &mut Window) {
             let affordable = |r: &repair::AnvilResult| {
                 w.creative || (r.cost < repair::TOO_EXPENSIVE && r.cost <= w.xp_level)
             };
-            w.slots[2] = repair::anvil(w.slots[0], w.slots[1])
+            w.slots[2] = repair::anvil_named(w.slots[0], w.slots[1], w.rename)
                 .filter(affordable)
                 .map_or(Stack::EMPTY, |r| r.result);
         }
@@ -369,8 +371,8 @@ fn refresh_result(w: &mut Window) {
 }
 
 /// The level cost of the anvil's current result, for showing on the screen.
-pub fn anvil_cost(slots: &[Stack]) -> i32 {
-    repair::anvil(slots[0], slots[1]).map_or(0, |r| r.cost)
+pub fn anvil_cost(slots: &[Stack], rename: Option<&str>) -> i32 {
+    repair::anvil_named(slots[0], slots[1], rename).map_or(0, |r| r.cost)
 }
 
 /// Takes the result: one craft, using up one of each ingredient, or an anvil's or
@@ -378,13 +380,13 @@ pub fn anvil_cost(slots: &[Stack]) -> i32 {
 fn take_result(w: &mut Window) -> Stack {
     match w.layout {
         Layout::Anvil => {
-            let Some(r) = repair::anvil(w.slots[0], w.slots[1]) else {
+            let Some(r) = repair::anvil_named(w.slots[0], w.slots[1], w.rename) else {
                 return Stack::EMPTY;
             };
             if w.slots[2].is_empty() {
                 return Stack::EMPTY;
             }
-            w.slots[0] = w.slots[0].with_count(w.slots[0].count - 1);
+            w.slots[0] = w.slots[0].with_count(w.slots[0].count - r.result.count);
             w.slots[1] = w.slots[1].with_count(w.slots[1].count - r.uses);
             w.used = Some(Used::Levels(r.cost));
             refresh_result(w);

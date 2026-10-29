@@ -855,6 +855,7 @@ impl World {
             result: Stack::EMPTY,
             offers: Default::default(),
             choice: None,
+            rename: None,
         });
         self.send(
             id,

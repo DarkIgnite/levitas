@@ -28,6 +28,8 @@ pub struct Stack {
     /// The potion in a bottle or tipped arrow (the `minecraft:potion_contents`
     /// component), by potion ID.
     pub potion: Option<u8>,
+    /// A name given at an anvil (the `minecraft:custom_name` component).
+    pub name: Option<&'static str>,
 }
 
 /// An armor trim: entries of the trim material and trim pattern registries.
@@ -74,6 +76,7 @@ impl Stack {
         repair_cost: 0,
         trim: None,
         potion: None,
+        name: None,
     };
 
     pub fn new(item: i32, count: i32) -> Self {
@@ -85,6 +88,7 @@ impl Stack {
             repair_cost: 0,
             trim: None,
             potion: None,
+            name: None,
         }
     }
 
@@ -105,6 +109,7 @@ impl Stack {
             && self.repair_cost == other.repair_cost
             && self.trim == other.trim
             && self.potion == other.potion
+            && self.name == other.name
     }
 
     pub fn is_empty(&self) -> bool {
@@ -139,6 +144,9 @@ impl Stack {
         }
         if self.repair_cost > 0 {
             components.insert("minecraft:repair_cost", self.repair_cost);
+        }
+        if let Some(name) = self.name {
+            components.insert("minecraft:custom_name", name);
         }
         if let Some(name) = self.potion.and_then(crate::potions::name) {
             components.insert(
@@ -186,6 +194,10 @@ impl Stack {
             damage: damage.max(0),
             enchants,
             repair_cost,
+            name: components
+                .and_then(|c| c.get("minecraft:custom_name"))
+                .map(crate::names::plain_text)
+                .and_then(|n| crate::names::intern(&n)),
             potion: components
                 .and_then(|c| c.get("minecraft:potion_contents"))
                 .and_then(|p| match p {
@@ -235,11 +247,13 @@ pub fn write_stack(packet: Writer, stack: Stack) -> Writer {
     let worked = stack.repair_cost > 0;
     let trimmed = stack.trim.is_some();
     let brewed = stack.potion.is_some();
+    let named = stack.name.is_some();
     let added = i32::from(damaged)
         + i32::from(enchanted)
         + i32::from(worked)
         + i32::from(trimmed)
-        + i32::from(brewed);
+        + i32::from(brewed)
+        + i32::from(named);
     let mut packet = packet.varint(added).varint(0);
     if damaged {
         packet = packet.varint(component::DAMAGE).varint(stack.damage);
@@ -256,6 +270,10 @@ pub fn write_stack(packet: Writer, stack: Stack) -> Writer {
         packet = packet
             .varint(component::REPAIR_COST)
             .varint(stack.repair_cost);
+    }
+    if let Some(name) = stack.name {
+        // A text component, as a plain NBT string.
+        packet = packet.varint(component::CUSTOM_NAME).text(name);
     }
     if let Some(potion) = stack.potion {
         // The potion, then no custom colour, no custom effects and no custom name.

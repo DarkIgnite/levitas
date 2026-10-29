@@ -214,6 +214,11 @@ pub enum Event {
         window: i32,
         button: i32,
     },
+    /// The name typed into an anvil's box.
+    RenameItem {
+        id: i32,
+        name: String,
+    },
     /// A trade picked on a villager's trading screen.
     SelectTrade {
         id: i32,
@@ -763,6 +768,7 @@ impl World {
                 lines,
             } => self.update_sign(id, pos, front, lines),
             Event::SelectTrade { id, index } => self.select_trade(id, index),
+            Event::RenameItem { id, name } => self.rename_item(id, &name),
             Event::ContainerButton { id, window, button } => self.window_button(id, window, button),
             Event::HeldSlot { id, slot } => {
                 if let (Some(p), Ok(slot)) = (self.players.get_mut(&id), usize::try_from(slot)) {

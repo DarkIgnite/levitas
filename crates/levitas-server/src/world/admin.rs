@@ -370,3 +370,65 @@ mod tests {
         rules::set("fallDamage", "true").unwrap();
     }
 }
+
+#[cfg(test)]
+mod naming_tests {
+    use super::*;
+    use crate::connection::Profile;
+
+    #[test]
+    fn anvils_rename_and_name_tags_name_mobs() {
+        let dir = std::env::temp_dir().join(format!("levitas-names-{}", std::process::id()));
+        let (mut w, _) = World::new(
+            dir,
+            NewWorld {
+                kind: WorldKind::Flat,
+                seed: Some(0),
+            },
+        );
+        w.chunk(0, 0);
+        let (out, frames) = mpsc::channel(100_000);
+        std::mem::forget(frames);
+        let alice = next_entity_id();
+        let profile = Profile {
+            name: "Alice".to_owned(),
+            uuid: 1,
+            properties: Vec::new(),
+        };
+        w.players
+            .insert(alice, Player::new(profile, out, [2.5, -60.0, 2.5]));
+        w.players.get_mut(&alice).unwrap().xp_level = 5;
+        let anvil = BlockPos::new(3, -60, 3);
+        let state = BlockInfo::by_name("minecraft:anvil").unwrap().default_state;
+        w.set_block(anvil, state);
+        assert!(w.open_container(alice, anvil, state));
+        let tag = Stack::new(ItemInfo::id_of("minecraft:name_tag").unwrap(), 1);
+        w.players
+            .get_mut(&alice)
+            .unwrap()
+            .open
+            .as_mut()
+            .unwrap()
+            .grid[0] = tag;
+        w.rename_item(alice, "Bessie");
+        let window = w.players[&alice].open.as_ref().unwrap().window;
+        w.container_click(alice, window, 2, 0, 0, Vec::new(), Stack::EMPTY);
+        let named = w.players[&alice].inventory.carried;
+        assert_eq!((named.item, named.name), (tag.item, Some("Bessie")));
+        assert_eq!(w.players[&alice].xp_level, 4, "one level for the name");
+
+        // The tag names a cow, which keeps the name when saved.
+        let p = w.players.get_mut(&alice).unwrap();
+        p.inventory.carried = Stack::EMPTY;
+        let held = p.hand_slot(0);
+        p.inventory.slots[held] = named;
+        let cow = next_entity_id();
+        w.mobs.insert(
+            cow,
+            super::mobs::Mob::new(super::mobs::MobKind::Cow, [3.5, -60.0, 2.5], &mut w.rng),
+        );
+        w.use_on_mob(alice, cow, 0);
+        assert_eq!(w.mobs[&cow].name, Some("Bessie"));
+        assert!(w.players[&alice].inventory.slots[held].is_empty());
+    }
+}

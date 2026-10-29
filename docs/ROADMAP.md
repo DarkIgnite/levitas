@@ -280,12 +280,14 @@ Known gaps are listed under each phase instead of being hidden.
       fortune, silk touch, looting, the protection family, feather falling,
       respiration, power, flame, infinity and mending. Missing: thorns, punch,
       frost walker, depth strider (client side), aqua affinity, curses.
-- [ ] Anvil (repair, rename, combine), grindstone. Anvils (`repair.rs`) repair with
+- [x] Anvil (repair, rename, combine), grindstone. Anvils (`repair.rs`) repair with
       materials or a second item, merge enchantments from items and books by the
       wiki's rules, charge levels with the prior work penalty, refuse 40 levels or
-      more in survival, and wear out. Grindstones strip all but curses, merge two
-      items and give experience back. Renaming is missing (item names are not
-      tracked yet).
+      more in survival, and wear out. Renaming (`names.rs`) costs a level more, or
+      one level plus the penalty alone (never too expensive), names whole stacks,
+      and an empty name takes a custom name off. Name tags name mobs, which then
+      never despawn. Grindstones strip all but curses, merge two items and give
+      experience back.
 - [ ] Brewing stand, potions, splash and lingering potions, tipped arrows. Potions
       (`potions.rs`, effects and recipes from the wiki's tables) are carried as the
       `minecraft:potion_contents` component. Glass bottles fill at water; drinking
@@ -378,7 +380,9 @@ Known gaps are listed under each phase instead of being hidden.
       at 5 hearts on Easy and kills on Hard, fire spreads more readily the harder
       the game, and Peaceful has no monsters and no hunger.
 - [ ] Scoreboards, teams, boss bars, titles
-- [ ] Item components on the network (enchantments, names, damage, ...)
+- [ ] Item components on the network (enchantments, names, damage, ...). Damage,
+      enchantments, stored enchantments, repair cost, custom names, armor trims and
+      potion contents are kept, saved and sent; other components are dropped.
 - [x] Online mode (encryption and Mojang session check), compression. Compression
       works (zlib above `network-compression-threshold`, 256 by default). With
       `online-mode=true` (`auth.rs`) the server sends its RSA key and a token, takes
