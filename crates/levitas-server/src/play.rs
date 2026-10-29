@@ -17,6 +17,7 @@ const KEEP_ALIVE_INTERVAL: Duration = Duration::from_secs(10);
 const MAX_CHANGED_SLOTS: i32 = 128;
 const CLIENT_COMMAND_RESPAWN: i32 = 0;
 /// Flag in the player input packet for the sneak key.
+const INPUT_FORWARD: u8 = 0x01;
 const INPUT_SNEAK: u8 = 0x20;
 const PLAYER_COMMAND_LEAVE_BED: i32 = 0;
 /// Most components read from one creative-mode item.
@@ -287,10 +288,14 @@ fn decode(id: i32, packet: &[u8]) -> io::Result<Option<Event>> {
             hand: r.varint()?,
             sequence: r.varint()?,
         },
-        serverbound::PLAYER_INPUT => Event::Sneak {
-            id,
-            sneaking: r.u8()? & INPUT_SNEAK != 0,
-        },
+        serverbound::PLAYER_INPUT => {
+            let flags = r.u8()?;
+            Event::Sneak {
+                id,
+                sneaking: flags & INPUT_SNEAK != 0,
+                forward: flags & INPUT_FORWARD != 0,
+            }
+        }
         serverbound::CLIENT_COMMAND => match r.varint()? {
             CLIENT_COMMAND_RESPAWN => Event::Respawn { id },
             _ => return Ok(None),

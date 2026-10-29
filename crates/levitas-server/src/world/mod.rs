@@ -28,6 +28,7 @@ mod golems;
 mod hazards;
 mod hoppers;
 mod items;
+mod minecarts;
 mod mobs;
 mod monsters;
 mod nature;
@@ -265,6 +266,7 @@ pub enum Event {
     Sneak {
         id: i32,
         sneaking: bool,
+        forward: bool,
     },
     /// Where a player's client moved the boat they ride.
     MoveVehicle {
@@ -410,8 +412,10 @@ struct Player {
     portal_cooldown: u32,
     /// The tick from which an ender pearl can be thrown again.
     pearl_ready: u64,
-    /// The boat the player sits in.
+    /// The boat or minecart the player sits in.
     riding: Option<i32>,
+    /// Whether the player holds the forward key (to push a minecart).
+    forward: bool,
     /// Hand and start tick of a raised shield.
     blocking: Option<(i32, u64)>,
     /// Tick from which the shield can be raised again, after an axe knocked it down.
@@ -480,6 +484,7 @@ impl Player {
             portal_cooldown: 0,
             pearl_ready: 0,
             riding: None,
+            forward: false,
             blocking: None,
             shield_ready: 0,
             hurt_ticks: 0,
@@ -558,6 +563,9 @@ struct World {
     /// Ender pearls, snowballs and eggs in flight.
     thrown: HashMap<i32, thrown::Thrown>,
     boats: HashMap<i32, boats::Boat>,
+    carts: HashMap<i32, minecarts::Cart>,
+    /// Detector rails a cart is powering.
+    detectors: HashSet<BlockPos>,
     eyes: HashMap<i32, end_portal::EyeOfEnder>,
     /// The End's dragon fight, once started.
     fight: Option<dragon::Fight>,
@@ -659,6 +667,8 @@ impl World {
             fireballs: HashMap::new(),
             thrown: HashMap::new(),
             boats: HashMap::new(),
+            carts: HashMap::new(),
+            detectors: HashSet::new(),
             eyes: HashMap::new(),
             fight: None,
             redstone_dirty: Vec::new(),
@@ -792,7 +802,7 @@ impl World {
             Event::LeaveBed { id } => self.wake_up(id),
             Event::Attack { id, target } => self.attack(id, target),
             Event::UseEntity { id, target, hand } => {
-                if !self.board_boat(id, target) {
+                if !self.board_boat(id, target) && !self.board_cart(id, target) {
                     self.use_on_mob(id, target, hand);
                 }
             }
@@ -801,9 +811,14 @@ impl World {
                     p.sprinting = sprinting;
                 }
             }
-            Event::Sneak { id, sneaking } => {
+            Event::Sneak {
+                id,
+                sneaking,
+                forward,
+            } => {
                 if let Some(p) = self.players.get_mut(&id) {
                     p.sneaking = sneaking;
+                    p.forward = forward;
                 }
                 // Sneaking gets a rider out of their boat.
                 if sneaking {
@@ -971,6 +986,7 @@ impl World {
         packets.extend(self.fireball_packets());
         packets.extend(self.thrown_packets());
         packets.extend(self.boat_packets());
+        packets.extend(self.cart_packets());
         packets.extend(self.eye_packets());
         packets.extend(self.dragon_packets());
         packets.extend(self.orb_packets());
@@ -1337,6 +1353,7 @@ impl World {
         self.tick_fireballs();
         self.tick_thrown();
         self.tick_boats();
+        self.tick_minecarts();
         self.tick_eyes();
         self.tick_orbs();
         self.tick_monster_spawning();

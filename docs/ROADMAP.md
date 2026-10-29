@@ -157,8 +157,14 @@ Known gaps are listed under each phase instead of being hidden.
       placed on water or ground, ridden (the rider's client steers, the server checks
       each move and shows it to others, paddles included), left by sneaking, broken
       by hits into their item, float up to the surface when empty, and are saved
-      with the chunk's entities. Missing: chest boats, two seats, mobs riding,
-      minecarts, item frames, paintings and armor stands.
+      with the chunk's entities. Minecarts (`world/minecarts.rs`) are placed on
+      rails, ridden and left, broken into their item, and moved by the server along
+      straight rails, curves and slopes, pushed by powered rails (and off a wall
+      from standing), braked by unpowered ones, and nudged by a rider holding
+      forward; off the rails they fall and slide to a stop; saved like boats.
+      Missing: chest boats, two seats, mobs riding, chest, hopper, furnace and TNT
+      minecarts, carts bumping into each other, item frames, paintings and armor
+      stands.
 - [x] TNT and explosions. Explosions (`world/explosion.rs`) cast rays like vanilla,
       break blocks by blast resistance (dropping them 1 in `power` times, containers
       spilling), and damage and push entities; creepers use them. TNT (`world/tnt.rs`)
@@ -256,7 +262,10 @@ Known gaps are listed under each phase instead of being hidden.
       drop; dispensers shoot arrows, pour and scoop fluids, use bone meal, flint and
       steel and TNT, and drop the rest. Missing: crafters, minecart hoppers, other
       dispenser items (armor, shulker boxes, spawn eggs, boats, ...).
-- [ ] Rails: powered, detector, activator
+- [x] Rails: powered, detector, activator. Powered and activator rails take power
+      from redstone and pass it along up to 8 rails of their kind; detector rails
+      give off power (strong into the block below) while a minecart is on them
+      (`world/minecarts.rs`).
 - [x] Doors, trapdoors, lamps, TNT, note blocks and bells powered by redstone. Doors
       (iron ones too), trapdoors, fence gates, lamps and TNT answer power. Note blocks
       (`world/devices.rs`) take their instrument from the block below, are tuned by

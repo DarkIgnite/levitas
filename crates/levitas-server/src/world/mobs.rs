@@ -1652,6 +1652,12 @@ impl World {
                 .filter(|b| b.chunk() == (cx, cz))
                 .map(|b| Tag::Compound(b.to_nbt())),
         );
+        entities.extend(
+            self.carts
+                .values()
+                .filter(|c| c.chunk() == (cx, cz))
+                .map(|c| Tag::Compound(c.to_nbt())),
+        );
         Compound::new()
             .with("DataVersion", DATA_VERSION)
             .with("Position", vec![cx, cz])
@@ -1666,6 +1672,7 @@ impl World {
             .map(Mob::chunk)
             .chain(self.items.values().map(items::ItemEntity::chunk))
             .chain(self.boats.values().map(super::boats::Boat::chunk))
+            .chain(self.carts.values().map(super::minecarts::Cart::chunk))
             .collect();
         let chunks: Vec<(i32, i32)> = now
             .union(&self.mob_chunks)
@@ -1707,7 +1714,18 @@ impl World {
             .filter(|(_, b)| b.chunk() == (x, z) && b.rider.is_none())
             .map(|(&id, _)| id)
             .collect();
-        if ids.is_empty() && item_ids.is_empty() && boat_ids.is_empty() && !had_mobs {
+        let cart_ids: Vec<i32> = self
+            .carts
+            .iter()
+            .filter(|(_, c)| c.chunk() == (x, z) && c.rider.is_none())
+            .map(|(&id, _)| id)
+            .collect();
+        if ids.is_empty()
+            && item_ids.is_empty()
+            && boat_ids.is_empty()
+            && cart_ids.is_empty()
+            && !had_mobs
+        {
             return;
         }
         self.save_mob_chunk(x, z);
@@ -1721,6 +1739,10 @@ impl World {
         }
         for id in boat_ids {
             self.boats.remove(&id);
+            self.broadcast(items::remove_entity(id), None);
+        }
+        for id in cart_ids {
+            self.carts.remove(&id);
             self.broadcast(items::remove_entity(id), None);
         }
     }
@@ -1748,6 +1770,15 @@ impl World {
                     }
                     self.items.insert(id, item);
                 }
+                continue;
+            }
+            if let Some(cart) = super::minecarts::Cart::from_nbt(entity, &mut self.rng) {
+                self.mob_chunks.insert(cart.chunk());
+                let id = next_entity_id();
+                for packet in super::minecarts::spawn_packets(id, &cart) {
+                    self.broadcast(packet, None);
+                }
+                self.carts.insert(id, cart);
                 continue;
             }
             if let Some(boat) = super::boats::Boat::from_nbt(entity, &mut self.rng) {

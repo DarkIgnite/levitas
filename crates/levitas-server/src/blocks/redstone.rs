@@ -83,6 +83,7 @@ pub fn is_source(state: u16) -> bool {
         || is_observer(state)
         || is_wire(state)
         || n == "minecraft:daylight_detector"
+        || n == "minecraft:detector_rail"
 }
 
 /// Whether a block carries strong power to the dust around it: solid, opaque, and not
@@ -111,6 +112,13 @@ pub fn weak(state: u16, to: Dir) -> u8 {
     }
     if is_pressure_plate(state) || n == "minecraft:daylight_detector" {
         return plate_power(state);
+    }
+    if n == "minecraft:detector_rail" {
+        return if is_on(state, "powered") {
+            MAX_POWER
+        } else {
+            0
+        };
     }
     if is_torch(state) {
         let lit = is_on(state, "lit");
@@ -161,12 +169,8 @@ pub fn strong(state: u16, to: Dir) -> u8 {
             0
         };
     }
-    if is_pressure_plate(state) {
-        return if to == Dir::Down {
-            plate_power(state)
-        } else {
-            0
-        };
+    if is_pressure_plate(state) || n == "minecraft:detector_rail" {
+        return if to == Dir::Down { weak(state, to) } else { 0 };
     }
     if is_torch(state) {
         return if to == Dir::Up { weak(state, to) } else { 0 };
@@ -297,6 +301,8 @@ pub fn reacts(state: u16) -> bool {
                 | "minecraft:dispenser"
                 | "minecraft:note_block"
                 | "minecraft:bell"
+                | "minecraft:powered_rail"
+                | "minecraft:activator_rail"
         )
 }
 

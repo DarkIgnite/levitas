@@ -39,6 +39,7 @@ impl World {
         if self.deflect_fireball(attacker, target)
             || self.attack_dragon_or_crystal(attacker, target)
             || self.hit_boat(attacker, target)
+            || self.hit_cart(attacker, target)
         {
             return;
         }

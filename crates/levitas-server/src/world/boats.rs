@@ -236,6 +236,9 @@ impl World {
         let Some(boat_id) = self.players.get_mut(&id).and_then(|p| p.riding.take()) else {
             return;
         };
+        if self.leave_cart(id, boat_id) {
+            return;
+        }
         let Some(boat) = self.boats.get_mut(&boat_id) else {
             return;
         };

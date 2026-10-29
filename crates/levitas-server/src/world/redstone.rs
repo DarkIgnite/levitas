@@ -233,6 +233,8 @@ impl World {
             self.react_note_block(pos, state);
         } else if n == "minecraft:bell" {
             self.react_bell(pos, state);
+        } else if n == "minecraft:powered_rail" || n == "minecraft:activator_rail" {
+            self.react_rail(pos, state);
         } else if n == "minecraft:dropper" || n == "minecraft:dispenser" {
             self.react_dispenser(pos, state);
         } else if blocks::is_door(state) {
