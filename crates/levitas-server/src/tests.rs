@@ -1562,10 +1562,12 @@ async fn joining_players_get_the_command_tree() {
         [
             "ban",
             "deop",
+            "difficulty",
             "effect",
             "execute",
             "experience",
             "gamemode",
+            "gamerule",
             "give",
             "gm",
             "help",

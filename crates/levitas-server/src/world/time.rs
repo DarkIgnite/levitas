@@ -90,8 +90,12 @@ impl World {
     }
 
     pub(super) fn tick_time(&mut self) {
-        self.day_time += 1;
-        self.tick_weather();
+        if crate::rules::bool("doDaylightCycle") {
+            self.day_time += 1;
+        }
+        if crate::rules::bool("doWeatherCycle") {
+            self.tick_weather();
+        }
         self.tick_sleep();
         if self.tick.is_multiple_of(TIME_SYNC_TICKS) {
             self.broadcast(self.time_packet(), None);
@@ -311,17 +315,21 @@ impl World {
     /// Counts sleeping time, and skips the night once everyone has slept long enough.
     fn tick_sleep(&mut self) {
         let mut anyone = false;
-        let mut everyone_rested = true;
+        let (mut players, mut rested) = (0, 0);
         for p in self.players.values_mut().filter(|p| p.alive) {
-            match p.sleeping {
-                Some(_) => {
-                    anyone = true;
-                    p.sleep_ticks = p.sleep_ticks.saturating_add(1);
-                    everyone_rested &= p.sleep_ticks >= SLEEP_TICKS;
+            players += 1;
+            if p.sleeping.is_some() {
+                anyone = true;
+                p.sleep_ticks = p.sleep_ticks.saturating_add(1);
+                if p.sleep_ticks >= SLEEP_TICKS {
+                    rested += 1;
                 }
-                None => everyone_rested = false,
             }
         }
+        // `playersSleepingPercentage` of the players must have slept, at least one.
+        let percentage = crate::rules::int("playersSleepingPercentage").max(0);
+        let needed = ((players * percentage + 99) / 100).max(1);
+        let everyone_rested = percentage <= 100 && rested >= needed;
         if anyone && !self.can_sleep_now() {
             // Morning came on its own: everyone gets up.
             let sleepers: Vec<i32> = self

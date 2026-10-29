@@ -13,8 +13,6 @@ use crate::blocks::plants::{
 };
 use crate::blocks::{self, offset, prop, with, Dir};
 
-/// Random ticks per section per game tick (the `randomTickSpeed` game rule).
-const RANDOM_TICK_SPEED: u32 = 3;
 /// How far water keeps farmland moist.
 const WATER_REACH: i32 = 4;
 /// Level event for bone meal's green sparkles.
@@ -23,12 +21,13 @@ const LEVEL_EVENT_BONE_MEAL: i32 = 1505;
 impl World {
     pub(super) fn tick_random(&mut self) {
         let mut picks = Vec::new();
+        let speed = crate::rules::int("randomTickSpeed").clamp(0, 4096);
         for (&(cx, cz), chunk) in &self.chunks {
             for (s, section) in chunk.sections().iter().enumerate() {
                 if section.is_empty() {
                     continue;
                 }
-                for _ in 0..RANDOM_TICK_SPEED {
+                for _ in 0..speed {
                     let r = self.rng.below(4096) as usize;
                     let (x, y, z) = (r & 15, r >> 8, (r >> 4) & 15);
                     let state = section.get(x, y, z);

@@ -208,6 +208,8 @@ pub fn health_packet(p: &Player) -> Writer {
         .f32(p.saturation)
 }
 
+use crate::rules::Difficulty;
+
 impl World {
     pub(super) fn damage(&mut self, id: i32, amount: f32, kind: Damage) {
         self.damage_from(id, amount, kind, None);
@@ -222,6 +224,28 @@ impl World {
         kind: Damage,
         source: Option<i32>,
     ) -> bool {
+        let rule = match kind {
+            Damage::Fall => "fallDamage",
+            Damage::Drown => "drowningDamage",
+            _ if kind.is_fire() || matches!(kind, Damage::OnFire) => "fireDamage",
+            _ => "",
+        };
+        if !rule.is_empty() && !crate::rules::bool(rule) {
+            return false;
+        }
+        // Monsters hit harder or softer with the difficulty.
+        let by_mob = source.is_some_and(|s| self.mobs.contains_key(&s))
+            || matches!(kind, Damage::Explosion("Creeper"));
+        let amount = if by_mob {
+            match crate::rules::difficulty() {
+                Difficulty::Peaceful => return false,
+                Difficulty::Easy => (amount / 2.0 + 1.0).min(amount),
+                Difficulty::Normal => amount,
+                Difficulty::Hard => amount * 1.5,
+            }
+        } else {
+            amount
+        };
         // A raised shield takes hits from mobs, players and their projectiles.
         if let Some((from, axe)) = source.and_then(|s| self.attacker(s)) {
             let axe = axe && matches!(kind, Damage::Player(_));
@@ -349,7 +373,10 @@ impl World {
     fn die(&mut self, id: i32, kind: Damage) {
         self.wake_up(id);
         self.clear_effects(id);
-        self.drop_xp_on_death(id);
+        let keep = crate::rules::bool("keepInventory");
+        if !keep {
+            self.drop_xp_on_death(id);
+        }
         self.close_container(id);
         let p = self.players.get_mut(&id).expect("player exists");
         p.alive = false;
@@ -366,7 +393,11 @@ impl World {
         }
         let p = self.players.get_mut(&id).expect("player exists");
         let pos = p.pos;
-        let dropped = p.inventory.drain();
+        let dropped = if keep {
+            Vec::new()
+        } else {
+            p.inventory.drain()
+        };
         let content = p.inventory.content_packet();
 
         self.send(id, content);
@@ -377,7 +408,9 @@ impl World {
                 .text(&message),
         );
         self.broadcast(entity_event(id, ENTITY_EVENT_DEATH), Some(id));
-        self.announce(system_chat(&message));
+        if crate::rules::bool("showDeathMessages") {
+            self.announce(system_chat(&message));
+        }
         info!("{message}");
         for stack in dropped {
             self.scatter_item(pos, stack);
@@ -570,6 +603,20 @@ impl World {
             if !p.survival() {
                 continue;
             }
+            let difficulty = crate::rules::difficulty();
+            let regenerates = crate::rules::bool("naturalRegeneration");
+            if difficulty == Difficulty::Peaceful {
+                // No hunger in peaceful: health and food come back on their own.
+                if regenerates && p.health < MAX_HEALTH && tick.is_multiple_of(20) {
+                    p.health = (p.health + 1.0).min(MAX_HEALTH);
+                    p.health_dirty = true;
+                }
+                if p.food < 20 && tick.is_multiple_of(10) {
+                    p.food += 1;
+                    p.health_dirty = true;
+                }
+                continue;
+            }
             if p.exhaustion > 4.0 {
                 p.exhaustion -= 4.0;
                 if p.saturation > 0.0 {
@@ -581,7 +628,7 @@ impl World {
             }
             p.food_timer += 1;
             let hurt = p.health < MAX_HEALTH;
-            if hurt && p.food >= 20 && p.saturation > 0.0 {
+            if hurt && regenerates && p.food >= 20 && p.saturation > 0.0 {
                 // Fast regeneration from saturation.
                 if p.food_timer >= 10 {
                     let spent = p.saturation.min(6.0);
@@ -590,7 +637,7 @@ impl World {
                     p.food_timer = 0;
                     p.health_dirty = true;
                 }
-            } else if hurt && p.food >= 18 {
+            } else if hurt && regenerates && p.food >= 18 {
                 if p.food_timer >= 80 {
                     p.health = (p.health + 1.0).min(MAX_HEALTH);
                     p.exhaustion += 6.0;
@@ -598,9 +645,15 @@ impl World {
                     p.health_dirty = true;
                 }
             } else if p.food <= 0 {
-                // Normal difficulty: starving stops at half a heart.
+                // Starving stops at five hearts on Easy and half a heart on Normal,
+                // and kills on Hard.
+                let floor = match difficulty {
+                    Difficulty::Easy => 10.0,
+                    Difficulty::Normal => 1.0,
+                    _ => 0.0,
+                };
                 if p.food_timer >= 80 {
-                    if p.health > 1.0 {
+                    if p.health > floor {
                         damage.push((id, 1.0, Damage::Starve));
                     }
                     p.food_timer = 0;

@@ -25,6 +25,8 @@ pub struct Config {
     pub level_seed: Option<i64>,
     pub level_type: String,
     pub online_mode: bool,
+    /// `peaceful`, `easy`, `normal` or `hard`.
+    pub difficulty: String,
 }
 
 impl Default for Config {
@@ -44,6 +46,8 @@ impl Default for Config {
             level_seed: None,
             level_type: "minecraft:normal".to_owned(),
             online_mode: false,
+            // Vanilla's default; Levitas's own tests are written for Normal.
+            difficulty: if cfg!(test) { "normal" } else { "easy" }.to_owned(),
         }
     }
 }
@@ -91,6 +95,14 @@ pub fn load(dir: &Path) -> &'static Config {
     let seed = get_or("level-seed", String::new());
     let level_type = get_or("level-type", defaults.level_type.clone());
     let online = get_or("online-mode", "false".to_owned());
+    let difficulty = get_or("difficulty", defaults.difficulty.clone());
+    let difficulty = match crate::rules::Difficulty::parse(&difficulty) {
+        Some(d) => d.name().to_owned(),
+        None => {
+            warn!("{FILE}: difficulty={difficulty} is not a difficulty, using easy");
+            "easy".to_owned()
+        }
+    };
     let config = Config {
         server_ip: ip,
         server_port: number("server-port", port, 25565).clamp(1, 65535) as u16,
@@ -103,6 +115,7 @@ pub fn load(dir: &Path) -> &'static Config {
         level_seed: seed_from(&seed),
         level_type,
         online_mode: online.trim() == "true",
+        difficulty,
     };
     if changed {
         if let Err(e) = fs::write(&path, write(&values)) {

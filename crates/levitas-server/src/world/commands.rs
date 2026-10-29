@@ -438,6 +438,16 @@ pub(super) fn command_tree(op: bool) -> Writer {
     let run = t.literal(dimension, "run", false);
     t.nodes[run].redirect = Some(root);
 
+    let gamerule = t.literal(root, "gamerule", false);
+    for rule in crate::rules::names() {
+        let node = t.literal(gamerule, rule, true);
+        t.argument(node, "value", word, vec![0]);
+    }
+    let difficulty = t.literal(root, "difficulty", true);
+    for d in crate::rules::Difficulty::ALL {
+        t.literal(difficulty, d.name(), true);
+    }
+
     let weather = t.literal(root, "weather", false);
     for kind in ["clear", "rain", "thunder"] {
         let node = t.literal(weather, kind, true);

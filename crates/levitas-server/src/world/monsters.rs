@@ -537,6 +537,11 @@ impl World {
 
     /// Tries to spawn monster groups in the dark around each player.
     pub(super) fn tick_monster_spawning(&mut self) {
+        if !crate::rules::bool("doMobSpawning")
+            || crate::rules::difficulty() == crate::rules::Difficulty::Peaceful
+        {
+            return;
+        }
         let players: Vec<([f64; 3], (i32, i32))> = self
             .players
             .values()

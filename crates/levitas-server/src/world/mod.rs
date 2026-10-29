@@ -838,11 +838,12 @@ impl World {
             .varint(crate::config::get().max_players as i32) // unused by the client
             .varint(view_distance())
             .varint(view_distance()) // simulation distance
-            .bool(false) // reduced debug info
-            .bool(true) // enable respawn screen
-            .bool(false); // limited crafting
+            .bool(crate::rules::bool("reducedDebugInfo"))
+            .bool(!crate::rules::bool("doImmediateRespawn")) // respawn screen
+            .bool(crate::rules::bool("doLimitedCrafting"));
         login = spawn_info(login, mode, self.dimension).bool(false); // enforces secure chat
         self.send(id, login);
+        self.send(id, admin::difficulty_packet());
         self.send(
             id,
             Writer::packet(clientbound::GAME_EVENT)

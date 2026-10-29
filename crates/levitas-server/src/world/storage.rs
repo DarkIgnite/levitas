@@ -50,6 +50,9 @@ impl LevelData {
             match levitas_nbt::from_gzip(&bytes) {
                 Ok((_, root)) => {
                     let data = root.compound("Data").cloned().unwrap_or_default();
+                    if let Some(rules) = data.compound("GameRules") {
+                        crate::rules::load_nbt(rules);
+                    }
                     let int = |key: &str, default: i64| data.int(key).unwrap_or(default) as i32;
                     let gen = data
                         .compound("WorldGenSettings")
@@ -187,7 +190,8 @@ impl LevelData {
             )
             .with("LevelName", "world")
             .with("GameType", 0)
-            .with("Difficulty", 2i8)
+            .with("Difficulty", crate::rules::difficulty() as i8)
+            .with("GameRules", crate::rules::to_nbt())
             .with("hardcore", false)
             .with("allowCommands", true)
             .with("initialized", true)

@@ -42,7 +42,13 @@ impl World {
         power: f32,
         by: &'static str,
     ) -> Vec<BlockPos> {
-        let destroyed = self.blast_rays(centre, power);
+        // Mobs' explosions (creepers, fireballs) leave blocks alone without `mobGriefing`.
+        let by_mob = !matches!(by, "TNT" | "End Crystal" | "[Intentional Game Design]");
+        let destroyed = if by_mob && !crate::rules::bool("mobGriefing") {
+            Default::default()
+        } else {
+            self.blast_rays(centre, power)
+        };
 
         // Blocks break; each drops what it would with a chance of 1 in `power`.
         for &pos in &destroyed {

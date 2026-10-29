@@ -799,7 +799,9 @@ impl World {
                 self.mobs.insert(id, mob);
                 continue;
             }
-            if self.despawns(&mob) {
+            // Peaceful leaves no monsters about.
+            let peaceful = crate::rules::difficulty() == crate::rules::Difficulty::Peaceful;
+            if self.despawns(&mob) || (peaceful && mob.kind.is_monster()) {
                 self.send_to_viewers(&mob, items::remove_entity(id));
                 continue;
             }
@@ -1487,7 +1489,7 @@ impl World {
         for (item, count) in drops {
             self.scatter_item(mob.pos, Stack::new(item, count));
         }
-        if mob.killed_by_player {
+        if mob.killed_by_player && crate::rules::bool("doMobLoot") {
             self.mob_xp(mob.pos, mob.kind.is_monster());
         }
     }

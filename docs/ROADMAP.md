@@ -336,7 +336,17 @@ Known gaps are listed under each phase instead of being hidden.
       no command framework or console input yet.
 - [ ] Vanilla commands: /tp, /time, /weather, /gamerule, /give with components,
       /effect, /enchant, /summon, /setblock, /fill, /kill, /clear, /spawnpoint, ...
-- [ ] Game rules and difficulty
+- [x] Game rules and difficulty. Every 1.21.8 game rule is kept and saved in
+      `level.dat` as vanilla saves it (`rules.rs`), set with `/gamerule` in game or
+      at the console. Enforced: keepInventory, doDaylightCycle, doWeatherCycle,
+      doMobSpawning, doMobLoot, doTileDrops, doFireTick, mobGriefing (creeper and
+      fireball blasts), naturalRegeneration, fallDamage, fireDamage, drowningDamage,
+      showDeathMessages, randomTickSpeed, playersSleepingPercentage,
+      doImmediateRespawn, reducedDebugInfo and doLimitedCrafting (told to clients).
+      Difficulty comes from `server.properties` (`difficulty`, easy by default) and
+      `/difficulty`: monsters hit softer on Easy and harder on Hard, starving stops
+      at 5 hearts on Easy and kills on Hard, fire spreads more readily the harder
+      the game, and Peaceful has no monsters and no hunger.
 - [ ] Scoreboards, teams, boss bars, titles
 - [ ] Item components on the network (enchantments, names, damage, ...)
 - [x] Online mode (encryption and Mojang session check), compression. Compression

@@ -8,6 +8,18 @@ use crate::access::{self, List};
 const ENTITY_EVENT_PERMISSION_0: i8 = 24;
 const ENTITY_EVENT_PERMISSION_4: i8 = 28;
 
+/// Game events telling clients about rules they act on themselves.
+const GAME_EVENT_IMMEDIATE_RESPAWN: u8 = 11;
+const ENTITY_EVENT_REDUCED_DEBUG_INFO: i8 = 22;
+const ENTITY_EVENT_FULL_DEBUG_INFO: i8 = 23;
+
+/// Tells a client the difficulty (never locked).
+pub fn difficulty_packet() -> Writer {
+    Writer::packet(clientbound::CHANGE_DIFFICULTY)
+        .u8(crate::rules::difficulty() as u8)
+        .bool(false)
+}
+
 /// Commands every player may use; the rest need an operator.
 pub const EVERYONE: [&str; 2] = ["help", "list"];
 
@@ -37,7 +49,7 @@ impl World {
         let words: Vec<&str> = line.split_whitespace().collect();
         let reply = self
             .admin_command(&words, "Server")
-            .unwrap_or_else(|| format!("Unknown console command: {line}. Try op, deop, whitelist, ban, pardon, kick, list, say, stop."));
+            .unwrap_or_else(|| format!("Unknown console command: {line}. Try op, deop, whitelist, ban, pardon, kick, list, say, gamerule, difficulty, stop."));
         info!("{reply}");
     }
 
@@ -138,6 +150,32 @@ impl World {
                     names.join(", ")
                 )
             }
+            ["gamerule", rule] => match crate::rules::get_text(rule) {
+                Some(value) => format!("Gamerule {rule} is currently set to: {value}"),
+                None => format!("Unknown game rule: {rule}"),
+            },
+            ["gamerule", rule, value] => match crate::rules::set(rule, value) {
+                Ok(()) => {
+                    self.rule_changed(rule);
+                    format!("Gamerule {rule} is now set to: {value}")
+                }
+                Err(e) => e,
+            },
+            ["difficulty"] => format!("The difficulty is {}", crate::rules::difficulty().name()),
+            ["difficulty", name] => match crate::rules::Difficulty::parse(name) {
+                Some(d) if d == crate::rules::difficulty() => {
+                    format!(
+                        "The difficulty did not change; it is already set to {}",
+                        d.name()
+                    )
+                }
+                Some(d) => {
+                    crate::rules::set_difficulty(d);
+                    self.announce(difficulty_packet());
+                    format!("The difficulty has been set to {}", d.name())
+                }
+                None => "Usage: /difficulty <peaceful|easy|normal|hard>".to_owned(),
+            },
             ["say", message @ ..] if !message.is_empty() => {
                 let line = format!("[{by}] {}", message.join(" "));
                 self.announce(system_chat(&line));
@@ -146,6 +184,32 @@ impl World {
             _ => return None,
         };
         Some(reply)
+    }
+
+    /// Tells everyone's client about a rule it acts on itself.
+    fn rule_changed(&mut self, rule: &str) {
+        match rule {
+            "doImmediateRespawn" => {
+                let on = crate::rules::bool(rule);
+                self.announce(
+                    Writer::packet(clientbound::GAME_EVENT)
+                        .u8(GAME_EVENT_IMMEDIATE_RESPAWN)
+                        .f32(if on { 1.0 } else { 0.0 }),
+                );
+            }
+            "reducedDebugInfo" => {
+                let event = if crate::rules::bool(rule) {
+                    ENTITY_EVENT_REDUCED_DEBUG_INFO
+                } else {
+                    ENTITY_EVENT_FULL_DEBUG_INFO
+                };
+                let ids: Vec<i32> = self.players.keys().copied().collect();
+                for id in ids {
+                    self.send(id, entity_event(id, event));
+                }
+            }
+            _ => {}
+        }
     }
 
     /// A player's UUID if they are online here, else 0 (they are matched by name).
@@ -235,5 +299,74 @@ impl World {
                 let _ = link.send(copy).await;
             });
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::connection::Profile;
+    use crate::rules::{self, Difficulty};
+
+    fn world() -> World {
+        let dir = std::env::temp_dir().join(format!(
+            "levitas-rules-{}-{}",
+            std::process::id(),
+            next_entity_id()
+        ));
+        World::new(
+            dir,
+            NewWorld {
+                kind: WorldKind::Flat,
+                seed: Some(0),
+            },
+        )
+        .0
+    }
+
+    fn player(w: &mut World) -> i32 {
+        let (out, frames) = mpsc::channel(100_000);
+        std::mem::forget(frames); // keep the channel open
+        let id = next_entity_id();
+        let profile = Profile {
+            name: "Alice".to_owned(),
+            uuid: 1,
+            properties: Vec::new(),
+        };
+        w.players
+            .insert(id, Player::new(profile, out, [0.5, -60.0, 0.5]));
+        id
+    }
+
+    #[test]
+    fn game_rules_and_difficulty_from_the_console() {
+        let mut w = world();
+        w.console("gamerule keepInventory true");
+        assert!(rules::bool("keepInventory"));
+        w.console("gamerule keepInventory sometimes");
+        assert!(rules::bool("keepInventory"), "bad values change nothing");
+        w.console("difficulty hard");
+        assert_eq!(rules::difficulty(), Difficulty::Hard);
+        rules::set("keepInventory", "false").unwrap();
+        rules::set_difficulty(Difficulty::Normal);
+    }
+
+    #[test]
+    fn kept_inventories_and_harmless_falls() {
+        let mut w = world();
+        let id = player(&mut w);
+        let dirt = Stack::new(ItemInfo::id_of("minecraft:dirt").unwrap(), 5);
+        w.players.get_mut(&id).unwrap().inventory.slots[10] = dirt;
+
+        rules::set("fallDamage", "false").unwrap();
+        w.damage(id, 5.0, survival::Damage::Fall);
+        assert_eq!(w.players[&id].health, 20.0);
+
+        rules::set("keepInventory", "true").unwrap();
+        w.damage(id, 100.0, survival::Damage::Kill);
+        assert!(!w.players[&id].alive);
+        assert_eq!(w.players[&id].inventory.slots[10], dirt);
+        rules::set("keepInventory", "false").unwrap();
+        rules::set("fallDamage", "true").unwrap();
     }
 }

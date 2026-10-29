@@ -15,8 +15,6 @@ use crate::blocks::{self, offset, prop, with, Dir};
 const FIRE_TICK: u64 = 30;
 const FIRE_TICK_SPREAD: u32 = 10;
 const MAX_AGE: u32 = 15;
-/// Normal difficulty, which adds to how readily fire spreads.
-const DIFFICULTY: u32 = 2;
 
 impl World {
     /// Flint and steel on a block: lights TNT, unlit campfires and candles, or sets fire
@@ -67,8 +65,8 @@ impl World {
             self.set_block_updating(pos, block::AIR);
             return;
         }
-        // Soul fire neither ages nor spreads.
-        if blocks::name(state) == "minecraft:soul_fire" {
+        // Soul fire neither ages nor spreads, nor does any fire without `doFireTick`.
+        if blocks::name(state) == "minecraft:soul_fire" || !crate::rules::bool("doFireTick") {
             return;
         }
         let below = self.block(offset(pos, Dir::Down));
@@ -175,7 +173,9 @@ impl World {
         if encouragement == 0 {
             return;
         }
-        let odds = (encouragement + 40 + DIFFICULTY * 7) / (age + 30);
+        // The harder the game, the more readily fire spreads.
+        let difficulty = crate::rules::difficulty() as u32;
+        let odds = (encouragement + 40 + difficulty * 7) / (age + 30);
         if odds == 0 || self.rng.below(divisor) > odds || self.rained_on(pos) {
             return;
         }

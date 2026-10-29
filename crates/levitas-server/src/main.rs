@@ -12,6 +12,7 @@ mod play;
 mod recipes;
 mod repair;
 mod rng;
+mod rules;
 mod terrain;
 #[cfg(test)]
 mod tests;
