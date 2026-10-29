@@ -49,7 +49,11 @@ impl World {
         // Using a container or a door works unless sneaking with something in hand.
         let clicked = self.block(pos);
         let may_use = hand == 0 && !(sneaking && !stack.is_empty());
-        if may_use && (self.open_container(id, pos, clicked) || self.interact(id, pos, clicked)) {
+        if may_use
+            && (self.use_sign(id, slot, pos, clicked)
+                || self.open_container(id, pos, clicked)
+                || self.interact(id, pos, clicked))
+        {
             return self.ack(id, sequence);
         }
 
@@ -79,6 +83,9 @@ impl World {
                     for &(q, state) in &blocks {
                         self.update_neighbors(q);
                         self.check_falling(q, state);
+                    }
+                    if let Some(&(q, _)) = blocks.first() {
+                        self.sign_placed(id, q);
                     }
                     if survival {
                         let p = self.players.get_mut(&id).expect("player exists");

@@ -32,6 +32,7 @@ pub enum BlockEntity {
     /// A block entity holding nothing Levitas tracks (daylight detectors, bells).
     Plain(Plain),
     Spawner(super::spawners::Spawner),
+    Sign(Box<super::signs::Sign>),
 }
 
 pub struct Plain {
@@ -93,14 +94,17 @@ impl BlockEntity {
             }
             BlockEntity::Plain(_) => ("minecraft:daylight_detector", &[][..]),
             BlockEntity::Spawner(_) => ("minecraft:mob_spawner", &[][..]),
+            BlockEntity::Sign(s) => (s.id(), &[][..]),
         };
         let mut nbt = Compound::new()
             .with("id", id)
             .with("x", pos.x)
             .with("y", pos.y)
             .with("z", pos.z)
-            .with("keepPacked", false)
-            .with("Items", items_to_nbt(items.iter().copied().enumerate()));
+            .with("keepPacked", false);
+        if !matches!(self, BlockEntity::Sign(_)) {
+            nbt.insert("Items", items_to_nbt(items.iter().copied().enumerate()));
+        }
         if let BlockEntity::Furnace(f) = self {
             let short = |v: i32| v.clamp(0, i32::from(i16::MAX)) as i16;
             nbt.insert("lit_time_remaining", short(f.burn_left));
@@ -114,6 +118,9 @@ impl BlockEntity {
         if let BlockEntity::Spawner(s) = self {
             s.to_nbt(&mut nbt);
         }
+        if let BlockEntity::Sign(s) = self {
+            s.write_nbt(&mut nbt);
+        }
         nbt
     }
 
@@ -122,6 +129,7 @@ impl BlockEntity {
         match self {
             BlockEntity::Campfire(c) => Some(c.network_data()),
             BlockEntity::Spawner(s) => Some(s.network_data()),
+            BlockEntity::Sign(s) => Some(s.network_data()),
             _ => None,
         }
     }
@@ -150,6 +158,9 @@ impl BlockEntity {
                 BlockEntity::Spawner(super::spawners::Spawner::read_nbt(nbt)?)
             }
             "minecraft:daylight_detector" => Self::for_block(block::DAYLIGHT_DETECTOR)?,
+            id @ ("minecraft:sign" | "minecraft:hanging_sign") => BlockEntity::Sign(Box::new(
+                super::signs::Sign::read_nbt(id == "minecraft:hanging_sign", nbt),
+            )),
             _ => return None,
         };
         let items = entity.items_mut();
@@ -214,7 +225,8 @@ impl BlockEntity {
                     ..Default::default()
                 }))
             }
-            _ => None,
+            _ => super::signs::sign_kind(state)
+                .map(|hanging| BlockEntity::Sign(Box::new(super::signs::Sign::new(hanging)))),
         }
     }
 
@@ -230,6 +242,7 @@ impl BlockEntity {
             BlockEntity::Campfire(_) => block_entity_type::CAMPFIRE,
             BlockEntity::Plain(p) => p.kind,
             BlockEntity::Spawner(_) => block_entity_type::MOB_SPAWNER,
+            BlockEntity::Sign(s) => s.type_id(),
         }
     }
 
@@ -247,7 +260,7 @@ impl BlockEntity {
             BlockEntity::Chest(c) => &c.items[..],
             BlockEntity::Furnace(f) => &f.items,
             BlockEntity::Campfire(c) => &c.items,
-            BlockEntity::Plain(_) | BlockEntity::Spawner(_) => &[],
+            BlockEntity::Plain(_) | BlockEntity::Spawner(_) | BlockEntity::Sign(_) => &[],
         }
     }
 
@@ -256,7 +269,7 @@ impl BlockEntity {
             BlockEntity::Chest(c) => &mut c.items[..],
             BlockEntity::Furnace(f) => &mut f.items,
             BlockEntity::Campfire(c) => &mut c.items,
-            BlockEntity::Plain(_) | BlockEntity::Spawner(_) => &mut [],
+            BlockEntity::Plain(_) | BlockEntity::Spawner(_) | BlockEntity::Sign(_) => &mut [],
         }
     }
 
@@ -267,6 +280,7 @@ impl BlockEntity {
             BlockEntity::Campfire(c) => &mut c.viewers,
             BlockEntity::Plain(p) => &mut p.viewers,
             BlockEntity::Spawner(s) => &mut s.viewers,
+            BlockEntity::Sign(s) => &mut s.viewers,
         }
     }
 }

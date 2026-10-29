@@ -83,7 +83,12 @@ Known gaps are listed under each phase instead of being hidden.
       Template, base and addition are each used up once.
 - [ ] Special crafting recipes: dyeing, fireworks, map and book cloning, banners,
       shields, repairing, decorated pots, transmute recipes
-- [ ] Signs (editing text), item frames, armor stands, flower pots, jukebox, note blocks
+- [ ] Signs (editing text), item frames, armor stands, flower pots, jukebox, note blocks.
+      Signs and hanging signs work (`world/signs.rs`): placing one opens its editor,
+      either side can be edited again by right-clicking it, dyes colour a side's text,
+      glow ink sacs make it glow and ink sacs undo that, honeycomb waxes it for good.
+      Text is saved in vanilla's format (older worlds' JSON lines are read too). Note
+      blocks work; item frames, armor stands, flower pots and jukeboxes do not yet.
 
 ## Phase 3: Fluids, gravity and light
 

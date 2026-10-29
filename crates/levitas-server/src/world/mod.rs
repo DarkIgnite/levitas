@@ -32,6 +32,7 @@ mod pathfinding;
 mod piston;
 mod portal;
 mod redstone;
+mod signs;
 mod spawners;
 mod storage;
 mod survival;
@@ -207,6 +208,13 @@ pub enum Event {
         id: i32,
         window: i32,
         button: i32,
+    },
+    /// The text typed into a sign's editor.
+    SignUpdate {
+        id: i32,
+        pos: BlockPos,
+        front: bool,
+        lines: [String; 4],
     },
     ContainerClose {
         id: i32,
@@ -716,6 +724,12 @@ impl World {
                 carried,
             } => self.container_click(id, window, slot, button, mode, changed, carried),
             Event::ContainerClose { id, window } => self.container_closed(id, window),
+            Event::SignUpdate {
+                id,
+                pos,
+                front,
+                lines,
+            } => self.update_sign(id, pos, front, lines),
             Event::ContainerButton { id, window, button } => self.window_button(id, window, button),
             Event::HeldSlot { id, slot } => {
                 if let (Some(p), Ok(slot)) = (self.players.get_mut(&id), usize::try_from(slot)) {

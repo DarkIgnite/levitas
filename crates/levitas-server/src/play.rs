@@ -236,6 +236,20 @@ fn decode(id: i32, packet: &[u8]) -> io::Result<Option<Event>> {
             window: r.varint()?,
             button: r.varint()?,
         },
+        serverbound::SIGN_UPDATE => {
+            let pos = r.position()?;
+            let front = r.bool()?;
+            let mut lines: [String; 4] = Default::default();
+            for line in &mut lines {
+                *line = r.string(384)?.to_owned();
+            }
+            Event::SignUpdate {
+                id,
+                pos,
+                front,
+                lines,
+            }
+        }
         serverbound::CONTAINER_CLOSE => Event::ContainerClose {
             id,
             window: r.varint()?,
