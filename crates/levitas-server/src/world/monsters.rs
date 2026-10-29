@@ -90,6 +90,14 @@ impl World {
     /// the monster is gone (a creeper that exploded).
     pub(super) fn hunt(&mut self, id: i32, mob: &mut Mob) -> bool {
         mob.attack_cooldown = mob.attack_cooldown.saturating_sub(1);
+        // Zombified piglins leave players alone unless angered.
+        if mob.kind == MobKind::ZombifiedPiglin {
+            mob.anger = mob.anger.saturating_sub(1);
+            if mob.anger == 0 {
+                mob.hunting = None;
+                return false;
+            }
+        }
         let range = mob.kind.follow_range();
         let head = BlockPos::new(
             mob.pos[0].floor() as i32,
@@ -130,6 +138,8 @@ impl World {
         if mob.kind == MobKind::Spider {
             // Spiders climb over whatever is in the way.
             mob.target = Some(([target[0], target[2]], 20));
+        } else if mob.kind == MobKind::MagmaCube {
+            // Magma cubes hop towards their prey instead of walking.
         } else {
             let goal = BlockPos::new(
                 target[0].floor() as i32,
@@ -172,7 +182,7 @@ impl World {
             self.send_to_viewers(mob, Writer::packet(clientbound::ANIMATE).varint(id).u8(0));
             self.damage_from(
                 pid,
-                mob.kind.attack_damage(),
+                mob.attack_damage(),
                 Damage::Mob(mob.kind.display()),
                 Some(id),
             );
@@ -284,7 +294,9 @@ impl World {
             .map(|c| c.get((feet.x & 15) as usize, feet.y, (feet.z & 15) as usize))
             .and_then(fluid_at)
             .is_some_and(|f| f.fluid == Fluid::Lava);
-        if in_lava {
+        if in_lava && mob.kind.fire_immune() {
+            mob.fire_ticks = 0;
+        } else if in_lava {
             // Lava burns everything for 15 seconds, and hurts twice a second.
             mob.fire_ticks = mob.fire_ticks.max(300);
             if self.tick.is_multiple_of(10) {
@@ -406,7 +418,11 @@ impl World {
         let Some(top) = self.top_block(x, z) else {
             return;
         };
-        let y = MIN_Y + self.rng.below((top - MIN_Y + 2) as u32) as i32;
+        let bottom = self.dimension.span().min_y();
+        if top < bottom {
+            return;
+        }
+        let y = bottom + self.rng.below((top - bottom + 2) as u32) as i32;
         let Some(biome) = self.biome_at(x, y, z) else {
             return;
         };
@@ -464,6 +480,10 @@ impl World {
             && !block_has_tag(below, "minecraft:impermeable");
         if !ground_ok || !open(feet) || !open(head) {
             return false;
+        }
+        // Nether monsters do not care how dark it is.
+        if !self.dimension.has_sky() {
+            return true;
         }
         let Some((sky, light)) = self.light_at(pos) else {
             return false;

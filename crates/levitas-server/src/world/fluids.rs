@@ -54,7 +54,7 @@ impl World {
     }
 
     fn schedule_fluid(&mut self, pos: BlockPos, fluid: Fluid) {
-        self.schedule_fluid_in(pos, fluid, fluid.delay());
+        self.schedule_fluid_in(pos, fluid, self.fluid_delay(fluid));
     }
 
     fn schedule_fluid_in(&mut self, pos: BlockPos, fluid: Fluid, delay: u64) {
@@ -140,7 +140,7 @@ impl World {
         if above.is_some_and(|f| f.fluid == fluid) {
             return Some(FluidState::falling(fluid));
         }
-        let amount = strongest.saturating_sub(fluid.drop_off());
+        let amount = strongest.saturating_sub(self.drop_off(fluid));
         (amount > 0).then(|| FluidState::flowing(fluid, amount))
     }
 
@@ -191,7 +191,7 @@ impl World {
         let amount = if state.falling {
             7
         } else {
-            state.amount.saturating_sub(state.fluid.drop_off())
+            state.amount.saturating_sub(self.drop_off(state.fluid))
         };
         if amount == 0 {
             return;
@@ -237,7 +237,7 @@ impl World {
             if self.is_hole(offset(next, Dir::Down), fluid) {
                 return depth;
             }
-            if depth < fluid.slope_distance() {
+            if depth < self.fluid_slope_distance(fluid) {
                 best = best.min(self.slope_distance(next, depth + 1, dir.opposite(), fluid));
             }
         }
@@ -349,6 +349,13 @@ impl World {
                 let Some((hit, face)) = self.ray_cast(eye, look, reach, false) else {
                     return true;
                 };
+                // In the Nether water boils away as it is poured.
+                if fluid == Fluid::Water && self.dimension.ultrawarm() {
+                    let pos = offset(hit, face);
+                    self.play_sound("minecraft:block.fire.extinguish", pos, None);
+                    self.exchange_held(id, slot, "minecraft:bucket");
+                    return true;
+                }
                 let clicked = self.block(hit);
                 let (pos, target) = if fluid == Fluid::Water && can_waterlog(clicked) {
                     (hit, with_bool(clicked, "waterlogged", true))
@@ -377,6 +384,29 @@ impl World {
             }
         }
         true
+    }
+
+    /// Ticks between flow steps: lava in the Nether runs three times as often.
+    fn fluid_delay(&self, fluid: Fluid) -> u64 {
+        match fluid {
+            Fluid::Lava if self.dimension.ultrawarm() => 10,
+            _ => fluid.delay(),
+        }
+    }
+
+    /// How much weaker fluid gets per block: Nether lava runs as far as water.
+    pub(super) fn drop_off(&self, fluid: Fluid) -> u8 {
+        match fluid {
+            Fluid::Lava if self.dimension.ultrawarm() => 1,
+            _ => fluid.drop_off(),
+        }
+    }
+
+    fn fluid_slope_distance(&self, fluid: Fluid) -> i32 {
+        match fluid {
+            Fluid::Lava if self.dimension.ultrawarm() => 4,
+            _ => fluid.slope_distance(),
+        }
     }
 
     /// Swaps one of the items in `slot` for one `result` (a bucket filled or emptied).

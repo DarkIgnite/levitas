@@ -214,6 +214,17 @@ impl World {
         if !blocks::is_bed(head_state) || self.players.get(&id).is_none_or(|p| !p.alive) {
             return true;
         }
+        // Beds anywhere but the overworld blow up, setting fires.
+        if !self.dimension.beds_work() {
+            let foot = blocks::other_part(head_state, head);
+            self.set_block(head, block::AIR);
+            if let Some(foot) = foot {
+                self.set_block(foot, block::AIR);
+            }
+            let centre = [head.x, head.y, head.z].map(|v| f64::from(v) + 0.5);
+            self.explode_with_fire(centre, 5.0, "[Intentional Game Design]");
+            return true;
+        }
         if self.players[&id].sleeping.is_some() {
             return true;
         }

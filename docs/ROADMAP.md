@@ -168,7 +168,11 @@ Known gaps are listed under each phase instead of being hidden.
       creepers (hiss and explode). They chase the nearest survival player straight on
       (no pathfinding yet), hit with knockback, and keep players from sleeping nearby.
       Skeletons keep their distance and shoot arrows when they can see their target.
-      Missing: baby/husk/drowned/stray variants, and the rest.
+      Nether: zombified piglins (neutral until hit, then their whole group within 20
+      blocks hunts the attacker for 20 to 39 seconds; golden swords) and magma cubes
+      (hop towards players, three sizes, split when they die, no fall damage); both
+      ignore fire and lava and spawn by the Nether biomes' lists regardless of light.
+      Missing: baby/husk/drowned/stray variants, ghasts, blazes, piglins, and the rest.
 - [ ] Mob drops, experience, equipment, babies, riding. Drops come from the vanilla
       entity loot tables (sheep drop their colour's wool); no experience yet.
 - [ ] Breeding, taming, leashes, name tags. Breeding works (`world/breeding.rs`): food
@@ -264,8 +268,9 @@ Known gaps are listed under each phase instead of being hidden.
       (chunks hold the overworld's 24 sections; only y = 0..255 is sent and saved).
       Chat and join/leave/death messages reach every dimension. Dying elsewhere
       respawns in the overworld. `/execute in <dimension> run tp` and `/tp` move
-      players. Missing: the End, Nether mobs and rules (water
-      evaporating, beds exploding), players in other dimensions in the tab list.
+      players. In the Nether water boils away when poured, beds blow up (power 5,
+      with fire), and lava runs as far as water, three times as often. Missing: the
+      End, players in other dimensions in the tab list.
 - [x] Nether portals (lighting, linking, travelling). `blocks/portal.rs` finds obsidian
       frames (2 to 21 wide, 3 to 21 high, corners optional) and fire in one lights it;
       portals go out when their frame breaks. `world/portal.rs`: standing in a portal

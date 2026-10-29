@@ -53,6 +53,16 @@ impl Dimension {
         self == Dimension::Overworld
     }
 
+    /// Whether water boils away and lava runs far and fast (the Nether).
+    pub fn ultrawarm(self) -> bool {
+        self == Dimension::Nether
+    }
+
+    /// Whether beds work; elsewhere they blow up.
+    pub fn beds_work(self) -> bool {
+        self == Dimension::Overworld
+    }
+
     /// Where the dimension keeps its regions, inside the world folder.
     pub fn folder(self, world: &Path) -> PathBuf {
         match self {
@@ -66,5 +76,64 @@ impl Dimension {
             Dimension::Overworld => 63,
             Dimension::Nether => 32,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::connection::Profile;
+    use crate::world::*;
+
+    #[test]
+    fn beds_blow_up_and_lava_runs_far_in_the_nether() {
+        let dir = std::env::temp_dir().join(format!(
+            "levitas-nether-rules-{}-{}",
+            std::process::id(),
+            next_entity_id()
+        ));
+        let (mut nether, _) = World::new_in(
+            dir,
+            NewWorld {
+                kind: WorldKind::Flat,
+                seed: Some(0),
+            },
+            Dimension::Nether,
+        );
+        use crate::blocks::fluid::Fluid;
+        assert_eq!(nether.drop_off(Fluid::Lava), 1);
+
+        nether.chunk(0, 0);
+        // A bed on a little stone floor high up in the Nether's open air.
+        let foot = BlockPos::new(5, 100, 5);
+        for x in 3..8 {
+            for z in 3..8 {
+                nether.set_block(BlockPos::new(x, 99, z), block::STONE);
+                for y in 100..104 {
+                    nether.set_block(BlockPos::new(x, y, z), block::AIR);
+                }
+            }
+        }
+        let bed = BlockInfo::by_name("minecraft:red_bed")
+            .unwrap()
+            .default_state;
+        let foot_state =
+            crate::blocks::with(crate::blocks::with(bed, "part", "foot"), "facing", "south");
+        nether.set_block(foot, foot_state);
+        nether.set_block(
+            BlockPos::new(5, 100, 6),
+            crate::blocks::with(foot_state, "part", "head"),
+        );
+        let (out, _frames) = mpsc::channel(1000);
+        let id = next_entity_id();
+        let profile = Profile {
+            name: "Alice".to_owned(),
+            uuid: 1,
+        };
+        nether
+            .players
+            .insert(id, Player::new(profile, out, [5.5, 100.0, 3.5]));
+        assert!(nether.use_bed(id, foot, foot_state));
+        assert!(is_air(nether.block(foot)), "the bed is gone");
+        assert!(nether.players[&id].health < 20.0, "and it hurt");
     }
 }

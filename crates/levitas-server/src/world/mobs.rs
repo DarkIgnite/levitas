@@ -35,6 +35,10 @@ const REACH: f64 = 6.0;
 const DEFAULT_CREATURE_PROBABILITY: f64 = 0.1;
 
 const DATA_SHEEP_WOOL: u8 = 17;
+const DATA_SLIME_SIZE: u8 = 16;
+const SERIALIZER_INT: i32 = 1;
+/// How far a hit zombified piglin's anger spreads to others.
+const PIGLIN_ALERT_RANGE: f64 = 20.0;
 const SERIALIZER_BYTE: i32 = 0;
 const SHEARED: u8 = 0x10;
 const ENTITY_EVENT_MOB_DEATH: i8 = 3;
@@ -70,6 +74,8 @@ pub enum MobKind {
     Spider,
     Creeper,
     Skeleton,
+    ZombifiedPiglin,
+    MagmaCube,
 }
 
 impl MobKind {
@@ -83,6 +89,8 @@ impl MobKind {
             "minecraft:spider" => Some(MobKind::Spider),
             "minecraft:creeper" => Some(MobKind::Creeper),
             "minecraft:skeleton" => Some(MobKind::Skeleton),
+            "minecraft:zombified_piglin" => Some(MobKind::ZombifiedPiglin),
+            "minecraft:magma_cube" => Some(MobKind::MagmaCube),
             _ => None,
         }
     }
@@ -97,6 +105,8 @@ impl MobKind {
             MobKind::Spider => "minecraft:spider",
             MobKind::Creeper => "minecraft:creeper",
             MobKind::Skeleton => "minecraft:skeleton",
+            MobKind::ZombifiedPiglin => "minecraft:zombified_piglin",
+            MobKind::MagmaCube => "minecraft:magma_cube",
         }
     }
 
@@ -111,14 +121,26 @@ impl MobKind {
             MobKind::Spider => "Spider",
             MobKind::Creeper => "Creeper",
             MobKind::Skeleton => "Skeleton",
+            MobKind::ZombifiedPiglin => "Zombified Piglin",
+            MobKind::MagmaCube => "Magma Cube",
         }
     }
 
     pub fn is_monster(self) -> bool {
         matches!(
             self,
-            MobKind::Zombie | MobKind::Spider | MobKind::Creeper | MobKind::Skeleton
+            MobKind::Zombie
+                | MobKind::Spider
+                | MobKind::Creeper
+                | MobKind::Skeleton
+                | MobKind::ZombifiedPiglin
+                | MobKind::MagmaCube
         )
+    }
+
+    /// Whether fire and lava leave it unhurt.
+    pub fn fire_immune(self) -> bool {
+        matches!(self, MobKind::ZombifiedPiglin | MobKind::MagmaCube)
     }
 
     /// Melee damage on Normal difficulty.
@@ -126,6 +148,8 @@ impl MobKind {
         match self {
             MobKind::Zombie => 3.0,
             MobKind::Spider => 2.0,
+            // With its golden sword.
+            MobKind::ZombifiedPiglin => 8.0,
             _ => 0.0,
         }
     }
@@ -133,7 +157,7 @@ impl MobKind {
     /// How far away a monster notices players.
     pub fn follow_range(self) -> f64 {
         match self {
-            MobKind::Zombie => 35.0,
+            MobKind::Zombie | MobKind::ZombifiedPiglin => 35.0,
             _ => 16.0,
         }
     }
@@ -152,6 +176,8 @@ impl MobKind {
             MobKind::Spider => entity_type::SPIDER,
             MobKind::Creeper => entity_type::CREEPER,
             MobKind::Skeleton => entity_type::SKELETON,
+            MobKind::ZombifiedPiglin => entity_type::ZOMBIFIED_PIGLIN,
+            MobKind::MagmaCube => entity_type::MAGMA_CUBE,
         }
     }
 
@@ -161,7 +187,10 @@ impl MobKind {
             MobKind::Sheep => 8.0,
             MobKind::Chicken => 4.0,
             MobKind::Zombie | MobKind::Creeper | MobKind::Skeleton => 20.0,
+            MobKind::ZombifiedPiglin => 20.0,
             MobKind::Spider => 16.0,
+            // A magma cube's health is its size squared; this is the smallest's.
+            MobKind::MagmaCube => 1.0,
         }
     }
 
@@ -176,6 +205,8 @@ impl MobKind {
             MobKind::Spider => (1.4, 0.9),
             MobKind::Creeper => (0.6, 1.7),
             MobKind::Skeleton => (0.6, 1.99),
+            MobKind::ZombifiedPiglin => (0.6, 1.95),
+            MobKind::MagmaCube => (0.52, 0.52),
         }
     }
 
@@ -186,7 +217,9 @@ impl MobKind {
             MobKind::Zombie => 0.12,
             MobKind::Spider => 0.15,
             MobKind::Creeper => 0.11,
-            MobKind::Skeleton => 0.12,
+            MobKind::Skeleton | MobKind::ZombifiedPiglin => 0.12,
+            // Magma cubes only move by hopping.
+            MobKind::MagmaCube => 0.0,
             _ => 0.1,
         }
     }
@@ -202,6 +235,8 @@ impl MobKind {
             MobKind::Spider => "spider",
             MobKind::Creeper => "creeper",
             MobKind::Skeleton => "skeleton",
+            MobKind::ZombifiedPiglin => "zombified_piglin",
+            MobKind::MagmaCube => "magma_cube",
         }
     }
 }
@@ -249,6 +284,11 @@ pub struct Mob {
     pub sheared: bool,
     /// Chicken: ticks until the next egg.
     egg_ticks: u32,
+    /// Zombified piglins: ticks left of anger.
+    pub anger: u32,
+    /// Magma cubes: size (1, 2 or 4) and ticks until the next hop.
+    pub slime_size: u8,
+    jump_cooldown: u32,
     /// What players were last told.
     sent_pos: [f64; 3],
     sent_angles: (u8, u8),
@@ -258,6 +298,16 @@ pub struct Mob {
 
 impl Mob {
     pub fn new(kind: MobKind, pos: [f64; 3], rng: &mut Rng) -> Mob {
+        let slime_size: u8 = if kind == MobKind::MagmaCube {
+            1 << rng.below(3)
+        } else {
+            1
+        };
+        let health = if kind == MobKind::MagmaCube {
+            f32::from(slime_size * slime_size)
+        } else {
+            kind.max_health()
+        };
         Mob {
             kind,
             uuid: (u128::from(rng.next_u64()) << 64) | u128::from(rng.next_u64()),
@@ -267,7 +317,7 @@ impl Mob {
             yaw: rng.f64() as f32 * 360.0,
             head_yaw: 0.0,
             on_ground: false,
-            health: kind.max_health(),
+            health,
             fall_distance: 0.0,
             hurt_ticks: 0,
             last_damage: 0.0,
@@ -293,19 +343,36 @@ impl Mob {
             },
             sheared: false,
             egg_ticks: 6000 + rng.below(6000),
+            anger: 0,
+            slime_size,
+            jump_cooldown: 0,
             sent_pos: pos,
             sent_angles: (0, 0),
             viewers: HashSet::new(),
         }
     }
 
-    /// Hitbox width and height: babies are half size.
+    /// Hitbox width and height: babies are half size, magma cubes grow with theirs.
     pub fn size(&self) -> (f64, f64) {
         let (width, height) = self.kind.size();
+        if self.kind == MobKind::MagmaCube {
+            let s = f64::from(self.slime_size);
+            return (width * s, height * s);
+        }
         if self.age < 0 {
             (width / 2.0, height / 2.0)
         } else {
             (width, height)
+        }
+    }
+
+    /// Melee damage: a magma cube's grows with its size.
+    pub fn attack_damage(&self) -> f32 {
+        match (self.kind, self.slime_size) {
+            (MobKind::MagmaCube, 1) => 3.0,
+            (MobKind::MagmaCube, 2) => 4.0,
+            (MobKind::MagmaCube, _) => 6.0,
+            (kind, _) => kind.attack_damage(),
         }
     }
 
@@ -349,6 +416,22 @@ impl Mob {
         }
         if self.age < 0 {
             packets.push(super::breeding::baby_data(id, true));
+        }
+        if self.kind == MobKind::MagmaCube {
+            packets.push(
+                Writer::packet(clientbound::SET_ENTITY_DATA)
+                    .varint(id)
+                    .u8(DATA_SLIME_SIZE)
+                    .varint(SERIALIZER_INT)
+                    .varint(i32::from(self.slime_size))
+                    .u8(0xFF),
+            );
+        }
+        if self.kind == MobKind::ZombifiedPiglin {
+            if let Some(sword) = ItemInfo::id_of("minecraft:golden_sword") {
+                let packet = Writer::packet(clientbound::SET_EQUIPMENT).varint(id).u8(0);
+                packets.push(crate::inventory::write_stack(packet, Stack::new(sword, 1)));
+            }
         }
         if self.kind == MobKind::Skeleton {
             // Skeletons hold a bow.
@@ -410,6 +493,8 @@ impl Mob {
                 nbt.insert("Sheared", self.sheared);
             }
             MobKind::Chicken => nbt.insert("EggLayTime", self.egg_ticks as i32),
+            MobKind::MagmaCube => nbt.insert("Size", i32::from(self.slime_size) - 1),
+            MobKind::ZombifiedPiglin => nbt.insert("AngerTime", self.anger as i32),
             _ => {}
         }
         nbt
@@ -431,6 +516,10 @@ impl Mob {
         if let Some(Tag::Float(yaw)) = nbt.list("Rotation").and_then(|r| r.first()) {
             mob.yaw = *yaw;
         }
+        if let Some(size) = nbt.int("Size").filter(|_| kind == MobKind::MagmaCube) {
+            mob.slime_size = (size.clamp(0, 3) as u8 + 1).next_power_of_two().min(4);
+        }
+        mob.anger = nbt.int("AngerTime").unwrap_or(0).max(0) as u32;
         mob.health = nbt.float("Health").map_or(kind.max_health(), |h| h as f32);
         if mob.health <= 0.0 {
             return None;
@@ -485,8 +574,17 @@ struct SpawnList {
 }
 
 /// Mobs `/summon` knows.
-pub const SUMMONABLE: [&str; 8] = [
-    "cow", "pig", "sheep", "chicken", "zombie", "spider", "creeper", "skeleton",
+pub const SUMMONABLE: [&str; 10] = [
+    "cow",
+    "pig",
+    "sheep",
+    "chicken",
+    "zombie",
+    "spider",
+    "creeper",
+    "skeleton",
+    "zombified_piglin",
+    "magma_cube",
 ];
 
 fn spawners(list: &Value) -> Vec<Spawner> {
@@ -657,6 +755,9 @@ impl World {
             if mob.kind.is_monster() && self.hunt(id, &mut mob) {
                 continue; // exploded
             }
+            if mob.kind == MobKind::MagmaCube {
+                self.hop(&mut mob);
+            }
             self.step(&mut mob);
             self.burn_in_daylight(id, &mut mob);
             self.animal_chores(id, &mut mob);
@@ -708,6 +809,33 @@ impl World {
             Some(p) if !panicking => yaw_towards(eyes, p),
             _ => mob.yaw,
         };
+    }
+
+    /// Magma cubes move only by hopping: towards their prey, or anywhere, now and then.
+    fn hop(&mut self, mob: &mut Mob) {
+        mob.target = None;
+        mob.jump_cooldown = mob.jump_cooldown.saturating_sub(1);
+        if !mob.on_ground || mob.jump_cooldown > 0 {
+            return;
+        }
+        let prey = mob
+            .hunting
+            .and_then(|pid| self.players.get(&pid))
+            .map(|p| p.pos);
+        let yaw = match prey {
+            Some(p) => f64::from(yaw_towards(mob.pos, p)),
+            None => self.rng.f64() * 360.0,
+        }
+        .to_radians();
+        let s = f64::from(mob.slime_size);
+        mob.yaw = yaw.to_degrees() as f32;
+        mob.vel[1] = 0.42 + 0.1 * s;
+        let push = 0.1 + 0.05 * s;
+        mob.knockback = [-yaw.sin() * push, yaw.cos() * push];
+        // Angry cubes hop three times as often.
+        let wait = 10 + self.rng.below(20);
+        mob.jump_cooldown = if prey.is_some() { wait / 3 } else { wait };
+        self.mob_sound(mob, "minecraft:entity.magma_cube.jump");
     }
 
     /// Moves the mob one tick: walking, jumping, swimming, gravity and collisions.
@@ -783,7 +911,10 @@ impl World {
 
         if mob.on_ground || in_water {
             let fallen = std::mem::take(&mut mob.fall_distance);
-            if !in_water && fallen > 3.0 && mob.kind != MobKind::Chicken {
+            if !in_water
+                && fallen > 3.0
+                && !matches!(mob.kind, MobKind::Chicken | MobKind::MagmaCube)
+            {
                 mob.health -= (fallen - 3.0).ceil() as f32;
             }
         } else if pos[1] < mob.pos[1] {
@@ -1073,6 +1204,7 @@ impl World {
         }
         mob.hurt_ticks = HURT_TICKS;
         mob.health -= dealt;
+        let anger_piglins = by_player.filter(|_| mob.kind == MobKind::ZombifiedPiglin);
         if let Some(attacker) = by_player {
             mob.killed_by_player = true;
             mob.looting = self
@@ -1111,8 +1243,34 @@ impl World {
             let sound = format!("minecraft:entity.{}.hurt", mob.kind.sound());
             self.mob_sound(&mob, &sound);
         }
+        let at = mob.pos;
         self.mobs.insert(target, mob);
+        if let Some(attacker) = anger_piglins {
+            self.anger_piglins(at, attacker);
+        }
         true
+    }
+
+    /// Hitting a zombified piglin angers every one around it at the attacker, for 20
+    /// to 39 seconds.
+    fn anger_piglins(&mut self, at: [f64; 3], attacker: i32) {
+        let ids: Vec<i32> = self
+            .mobs
+            .iter()
+            .filter(|(_, m)| {
+                m.kind == MobKind::ZombifiedPiglin
+                    && m.alive()
+                    && (m.pos[0] - at[0]).hypot(m.pos[2] - at[2]) <= PIGLIN_ALERT_RANGE
+            })
+            .map(|(&id, _)| id)
+            .collect();
+        for id in ids {
+            let anger = 400 + self.rng.below(380);
+            if let Some(m) = self.mobs.get_mut(&id) {
+                m.anger = anger;
+                m.hunting = Some(attacker);
+            }
+        }
     }
 
     fn kill_mob(&mut self, id: i32, mob: &mut Mob) {
@@ -1122,6 +1280,22 @@ impl World {
         mob.dying = Some(0);
         mob.health = 0.0;
         self.send_to_viewers(mob, entity_event(id, ENTITY_EVENT_MOB_DEATH));
+        // A big magma cube breaks into two to four smaller ones.
+        if mob.kind == MobKind::MagmaCube && mob.slime_size > 1 {
+            let size = mob.slime_size / 2;
+            for _ in 0..2 + self.rng.below(3) {
+                let offset = |rng: &mut Rng| (rng.f64() - 0.5) * f64::from(size) * 0.5;
+                let at = [
+                    mob.pos[0] + offset(&mut self.rng),
+                    mob.pos[1] + 0.5,
+                    mob.pos[2] + offset(&mut self.rng),
+                ];
+                let mut small = Mob::new(MobKind::MagmaCube, at, &mut self.rng);
+                small.slime_size = size;
+                small.health = f32::from(size * size);
+                self.mobs.insert(next_entity_id(), small);
+            }
+        }
         let sound = format!("minecraft:entity.{}.death", mob.kind.sound());
         self.mob_sound(mob, &sound);
         if mob.age < 0 {
@@ -1510,5 +1684,61 @@ mod path_tests {
             .expect("a way");
         assert!(path.contains(&BlockPos::new(3, -59, 0)), "{path:?}");
         assert_eq!(path.last(), Some(&goal));
+    }
+
+    #[test]
+    fn hitting_a_zombified_piglin_angers_its_group() {
+        let mut world = flat_world();
+        let player = next_entity_id();
+        let profile = crate::connection::Profile {
+            name: "Alice".to_owned(),
+            uuid: 1,
+        };
+        let (out, _frames) = mpsc::channel(1000);
+        world
+            .players
+            .insert(player, Player::new(profile, out, [0.5, -60.0, 0.5]));
+        let near = next_entity_id();
+        let far = next_entity_id();
+        let hit = next_entity_id();
+        for (id, x) in [(hit, 3.0), (near, 8.0), (far, 60.0)] {
+            let m = Mob::new(MobKind::ZombifiedPiglin, [x, -60.0, 0.5], &mut world.rng);
+            world.mobs.insert(id, m);
+        }
+        // Left alone, they leave the player alone.
+        let mut m = world.mobs.remove(&hit).unwrap();
+        world.hunt(hit, &mut m);
+        assert_eq!(m.hunting, None);
+        world.mobs.insert(hit, m);
+
+        world.hit_mob(
+            hit,
+            1.0,
+            Some(player),
+            [1.0, 0.0],
+            "minecraft:player_attack",
+        );
+        assert_eq!(world.mobs[&hit].hunting, Some(player));
+        assert_eq!(world.mobs[&near].hunting, Some(player));
+        assert_eq!(world.mobs[&far].hunting, None);
+    }
+
+    #[test]
+    fn big_magma_cubes_split_into_smaller_ones() {
+        let mut world = flat_world();
+        let mut cube = Mob::new(MobKind::MagmaCube, [0.5, -60.0, 0.5], &mut world.rng);
+        cube.slime_size = 4;
+        cube.health = 16.0;
+        assert_eq!(cube.size(), (2.08, 2.08));
+        assert_eq!(cube.attack_damage(), 6.0);
+        let id = next_entity_id();
+        world.kill_mob(id, &mut cube);
+        let small: Vec<&Mob> = world
+            .mobs
+            .values()
+            .filter(|m| m.kind == MobKind::MagmaCube)
+            .collect();
+        assert!((2..=4).contains(&small.len()), "{}", small.len());
+        assert!(small.iter().all(|m| m.slime_size == 2 && m.health == 4.0));
     }
 }

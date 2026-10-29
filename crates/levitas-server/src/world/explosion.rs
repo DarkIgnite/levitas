@@ -8,7 +8,7 @@ use std::collections::HashSet;
 use super::*;
 use levitas_registry::sound_id;
 
-use crate::blocks::{self, fluid::fluid_at};
+use crate::blocks::{self, fluid::fluid_at, offset, Dir};
 use crate::world::survival::Damage;
 
 /// Rays start from the surface of a 16x16x16 cube of directions.
@@ -19,7 +19,29 @@ const DECAY_PER_STEP: f32 = 0.225;
 
 impl World {
     /// An explosion of `power` at `centre` (a creeper is 3, TNT 4), caused by `by`.
-    pub(super) fn explode(&mut self, centre: [f64; 3], power: f32, by: &'static str) {
+    /// An explosion that also starts fires: a third of the blocks it clears that stand
+    /// on something solid catch fire (beds in the Nether, ghast fireballs).
+    pub(super) fn explode_with_fire(&mut self, centre: [f64; 3], power: f32, by: &'static str) {
+        let destroyed = self.explode(centre, power, by);
+        for pos in destroyed {
+            if self.rng.below(3) != 0 || !is_air(self.block(pos)) {
+                continue;
+            }
+            if let Some(fire) = crate::blocks::fire::fire_for(pos, &mut |q| self.block(q)) {
+                if crate::blocks::sturdy(self.block(offset(pos, Dir::Down)), Dir::Up) {
+                    self.light_fire(pos, fire);
+                }
+            }
+        }
+    }
+
+    /// An explosion of `power` at `centre` caused by `by`; returns the blocks it broke.
+    pub(super) fn explode(
+        &mut self,
+        centre: [f64; 3],
+        power: f32,
+        by: &'static str,
+    ) -> Vec<BlockPos> {
         let destroyed = self.blast_rays(centre, power);
 
         // Blocks break; each drops what it would with a chance of 1 in `power`.
@@ -129,6 +151,7 @@ impl World {
             };
             self.send(id, packet.varint(particle).varint(sound));
         }
+        destroyed.into_iter().collect()
     }
 
     /// The blocks an explosion breaks.

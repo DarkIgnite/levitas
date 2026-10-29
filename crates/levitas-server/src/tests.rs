@@ -1861,12 +1861,21 @@ async fn killing_mobs_gives_experience() {
     }
     let orb = spawned(&mut alice, entity_type::EXPERIENCE_ORB).await;
     // The orb drops right next to the player, who absorbs it: it flies in, then goes.
-    let body = read_until(&mut alice, play::clientbound::TAKE_ITEM_ENTITY).await;
-    assert_eq!(Reader::new(&body).varint().unwrap(), orb);
-    let body = read_until(&mut alice, play::clientbound::REMOVE_ENTITIES).await;
-    let mut r = Reader::new(&body);
-    assert_eq!(r.varint().unwrap(), 1);
-    assert_eq!(r.varint().unwrap(), orb);
+    // (The beef may be picked up first.)
+    loop {
+        let body = read_until(&mut alice, play::clientbound::TAKE_ITEM_ENTITY).await;
+        if Reader::new(&body).varint().unwrap() == orb {
+            break;
+        }
+    }
+    loop {
+        let body = read_until(&mut alice, play::clientbound::REMOVE_ENTITIES).await;
+        let mut r = Reader::new(&body);
+        assert_eq!(r.varint().unwrap(), 1);
+        if r.varint().unwrap() == orb {
+            break;
+        }
+    }
     experience_until(&mut alice, |_, _, total| (1..=3).contains(&total)).await;
 }
 

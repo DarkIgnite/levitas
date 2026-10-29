@@ -249,6 +249,10 @@ impl World {
                 self.level_event(LEVEL_EVENT_SHOOT, pos, 0);
                 Some(None)
             }
+            "minecraft:water_bucket" if replaceable && self.dimension.ultrawarm() => {
+                self.play_sound("minecraft:block.fire.extinguish", front, None);
+                Some(Some("minecraft:bucket"))
+            }
             "minecraft:water_bucket" | "minecraft:lava_bucket" if replaceable => {
                 let fluid = if name == "minecraft:water_bucket" {
                     block::WATER

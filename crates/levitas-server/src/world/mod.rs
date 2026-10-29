@@ -1203,9 +1203,7 @@ impl World {
         self.tick_mobs();
         self.tick_arrows();
         self.tick_orbs();
-        if self.dimension == Dimension::Overworld {
-            self.tick_monster_spawning();
-        }
+        self.tick_monster_spawning();
         self.tick_survival();
         self.tick_hazards();
         self.tick_portals();
