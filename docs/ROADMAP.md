@@ -88,7 +88,7 @@ Known gaps are listed under each phase instead of being hidden.
       either side can be edited again by right-clicking it, dyes colour a side's text,
       glow ink sacs make it glow and ink sacs undo that, honeycomb waxes it for good.
       Text is saved in vanilla's format (older worlds' JSON lines are read too). Note
-      blocks and item frames work; armor stands, flower pots and jukeboxes do not yet.
+      blocks, item frames and armor stands work; flower pots and jukeboxes do not yet.
 
 ## Phase 3: Fluids, gravity and light
 
@@ -168,7 +168,11 @@ Known gaps are listed under each phase instead of being hidden.
       fit the wall. Both fall off when their wall goes and are saved in vanilla's
       form. Missing: chest boats, two seats, mobs riding, chest, hopper, furnace and
       TNT minecarts, carts bumping into each other, maps in frames, comparators
-      reading frames, armor stands.
+      reading frames. Armor stands (`world/armor_stands.rs`) are placed facing the
+      player, dressed with armor (swapping what was worn), undressed by clicking the
+      part with an empty hand, broken by two quick hits (dropping what they wore),
+      fall when unsupported and are saved with their equipment; no arms, poses or
+      small stands yet.
 - [x] TNT and explosions. Explosions (`world/explosion.rs`) cast rays like vanilla,
       break blocks by blast resistance (dropping them 1 in `power` times, containers
       spilling), and damage and push entities; creepers use them. TNT (`world/tnt.rs`)

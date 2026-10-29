@@ -57,7 +57,10 @@ impl World {
             return self.ack(id, sequence);
         }
 
-        if self.place_minecart(id, slot, pos) || self.place_hanging(id, slot, pos, face) {
+        if self.place_minecart(id, slot, pos)
+            || self.place_hanging(id, slot, pos, face)
+            || self.place_armor_stand(id, slot, pos, face)
+        {
             return self.ack(id, sequence);
         }
         if !stack.is_empty() && self.use_tool_on_block(id, slot, pos, face, clicked) {

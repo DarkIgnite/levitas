@@ -3,6 +3,7 @@
 //! packet frames, so world state needs no locks.
 
 mod admin;
+mod armor_stands;
 mod arrows;
 mod boats;
 mod breeding;
@@ -255,6 +256,13 @@ pub enum Event {
         target: i32,
     },
     /// The player used the item in `hand` on an entity.
+    /// A right-click on an entity at a point on it, relative to its position.
+    UseEntityAt {
+        id: i32,
+        target: i32,
+        hand: i32,
+        at: [f32; 3],
+    },
     UseEntity {
         id: i32,
         target: i32,
@@ -567,6 +575,7 @@ struct World {
     carts: HashMap<i32, minecarts::Cart>,
     /// Item frames and paintings.
     hanging: HashMap<i32, hanging::Hanging>,
+    armor_stands: HashMap<i32, armor_stands::ArmorStand>,
     /// Detector rails a cart is powering.
     detectors: HashSet<BlockPos>,
     eyes: HashMap<i32, end_portal::EyeOfEnder>,
@@ -672,6 +681,7 @@ impl World {
             boats: HashMap::new(),
             carts: HashMap::new(),
             hanging: HashMap::new(),
+            armor_stands: HashMap::new(),
             detectors: HashSet::new(),
             eyes: HashMap::new(),
             fight: None,
@@ -805,10 +815,20 @@ impl World {
             }
             Event::LeaveBed { id } => self.wake_up(id),
             Event::Attack { id, target } => self.attack(id, target),
+            Event::UseEntityAt {
+                id,
+                target,
+                hand,
+                at,
+            } => {
+                self.use_armor_stand(id, target, hand, f64::from(at[1]));
+            }
             Event::UseEntity { id, target, hand } => {
+                // Armor stands take the click with its height on them instead.
                 if !self.board_boat(id, target)
                     && !self.board_cart(id, target)
                     && !self.use_hanging(id, target, hand)
+                    && !self.armor_stands.contains_key(&target)
                 {
                     self.use_on_mob(id, target, hand);
                 }
@@ -995,6 +1015,7 @@ impl World {
         packets.extend(self.boat_packets());
         packets.extend(self.cart_packets());
         packets.extend(self.hanging_packets());
+        packets.extend(self.armor_stand_packets());
         packets.extend(self.eye_packets());
         packets.extend(self.dragon_packets());
         packets.extend(self.orb_packets());
@@ -1363,6 +1384,7 @@ impl World {
         self.tick_boats();
         self.tick_minecarts();
         self.tick_hanging();
+        self.tick_armor_stands();
         self.tick_eyes();
         self.tick_orbs();
         self.tick_monster_spawning();

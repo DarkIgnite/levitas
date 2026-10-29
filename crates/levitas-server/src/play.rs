@@ -23,6 +23,7 @@ const PLAYER_COMMAND_LEAVE_BED: i32 = 0;
 /// Most components read from one creative-mode item.
 const MAX_COMPONENTS: i32 = 64;
 const INTERACT_USE: i32 = 0;
+const INTERACT_AT: i32 = 2;
 const INTERACT_ATTACK: i32 = 1;
 const PLAYER_COMMAND_START_SPRINTING: i32 = 1;
 const PLAYER_COMMAND_STOP_SPRINTING: i32 = 2;
@@ -309,7 +310,15 @@ fn decode(id: i32, packet: &[u8]) -> io::Result<Option<Event>> {
                     target,
                     hand: r.varint()?,
                 },
-                // "Interact at" comes along with "interact" and is not needed.
+                INTERACT_AT => {
+                    let at = [r.f32()?, r.f32()?, r.f32()?];
+                    Event::UseEntityAt {
+                        id,
+                        target,
+                        at,
+                        hand: r.varint()?,
+                    }
+                }
                 _ => return Ok(None),
             }
         }

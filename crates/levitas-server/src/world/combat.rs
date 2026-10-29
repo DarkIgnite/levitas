@@ -41,6 +41,7 @@ impl World {
             || self.hit_boat(attacker, target)
             || self.hit_cart(attacker, target)
             || self.hit_hanging(attacker, target)
+            || self.hit_armor_stand(attacker, target)
         {
             return;
         }

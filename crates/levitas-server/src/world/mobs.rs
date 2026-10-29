@@ -1664,6 +1664,12 @@ impl World {
                 .filter(|h| h.chunk() == (cx, cz))
                 .map(|h| Tag::Compound(h.to_nbt())),
         );
+        entities.extend(
+            self.armor_stands
+                .values()
+                .filter(|s| s.chunk() == (cx, cz))
+                .map(|s| Tag::Compound(s.to_nbt())),
+        );
         Compound::new()
             .with("DataVersion", DATA_VERSION)
             .with("Position", vec![cx, cz])
@@ -1680,6 +1686,11 @@ impl World {
             .chain(self.boats.values().map(super::boats::Boat::chunk))
             .chain(self.carts.values().map(super::minecarts::Cart::chunk))
             .chain(self.hanging.values().map(super::hanging::Hanging::chunk))
+            .chain(
+                self.armor_stands
+                    .values()
+                    .map(super::armor_stands::ArmorStand::chunk),
+            )
             .collect();
         let chunks: Vec<(i32, i32)> = now
             .union(&self.mob_chunks)
@@ -1733,11 +1744,18 @@ impl World {
             .filter(|(_, h)| h.chunk() == (x, z))
             .map(|(&id, _)| id)
             .collect();
+        let stand_ids: Vec<i32> = self
+            .armor_stands
+            .iter()
+            .filter(|(_, s)| s.chunk() == (x, z))
+            .map(|(&id, _)| id)
+            .collect();
         if ids.is_empty()
             && item_ids.is_empty()
             && boat_ids.is_empty()
             && cart_ids.is_empty()
             && hanging_ids.is_empty()
+            && stand_ids.is_empty()
             && !had_mobs
         {
             return;
@@ -1761,6 +1779,10 @@ impl World {
         }
         for id in hanging_ids {
             self.hanging.remove(&id);
+            self.broadcast(items::remove_entity(id), None);
+        }
+        for id in stand_ids {
+            self.armor_stands.remove(&id);
             self.broadcast(items::remove_entity(id), None);
         }
     }
@@ -1788,6 +1810,15 @@ impl World {
                     }
                     self.items.insert(id, item);
                 }
+                continue;
+            }
+            if let Some(s) = super::armor_stands::ArmorStand::from_nbt(entity, &mut self.rng) {
+                self.mob_chunks.insert(s.chunk());
+                let id = next_entity_id();
+                for packet in super::armor_stands::spawn_packets(id, &s) {
+                    self.broadcast(packet, None);
+                }
+                self.armor_stands.insert(id, s);
                 continue;
             }
             if let Some(h) = super::hanging::Hanging::from_nbt(entity, &mut self.rng) {
