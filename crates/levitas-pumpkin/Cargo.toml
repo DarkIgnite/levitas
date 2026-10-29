@@ -8,10 +8,12 @@ repository.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+levitas-nbt.workspace = true
 levitas-registry.workspace = true
 levitas-world.workspace = true
 # Pumpkin (GPL-3.0, https://github.com/Pumpkin-MC/Pumpkin), pinned to a known revision.
 pumpkin-config = { git = "https://github.com/Pumpkin-MC/Pumpkin", rev = "cd9e98c966919541fe951d78dfdf8d3401e10112" }
+pumpkin-nbt = { git = "https://github.com/Pumpkin-MC/Pumpkin", rev = "cd9e98c966919541fe951d78dfdf8d3401e10112" }
 pumpkin-data = { git = "https://github.com/Pumpkin-MC/Pumpkin", rev = "cd9e98c966919541fe951d78dfdf8d3401e10112" }
 pumpkin-util = { git = "https://github.com/Pumpkin-MC/Pumpkin", rev = "cd9e98c966919541fe951d78dfdf8d3401e10112" }
 pumpkin-world = { git = "https://github.com/Pumpkin-MC/Pumpkin", rev = "cd9e98c966919541fe951d78dfdf8d3401e10112" }

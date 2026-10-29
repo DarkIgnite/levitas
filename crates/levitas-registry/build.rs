@@ -94,6 +94,14 @@ fn main() {
     embed_json_dir(
         &data,
         &out_dir,
+        "loot_table/chests",
+        "CHEST_LOOT_JSON",
+        "Chest loot tables as JSON: an object mapping `minecraft:<path under chests/>` to loot tables.",
+        &mut out,
+    );
+    embed_json_dir(
+        &data,
+        &out_dir,
         "worldgen/biome",
         "BIOMES_JSON",
         "Biome definitions as JSON (spawners, spawn probabilities, climate, ...).",

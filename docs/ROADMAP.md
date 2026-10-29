@@ -352,9 +352,14 @@ Known gaps are listed under each phase instead of being hidden.
       Pumpkin targets a newer Minecraft version, so its newer blocks and biomes become
       their closest 1.21.8 relatives (poplar wood as birch, sulfur as sandstone, ...).
 - [x] Features: trees, ores, flowers, lakes, ...
-- [ ] Structures: villages, strongholds, mineshafts, temples, monuments, ...
-      Pumpkin places them, but their chests, spawners and other block entities are not
-      created yet, so structure chests are empty.
+- [x] Structures: villages, strongholds, mineshafts, temples, monuments, ...
+      Pumpkin places them along with their block entities, which come out with each
+      generated chunk. Chests, barrels and dispensers naming a loot table are filled
+      from vanilla's chest tables when their chunk arrives (`loot.rs`: random slots,
+      split stacks, enchanted and worn gear, enchanted books); spawners keep the mob
+      the generator gave them. Saved chests from vanilla worlds that were never opened
+      are filled when loaded. Known gaps: decorated pots, suspicious sand and gravel,
+      mineshaft chest minecarts, and potions, maps and names in loot.
 - [ ] Nether and End generation
 - [ ] Loading existing Leaf/vanilla worlds (pre-generated terrain)
 

@@ -1413,13 +1413,18 @@ impl World {
     /// for them.
     fn area_generated(&mut self, area: Vec<Generated>) {
         let size = self.terrain.area();
-        if let Some(&((x, z), _)) = area.first() {
+        if let Some(&Generated { pos: (x, z), .. }) = area.first() {
             self.generating
                 .remove(&(x.div_euclid(size), z.div_euclid(size)));
         }
         let mut new = Vec::with_capacity(area.len());
         let mut fresh = Vec::new();
-        for (pos, chunk) in area {
+        for Generated {
+            pos,
+            chunk,
+            block_entities,
+        } in area
+        {
             // Chunks generated on the spot meanwhile, or saved before, stay as they are.
             if self.chunks.contains_key(&pos) {
                 continue;
@@ -1433,6 +1438,10 @@ impl World {
                     self.chunks.insert(pos, chunk);
                     self.dirty.insert(pos);
                     fresh.push(pos);
+                    // Structure chests get their loot, dungeon spawners their mob.
+                    for nbt in &block_entities {
+                        self.add_block_entity(nbt, pos.0, pos.1);
+                    }
                 }
             }
             new.push(pos);

@@ -262,6 +262,51 @@ pub fn slot_costs(rng: &mut Rng, bookshelves: u32, item: i32) -> [u32; 3] {
 
 /// The enchantments an enchanting table puts on `item` for `level`.
 pub fn select(rng: &mut Rng, item: i32, level: u32) -> Vec<(i32, u32)> {
+    select_from(rng, item, level, |d| d.in_table)
+}
+
+/// The enchantments `enchant_with_levels` loot puts on `item`: as a table would for
+/// `level`, but drawn from `options` (often treasure enchantments included).
+pub fn select_for_loot(rng: &mut Rng, item: i32, level: u32, options: &Value) -> Vec<(i32, u32)> {
+    select_from(rng, item, level, |d| in_options(options, d.id))
+}
+
+/// The one enchantment `enchant_randomly` loot puts on `item`: any of `options` the
+/// item can take, at a random level.
+pub fn random_for_loot(rng: &mut Rng, item: i32, options: &Value) -> Option<(i32, u32)> {
+    let fitting: Vec<&Definition> = definitions()
+        .iter()
+        .filter(|d| in_options(options, d.id) && (is_book(item) || d.supports(item)))
+        .collect();
+    if fitting.is_empty() {
+        return None;
+    }
+    let d = fitting[rng.below(fitting.len() as u32) as usize];
+    Some((d.id, 1 + rng.below(d.max_level.max(1))))
+}
+
+/// Whether enchantment `id` is among `options` (a `#tag`, a name or a list of them);
+/// with no options, every enchantment is.
+fn in_options(options: &Value, id: i32) -> bool {
+    let one = |s: &str| match s.strip_prefix('#') {
+        Some(tag) => TagRegistry::get("minecraft:enchantment")
+            .is_some_and(|t| t.members(tag).contains(&i64::from(id))),
+        None => enchantment_id(s) == Some(id),
+    };
+    match options {
+        Value::Null => true,
+        Value::String(s) => one(s),
+        Value::Array(list) => list.iter().filter_map(Value::as_str).any(one),
+        _ => false,
+    }
+}
+
+fn select_from(
+    rng: &mut Rng,
+    item: i32,
+    level: u32,
+    allowed: impl Fn(&Definition) -> bool,
+) -> Vec<(i32, u32)> {
     let Some(info) = ItemInfo::get(item).filter(|i| i.enchantability > 0) else {
         return Vec::new();
     };
@@ -270,7 +315,7 @@ pub fn select(rng: &mut Rng, item: i32, level: u32) -> Vec<(i32, u32)> {
     let bonus = 1.0 + (rng.f64() as f32 + rng.f64() as f32 - 1.0) * 0.15;
     power = ((power as f32 * bonus).round() as u32).max(1);
 
-    let mut pool = candidates(item, power);
+    let mut pool = candidates(item, power, allowed);
     let mut chosen = Vec::new();
     let Some(first) = weighted(rng, &pool) else {
         return chosen;
@@ -293,11 +338,11 @@ pub fn select(rng: &mut Rng, item: i32, level: u32) -> Vec<(i32, u32)> {
 
 /// Each enchantment the table can offer for `item` at `power`, at the highest level
 /// whose cost range contains it.
-fn candidates(item: i32, power: u32) -> Vec<(i32, u32)> {
+fn candidates(item: i32, power: u32, allowed: impl Fn(&Definition) -> bool) -> Vec<(i32, u32)> {
     let power = power as i32;
     definitions()
         .iter()
-        .filter(|d| d.in_table && d.offered_for(item))
+        .filter(|d| allowed(d) && d.offered_for(item))
         .filter_map(|d| {
             (1..=d.max_level)
                 .rev()

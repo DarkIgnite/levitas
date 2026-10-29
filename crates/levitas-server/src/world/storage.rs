@@ -456,18 +456,37 @@ impl World {
                 return None;
             }
         };
+        let mut rolled = false;
         for nbt in &loaded.block_entities {
-            match BlockEntity::from_nbt(nbt) {
-                Some((pos, entity)) if pos.chunk() == (x, z) => {
-                    self.block_entities.insert(pos, entity);
-                }
-                Some(_) => warn!("chunk {x},{z} lists a block entity outside itself"),
-                None => {} // a kind of block entity Levitas does not handle yet
-            }
+            rolled |= self.add_block_entity(nbt, x, z);
+        }
+        if rolled {
+            self.dirty.insert((x, z));
         }
         self.load_scheduled_ticks(&loaded.block_ticks);
         self.load_fluid_ticks(&loaded.fluid_ticks);
         Some(loaded.chunk)
+    }
+
+    /// Registers a saved or generated block entity of chunk (`x`, `z`). A container
+    /// still naming a loot table (a structure chest no one has opened yet) is filled
+    /// from it; returns whether that happened, so the chunk gets saved with its loot.
+    pub(super) fn add_block_entity(&mut self, nbt: &Compound, x: i32, z: i32) -> bool {
+        match BlockEntity::from_nbt(nbt) {
+            Some((pos, mut entity)) if pos.chunk() == (x, z) => {
+                let rolled = nbt.str("LootTable").is_some_and(|table| {
+                    let seed = nbt.int("LootTableSeed").unwrap_or(0);
+                    self.loot.fill(table, seed, entity.items_mut())
+                });
+                self.block_entities.insert(pos, entity);
+                rolled
+            }
+            Some(_) => {
+                warn!("chunk {x},{z} lists a block entity outside itself");
+                false
+            }
+            None => false, // a kind of block entity Levitas does not handle yet
+        }
     }
 
     fn save_chunk(&mut self, x: i32, z: i32) {
@@ -574,6 +593,44 @@ impl World {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A chest a structure placed comes filled from its loot table, once: saved, it
+    /// keeps its items and no longer names the table.
+    #[test]
+    fn generated_chests_arrive_filled() {
+        let dir = std::env::temp_dir().join(format!("levitas-loot-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        let (mut w, _) = World::new(
+            dir.clone(),
+            NewWorld {
+                kind: WorldKind::Flat,
+                seed: Some(0),
+            },
+        );
+        let pos = BlockPos::new(5 * 16 + 3, -60, 5 * 16 + 4);
+        let mut chunk = w.terrain.generate(5, 5);
+        chunk.set(3, pos.y, 4, block::CHEST);
+        let nbt = Compound::new()
+            .with("id", "minecraft:chest")
+            .with("x", pos.x)
+            .with("y", pos.y)
+            .with("z", pos.z)
+            .with("LootTable", "minecraft:chests/buried_treasure")
+            .with("LootTableSeed", 7i64);
+        w.area_generated(vec![Generated {
+            pos: (5, 5),
+            chunk,
+            block_entities: vec![nbt],
+        }]);
+        let heart = ItemInfo::id_of("minecraft:heart_of_the_sea").unwrap();
+        let Some(BlockEntity::Chest(c)) = w.block_entities.get(&pos) else {
+            panic!("no chest");
+        };
+        assert!(c.items.iter().any(|s| s.item == heart));
+        let saved = w.block_entities[&pos].to_nbt(pos);
+        assert!(saved.str("LootTable").is_none());
+        let _ = fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn level_data_in_a_new_folder() {

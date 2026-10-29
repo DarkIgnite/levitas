@@ -903,10 +903,12 @@ version = "0.1.0"
 name = "levitas-pumpkin"
 version = "0.1.0"
 dependencies = [
+ "levitas-nbt",
  "levitas-registry",
  "levitas-world",
  "pumpkin-config",
  "pumpkin-data",
+ "pumpkin-nbt",
  "pumpkin-util",
  "pumpkin-world",
 ]

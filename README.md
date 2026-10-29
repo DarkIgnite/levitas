@@ -46,7 +46,7 @@ counts half. The roadmap lists exactly what is done and what is missing in each 
 | 9. Dimensions (Nether, End) | 60% | `██████░░░░` |
 | 10. Villagers and raids | 0% | `░░░░░░░░░░` |
 | 11. Everything else (commands, config, ...) | 40% | `████░░░░░░` |
-| 12. World generation | 50% | `█████░░░░░` |
+| 12. World generation | 60% | `██████░░░░` |
 | 13. Plugins and economy | 0% | `░░░░░░░░░░` |
 | Infrastructure (CI, parallel ticking, benchmarks) | 0% | `░░░░░░░░░░` |
 | **Overall** | **~59%** | `█████▉░░░░` |

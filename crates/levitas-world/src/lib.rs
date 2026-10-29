@@ -7,7 +7,7 @@ pub mod lighting;
 pub mod paletted;
 pub mod region;
 
-pub use chunk::{is_air, Chunk, Span, MAX_Y, MIN_Y};
+pub use chunk::{is_air, Chunk, Generated, Span, MAX_Y, MIN_Y};
 pub use light::{ChunkLight, LightLayer};
 pub use lighting::LightEngine;
 pub use paletted::{Kind, PalettedContainer};

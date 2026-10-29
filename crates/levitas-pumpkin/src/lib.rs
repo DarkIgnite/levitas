@@ -7,9 +7,11 @@
 //! 1.21.8 by name and properties, and the blocks 1.21.8 does not have yet become their
 //! closest older relative (see [`older_name`]).
 
+use levitas_nbt::{Compound, Tag};
 use levitas_registry::{block, BlockInfo, SyncedRegistry};
 use levitas_world::chunk::{Section, SECTIONS};
 use levitas_world::light::LIGHT_SECTIONS;
+pub use levitas_world::Generated;
 use levitas_world::{
     is_air, Chunk, ChunkLight, Kind, LightLayer, PalettedContainer, Span, MAX_Y, MIN_Y,
 };
@@ -49,9 +51,6 @@ const STEPS: [(StagedChunkEnum, i32, i32); 8] = [
     (StagedChunkEnum::Lighting, 0, 1),
 ];
 const MARGIN: i32 = 3;
-
-/// A finished chunk and its position.
-pub type Generated = ((i32, i32), Chunk);
 
 /// Terrain of one dimension for one seed.
 pub struct PumpkinTerrain {
@@ -147,11 +146,10 @@ impl PumpkinTerrain {
     /// Generates one chunk, together with the rest of its area.
     pub fn generate(&self, x: i32, z: i32) -> Chunk {
         let area = self.generate_area(x.div_euclid(AREA), z.div_euclid(AREA));
-        let (_, chunk) = area
-            .into_iter()
-            .find(|(pos, _)| *pos == (x, z))
-            .expect("the area holds the chunk");
-        chunk
+        area.into_iter()
+            .find(|g| g.pos == (x, z))
+            .expect("the area holds the chunk")
+            .chunk
     }
 
     /// Generates the `size` x `size` chunks starting at chunk (`x0`, `z0`).
@@ -180,7 +178,11 @@ impl PumpkinTerrain {
             for z in z0..z0 + size {
                 let i = grid.index(x, z);
                 match grid.chunks[i].take() {
-                    Some(PumpkinChunk::Proto(proto)) => out.push(((x, z), self.translate(&proto))),
+                    Some(PumpkinChunk::Proto(proto)) => out.push(Generated {
+                        pos: (x, z),
+                        chunk: self.translate(&proto),
+                        block_entities: proto.pending_block_entities.iter().map(compound).collect(),
+                    }),
                     _ => unreachable!("generation stops before the full stage"),
                 }
             }
@@ -551,6 +553,36 @@ impl WorldPortalExt for Portals {
     }
 }
 
+/// A Pumpkin NBT compound in Levitas's form.
+fn compound(c: &pumpkin_nbt::compound::NbtCompound) -> Compound {
+    let mut out = Compound::new();
+    for (name, value) in &c.child_tags {
+        if let Some(tag) = tag(value) {
+            out.insert(name.to_string(), tag);
+        }
+    }
+    out
+}
+
+fn tag(t: &pumpkin_nbt::tag::NbtTag) -> Option<Tag> {
+    use pumpkin_nbt::tag::NbtTag;
+    Some(match t {
+        NbtTag::End => return None,
+        NbtTag::Byte(v) => Tag::Byte(*v),
+        NbtTag::Short(v) => Tag::Short(*v),
+        NbtTag::Int(v) => Tag::Int(*v),
+        NbtTag::Long(v) => Tag::Long(*v),
+        NbtTag::Float(v) => Tag::Float(*v),
+        NbtTag::Double(v) => Tag::Double(*v),
+        NbtTag::ByteArray(v) => Tag::ByteArray(v.to_vec()),
+        NbtTag::String(v) => Tag::String(v.to_string()),
+        NbtTag::List(v) => Tag::List(v.iter().filter_map(tag).collect()),
+        NbtTag::Compound(v) => Tag::Compound(compound(v)),
+        NbtTag::IntArray(v) => Tag::IntArray(v.clone()),
+        NbtTag::LongArray(v) => Tag::LongArray(v.clone()),
+    })
+}
+
 #[cfg(test)]
 mod tests {
 
@@ -637,7 +669,12 @@ mod tests {
             "minecraft:brown_mushroom",
         ];
         let mut checked = 0;
-        for ((cx, cz), chunk) in terrain.generate_area(0, 0) {
+        for Generated {
+            pos: (cx, cz),
+            chunk,
+            ..
+        } in terrain.generate_area(0, 0)
+        {
             {
                 for x in 0..16 {
                     for z in 0..16 {
@@ -666,8 +703,11 @@ mod tests {
     #[test]
     fn trees_are_whole_across_chunk_borders() {
         let terrain = PumpkinTerrain::new(-4254893504593453935);
-        let chunks: std::collections::HashMap<(i32, i32), Chunk> =
-            terrain.generate_area(0, -6).into_iter().collect();
+        let chunks: std::collections::HashMap<(i32, i32), Chunk> = terrain
+            .generate_area(0, -6)
+            .into_iter()
+            .map(|g| (g.pos, g.chunk))
+            .collect();
         let at = |x: i32, y: i32, z: i32| {
             chunks
                 .get(&(x.div_euclid(16), z.div_euclid(16)))
@@ -728,5 +768,35 @@ mod tests {
         assert_eq!(sky(top + 1), 15);
         assert_eq!(sky(MIN_Y), 0);
         assert_eq!(chunk.light.sky[LIGHT_SECTIONS - 1], LightLayer::Uniform(15));
+    }
+
+    /// Structures and dungeons leave their block entities with the chunk: chests naming
+    /// the loot table they are to be filled from.
+    #[test]
+    fn generated_chests_name_their_loot_table() {
+        let terrain = PumpkinTerrain::new(-4254893504593453935);
+        let mut tables = Vec::new();
+        for (ax, az) in [(0, 0), (1, 0), (0, 1), (-1, 0), (0, -1), (1, 1)] {
+            for g in terrain.generate_area(ax, az) {
+                for nbt in &g.block_entities {
+                    let (x, z) = (nbt.int("x").unwrap(), nbt.int("z").unwrap());
+                    assert_eq!(((x >> 4) as i32, (z >> 4) as i32), g.pos);
+                    if let Some(table) = nbt.str("LootTable") {
+                        let block = g.chunk.get(
+                            (x & 15) as usize,
+                            nbt.int("y").unwrap() as i32,
+                            (z & 15) as usize,
+                        );
+                        assert_ne!(block, 0, "{table} in thin air");
+                        tables.push(table.to_owned());
+                    }
+                }
+            }
+            if !tables.is_empty() {
+                break;
+            }
+        }
+        assert!(!tables.is_empty(), "no loot chests in six areas");
+        eprintln!("{tables:?}");
     }
 }

@@ -1,20 +1,25 @@
 //! Loot tables: what a broken block or a killed mob drops. Tables are the vanilla JSON
 //! from the data generator, evaluated with the context Levitas tracks so far: the block
 //! state, the tool item and its enchantments (silk touch, fortune, looting) and a few
-//! mob properties.
+//! mob properties. Chest tables fill the containers structures generate with.
 
 use std::collections::HashMap;
 
-use levitas_registry::{BlockInfo, ItemInfo, TagRegistry, BLOCK_LOOT_JSON, ENTITY_LOOT_JSON};
+use levitas_registry::{
+    BlockInfo, ItemInfo, TagRegistry, BLOCK_LOOT_JSON, CHEST_LOOT_JSON, ENTITY_LOOT_JSON,
+};
 use serde_json::Value;
 
-use crate::enchanting::Enchantments;
+use crate::enchanting::{self, Enchantments};
+use crate::inventory::Stack;
 use crate::rng::Rng;
 
 pub struct LootTables {
     blocks: HashMap<String, Value>,
     /// Entity tables, keyed `minecraft:<entity>` (and `minecraft:sheep/<color>`).
     entities: HashMap<String, Value>,
+    /// Chest tables, keyed `minecraft:<path under chests/>`.
+    chests: HashMap<String, Value>,
     item_ids: HashMap<&'static str, i32>,
 }
 
@@ -46,6 +51,8 @@ impl LootTables {
             serde_json::from_str(BLOCK_LOOT_JSON).expect("block loot tables are valid JSON");
         let entities: serde_json::Map<String, Value> =
             serde_json::from_str(ENTITY_LOOT_JSON).expect("entity loot tables are valid JSON");
+        let chests: serde_json::Map<String, Value> =
+            serde_json::from_str(CHEST_LOOT_JSON).expect("chest loot tables are valid JSON");
         let item_ids = levitas_registry::ITEMS
             .iter()
             .enumerate()
@@ -54,6 +61,7 @@ impl LootTables {
         Self {
             blocks: blocks.into_iter().collect(),
             entities: entities.into_iter().collect(),
+            chests: chests.into_iter().collect(),
             item_ids,
         }
     }
@@ -71,7 +79,7 @@ impl LootTables {
         };
         let mut drops = Vec::new();
         self.roll(table, ctx, &mut drops);
-        drops
+        pairs(drops)
     }
 
     /// Items dropped by a mob of `entity` type (e.g. `minecraft:cow`) when it dies.
@@ -80,7 +88,38 @@ impl LootTables {
         if let Some(table) = self.entities.get(entity) {
             self.roll(table, ctx, &mut drops);
         }
-        drops
+        pairs(drops)
+    }
+
+    /// Fills a container from chest table `name` (`minecraft:chests/...`), rolled with
+    /// `seed` (0 for any). As in vanilla, the items land in random empty slots, with
+    /// some stacks split up to fill more of them. Returns whether the table exists.
+    pub fn fill(&self, name: &str, seed: i64, slots: &mut [Stack]) -> bool {
+        let Some(table) = name
+            .strip_prefix("minecraft:chests/")
+            .and_then(|path| self.chests.get(&format!("minecraft:{path}")))
+        else {
+            return false;
+        };
+        let mut rng = if seed == 0 {
+            Rng::from_time()
+        } else {
+            Rng::new(seed as u64)
+        };
+        let mut stacks = Vec::new();
+        self.roll(
+            table,
+            &mut LootContext {
+                state: 0,
+                tool: 0,
+                rng: &mut rng,
+                enchants: Enchantments::NONE,
+                entity: EntityProps::default(),
+            },
+            &mut stacks,
+        );
+        spread(stacks, slots, &mut rng);
+        true
     }
 
     /// The table a `minecraft:loot_table` entry refers to.
@@ -89,11 +128,14 @@ impl LootTables {
         if let Some(entity) = path.strip_prefix("entities/") {
             return self.entities.get(&format!("minecraft:{entity}"));
         }
+        if let Some(chest) = path.strip_prefix("chests/") {
+            return self.chests.get(&format!("minecraft:{chest}"));
+        }
         let block = path.strip_prefix("blocks/")?;
         self.blocks.get(&format!("minecraft:{block}"))
     }
 
-    fn roll(&self, table: &Value, ctx: &mut LootContext, drops: &mut Vec<(i32, i32)>) {
+    fn roll(&self, table: &Value, ctx: &mut LootContext, drops: &mut Vec<Stack>) {
         for pool in array(&table["pools"]) {
             if !conditions(pool, ctx) {
                 continue;
@@ -130,21 +172,111 @@ impl LootTables {
                 let Some(&item) = entry["name"].as_str().and_then(|n| self.item_ids.get(n)) else {
                     continue;
                 };
-                let mut count = 1;
+                let mut stack = Stack {
+                    item,
+                    count: 1,
+                    ..Stack::EMPTY
+                };
                 for function in array(&entry["functions"])
                     .iter()
                     .chain(array(&pool["functions"]))
                     .chain(array(&table["functions"]))
                 {
                     if conditions(function, ctx) {
-                        count = apply(function, count, ctx);
+                        self.apply_to(function, &mut stack, ctx);
                     }
                 }
-                if count > 0 {
-                    drops.push((item, count));
+                if stack.count > 0 {
+                    drops.push(stack);
                 }
             }
         }
+    }
+}
+
+impl LootTables {
+    /// Runs a loot function on a dropped stack.
+    fn apply_to(&self, function: &Value, stack: &mut Stack, ctx: &mut LootContext) {
+        match function["function"].as_str().unwrap_or_default() {
+            "minecraft:set_damage" => {
+                if let Some(info) = ItemInfo::get(stack.item).filter(|i| i.max_damage > 0) {
+                    // The share of durability left.
+                    let left = number(&function["damage"], ctx.rng).clamp(0.0, 1.0);
+                    stack.damage = ((1.0 - left) * f64::from(info.max_damage)).round() as i32;
+                }
+            }
+            "minecraft:enchant_randomly" => {
+                let picked = enchanting::random_for_loot(ctx.rng, stack.item, &function["options"]);
+                if let Some((id, level)) = picked {
+                    self.enchant(stack, id, level);
+                }
+            }
+            "minecraft:enchant_with_levels" => {
+                let level = number(&function["levels"], ctx.rng).max(0.0) as u32;
+                let options = &function["options"];
+                for (id, l) in enchanting::select_for_loot(ctx.rng, stack.item, level, options) {
+                    self.enchant(stack, id, l);
+                }
+            }
+            _ => stack.count = apply(function, stack.count, ctx),
+        }
+    }
+
+    /// Enchants a stack; a book becomes an enchanted book holding the enchantment.
+    fn enchant(&self, stack: &mut Stack, id: i32, level: u32) {
+        if ItemInfo::get(stack.item).is_some_and(|i| i.name == "minecraft:book") {
+            if let Some(&book) = self.item_ids.get("minecraft:enchanted_book") {
+                stack.item = book;
+            }
+        }
+        stack.enchants.set(id, level);
+    }
+}
+
+/// Dropped stacks as `(item ID, count)` pairs.
+fn pairs(stacks: Vec<Stack>) -> Vec<(i32, i32)> {
+    stacks.into_iter().map(|s| (s.item, s.count)).collect()
+}
+
+/// Puts rolled stacks into random empty slots, splitting oversized stacks, and then
+/// splitting others while there are slots to spare.
+fn spread(stacks: Vec<Stack>, slots: &mut [Stack], rng: &mut Rng) {
+    let mut free: Vec<usize> = (0..slots.len()).filter(|&i| slots[i].count == 0).collect();
+    shuffle(&mut free, rng);
+    let mut piles = Vec::new();
+    for mut stack in stacks {
+        let max = ItemInfo::get(stack.item).map_or(64, |i| i32::from(i.max_stack.max(1)));
+        while stack.count > max {
+            piles.push(Stack {
+                count: max,
+                ..stack
+            });
+            stack.count -= max;
+        }
+        piles.push(stack);
+    }
+    while piles.len() < free.len() {
+        let splittable: Vec<usize> = (0..piles.len()).filter(|&i| piles[i].count > 1).collect();
+        if splittable.is_empty() {
+            break;
+        }
+        let i = splittable[rng.below(splittable.len() as u32) as usize];
+        let part = 1 + rng.below((piles[i].count / 2) as u32) as i32;
+        piles[i].count -= part;
+        piles.push(Stack {
+            count: part,
+            ..piles[i]
+        });
+    }
+    shuffle(&mut piles, rng);
+    for (pile, slot) in piles.into_iter().zip(free) {
+        slots[slot] = pile;
+    }
+}
+
+fn shuffle<T>(list: &mut [T], rng: &mut Rng) {
+    for i in (1..list.len()).rev() {
+        list.swap(i, rng.below(i as u32 + 1) as usize);
     }
 }
 
@@ -579,5 +711,67 @@ mod tests {
         assert!(!drops
             .iter()
             .any(|(i, _)| *i == item("minecraft:black_wool")));
+    }
+
+    fn tables() -> &'static LootTables {
+        static TABLES: std::sync::OnceLock<LootTables> = std::sync::OnceLock::new();
+        TABLES.get_or_init(LootTables::load)
+    }
+
+    fn chest(table: &str, seed: i64) -> Vec<Stack> {
+        let mut slots = vec![Stack::EMPTY; 27];
+        assert!(tables().fill(table, seed, &mut slots), "{table}");
+        slots.into_iter().filter(|s| s.count > 0).collect()
+    }
+
+    #[test]
+    fn structure_chests_fill_from_their_tables() {
+        // Buried treasure always holds a heart of the sea.
+        let heart = item("minecraft:heart_of_the_sea");
+        for seed in 1..20 {
+            let items = chest("minecraft:chests/buried_treasure", seed);
+            assert!(items.iter().any(|s| s.item == heart), "{items:?}");
+            for s in &items {
+                let max = ItemInfo::get(s.item).unwrap().max_stack;
+                assert!(s.count >= 1 && s.count <= i32::from(max), "{s:?}");
+            }
+        }
+        // Village chests sit under chests/village/.
+        assert!(!chest("minecraft:chests/village/village_weaponsmith", 5).is_empty());
+        // The same seed gives the same chest.
+        assert_eq!(
+            chest("minecraft:chests/simple_dungeon", 9),
+            chest("minecraft:chests/simple_dungeon", 9)
+        );
+        let mut slots = vec![Stack::EMPTY; 27];
+        assert!(!tables().fill("minecraft:chests/nothing_here", 1, &mut slots));
+    }
+
+    #[test]
+    fn chest_loot_comes_enchanted_and_worn() {
+        let book = item("minecraft:enchanted_book");
+        let (mut books, mut enchanted_gear, mut worn) = (0, 0, 0);
+        for seed in 1..200 {
+            for s in chest("minecraft:chests/end_city_treasure", seed)
+                .into_iter()
+                .chain(chest("minecraft:chests/simple_dungeon", seed))
+                .chain(chest("minecraft:chests/bastion_other", seed))
+            {
+                if s.item == book {
+                    assert!(!s.enchants.is_empty());
+                    books += 1;
+                } else if !s.enchants.is_empty() {
+                    enchanted_gear += 1;
+                }
+                if s.damage > 0 {
+                    worn += 1;
+                    assert!(s.damage < ItemInfo::get(s.item).unwrap().max_damage);
+                }
+            }
+        }
+        assert!(
+            books > 0 && enchanted_gear > 0 && worn > 0,
+            "{books} {enchanted_gear} {worn}"
+        );
     }
 }

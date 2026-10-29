@@ -251,7 +251,7 @@ impl BlockEntity {
         }
     }
 
-    fn items_mut(&mut self) -> &mut [Stack] {
+    pub fn items_mut(&mut self) -> &mut [Stack] {
         match self {
             BlockEntity::Chest(c) => &mut c.items[..],
             BlockEntity::Furnace(f) => &mut f.items,

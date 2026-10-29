@@ -110,6 +110,25 @@ impl Section {
     }
 }
 
+/// A newly generated chunk: its position, its blocks, and the block entities generation
+/// placed in it (structure chests naming their loot table, dungeon spawners naming
+/// their mob) in their saved NBT form.
+pub struct Generated {
+    pub pos: (i32, i32),
+    pub chunk: Chunk,
+    pub block_entities: Vec<levitas_nbt::Compound>,
+}
+
+impl Generated {
+    pub fn new(pos: (i32, i32), chunk: Chunk) -> Self {
+        Self {
+            pos,
+            chunk,
+            block_entities: Vec::new(),
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Chunk {
     sections: Vec<Section>,

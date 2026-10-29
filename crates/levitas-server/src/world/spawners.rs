@@ -2,9 +2,9 @@
 //!
 //! With a player within 16 blocks, a spawner counts down 10 to 40 seconds and then tries
 //! four times to put its mob within 4 blocks sideways, unless six of them are already
-//! close. Generated chunks do not say which mob a spawner holds, so Levitas picks as
-//! the structures do: blazes in the Nether (fortresses), and in the overworld zombies,
-//! skeletons or spiders, as dungeons have them.
+//! close. Generated spawners come with their mob from the generator; one that does
+//! not name a mob gets what its structure would hold: blazes in the Nether
+//! (fortresses), and in the overworld zombies, skeletons or spiders, as dungeons have.
 
 use levitas_nbt::Compound;
 use levitas_registry::block;
@@ -63,7 +63,7 @@ impl Spawner {
     }
 }
 
-/// The mob a freshly generated spawner holds.
+/// The mob a freshly generated spawner that names none holds.
 pub fn generated_mob(dimension: Dimension, pos: BlockPos) -> MobKind {
     if dimension == Dimension::Nether {
         return MobKind::Blaze;

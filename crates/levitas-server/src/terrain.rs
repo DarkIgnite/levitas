@@ -24,7 +24,7 @@ pub trait Terrain: Send + Sync {
     /// Every chunk of area (`ax`, `az`), the one holding chunks
     /// `ax * area..(ax + 1) * area` along x and likewise along z.
     fn generate_area(&self, ax: i32, az: i32) -> Vec<Generated> {
-        vec![((ax, az), self.generate(ax, az))]
+        vec![Generated::new((ax, az), self.generate(ax, az))]
     }
 
     /// Where players spawn in a new world: a block position to stand at.
@@ -64,8 +64,7 @@ impl Terrain for PumpkinTerrain {
     }
 }
 
-/// A finished chunk: its position and contents.
-pub type Generated = ((i32, i32), Chunk);
+pub use levitas_world::Generated;
 
 /// Worker threads that generate areas on request.
 pub struct GenerationPool {
@@ -130,14 +129,7 @@ mod tests {
         }
         let mut got: Vec<(i32, i32)> = Vec::new();
         for _ in 0..4 {
-            got.extend(
-                finished
-                    .recv()
-                    .await
-                    .unwrap()
-                    .into_iter()
-                    .map(|(pos, _)| pos),
-            );
+            got.extend(finished.recv().await.unwrap().into_iter().map(|g| g.pos));
         }
         got.sort_unstable();
         assert_eq!(got, [(0, 0), (1, -1), (2, -2), (3, -3)]);
