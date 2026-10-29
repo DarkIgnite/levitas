@@ -2,6 +2,7 @@
 //! loop. Connection tasks talk to it only through [`Event`]s and receive ready-to-write
 //! packet frames, so world state needs no locks.
 
+mod admin;
 mod arrows;
 mod breeding;
 mod building;
@@ -66,14 +67,16 @@ use building::ScheduledTick;
 use containers::{BlockEntity, Open};
 use items::ItemEntity;
 use levitas_pumpkin::PumpkinTerrain;
-#[cfg(test)]
 pub use storage::uuid_string;
 pub use storage::WorldKind;
 use storage::{LevelData, AUTOSAVE_TICKS, UNLOAD_TICKS};
 use survival::MAX_HEALTH;
 
 /// Chunk radius sent around each player.
-pub const VIEW_DISTANCE: i32 = 8;
+/// How many chunks around them players see, from `view-distance`.
+pub fn view_distance() -> i32 {
+    crate::config::get().view_distance
+}
 /// Frames a player may have queued before they are disconnected as too slow.
 pub const OUTGOING_CAPACITY: usize = 4096;
 const TICK: Duration = Duration::from_millis(50);
@@ -109,6 +112,12 @@ const CREATIVE_DROP_SLOT: i16 = -1;
 pub type Frame = Arc<[u8]>;
 
 static NEXT_ENTITY_ID: AtomicI32 = AtomicI32::new(1);
+/// Players on the server, in every dimension.
+static ONLINE: AtomicI32 = AtomicI32::new(0);
+
+pub fn online() -> i32 {
+    ONLINE.load(Ordering::Relaxed)
+}
 
 pub fn next_entity_id() -> i32 {
     NEXT_ENTITY_ID.fetch_add(1, Ordering::Relaxed)
@@ -133,6 +142,20 @@ pub enum Event {
     /// A message for every player here, sent from another dimension.
     Announce {
         frame: Frame,
+    },
+    /// A line typed into the server console.
+    Console {
+        line: String,
+    },
+    /// Disconnect this player if they are here (kicked or banned elsewhere).
+    Kick {
+        name: String,
+        reason: String,
+    },
+    /// A player became or stopped being an operator.
+    OpChanged {
+        name: String,
+        op: bool,
     },
     Leave {
         id: i32,
@@ -346,6 +369,8 @@ struct Player {
     hazard_cooldown: u32,
     /// Where the player's connection sends its events; switched on changing dimension.
     route: Option<travel::Route>,
+    /// Whether the player is a server operator.
+    op: bool,
     /// Ticks spent standing in a portal, and ticks until one may take them again.
     portal_ticks: u32,
     portal_cooldown: u32,
@@ -410,6 +435,7 @@ impl Player {
             fire_ticks: 0,
             hazard_cooldown: 0,
             route: None,
+            op: false,
             portal_ticks: 0,
             portal_cooldown: 0,
             pearl_ready: 0,
@@ -654,6 +680,9 @@ impl World {
                     p.deliver(&frame);
                 }
             }
+            Event::Console { line } => self.console(&line),
+            Event::Kick { name, reason } => self.kick_here(&name, &reason),
+            Event::OpChanged { name, op } => self.op_changed_here(&name, op),
             Event::Leave { id } => self.leave(id),
             Event::Move {
                 id,
@@ -753,8 +782,11 @@ impl World {
     }
 
     fn join(&mut self, id: i32, profile: Profile, out: mpsc::Sender<Frame>, route: travel::Route) {
+        let op = crate::access::is_op(&profile.name, profile.uuid);
         let mut player = Player::new(profile, out, self.spawn);
         player.route = Some(route);
+        player.op = op;
+        ONLINE.fetch_add(1, Ordering::Relaxed);
         self.players.insert(id, player);
         let saved_in = self.load_player(id);
         // A player who logged out in another dimension goes back there.
@@ -779,9 +811,9 @@ impl World {
             .string(Dimension::Overworld.name())
             .string(Dimension::Nether.name())
             .string(Dimension::End.name())
-            .varint(100) // max players (unused by the client)
-            .varint(VIEW_DISTANCE)
-            .varint(VIEW_DISTANCE) // simulation distance
+            .varint(crate::config::get().max_players as i32) // unused by the client
+            .varint(view_distance())
+            .varint(view_distance()) // simulation distance
             .bool(false) // reduced debug info
             .bool(true) // enable respawn screen
             .bool(false); // limited crafting
@@ -811,7 +843,7 @@ impl World {
         self.send(id, position);
         self.send_status(id);
         self.send_time_and_weather(id);
-        self.send(id, commands::command_tree());
+        self.send_permissions(id);
         let recipes = self.recipes.update_packet();
         self.send(id, recipes);
         self.send(
@@ -831,6 +863,7 @@ impl World {
         let Some(player) = self.players.remove(&id) else {
             return;
         };
+        ONLINE.fetch_sub(1, Ordering::Relaxed);
         self.broadcast(
             Writer::packet(clientbound::REMOVE_ENTITIES)
                 .varint(1)
@@ -1281,12 +1314,12 @@ impl World {
         };
         let (cx, cz) = p.center;
         let in_view = |&(x, z): &(i32, i32)| {
-            (x - cx).abs() <= VIEW_DISTANCE && (z - cz).abs() <= VIEW_DISTANCE
+            (x - cx).abs() <= view_distance() && (z - cz).abs() <= view_distance()
         };
         let gone: Vec<_> = p.loaded.iter().copied().filter(|c| !in_view(c)).collect();
         let mut new = Vec::new();
-        for x in cx - VIEW_DISTANCE..=cx + VIEW_DISTANCE {
-            for z in cz - VIEW_DISTANCE..=cz + VIEW_DISTANCE {
+        for x in cx - view_distance()..=cx + view_distance() {
+            for z in cz - view_distance()..=cz + view_distance() {
                 if !p.loaded.contains(&(x, z)) {
                     new.push((x, z));
                 }
@@ -1415,8 +1448,8 @@ impl World {
                 .iter()
                 .copied()
                 .filter(|&(x, z)| {
-                    (x - p.center.0).abs() <= VIEW_DISTANCE
-                        && (z - p.center.1).abs() <= VIEW_DISTANCE
+                    (x - p.center.0).abs() <= view_distance()
+                        && (z - p.center.1).abs() <= view_distance()
                         && !p.loaded.contains(&(x, z))
                 })
                 .collect();

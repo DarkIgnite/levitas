@@ -12,6 +12,24 @@ const HELP: &str = "Commands: /gamemode <survival|creative>, /give <item> [count
 
 impl World {
     pub(super) fn command(&mut self, id: i32, command: &str) {
+        let words: Vec<&str> = command.split_whitespace().collect();
+        let Some(p) = self.players.get(&id) else {
+            return;
+        };
+        let (op, name) = (p.op, p.profile.name.clone());
+        let first = words.first().copied().unwrap_or("");
+        if !op && !admin::EVERYONE.contains(&first) {
+            self.send(
+                id,
+                system_chat("You do not have permission to use this command (ask an operator)"),
+            );
+            return;
+        }
+        if let Some(reply) = self.admin_command(&words, &name) {
+            info!("{name} ran /{command}: {reply}");
+            self.send(id, system_chat(&reply));
+            return;
+        }
         let mut args = command.split_whitespace();
         let reply = match args.next() {
             Some("gamemode" | "gm") => match args.next() {
@@ -324,10 +342,39 @@ fn at_least(min: i32) -> Vec<u8> {
 }
 
 /// The syntax of every command, for the client's tab completion.
-pub(super) fn command_tree() -> Writer {
+/// The commands a player may use, for their client's tab completion: everything for
+/// operators, only `/help` and `/list` for others.
+pub(super) fn command_tree(op: bool) -> Writer {
     let integer = command_argument::BRIGADIER_INTEGER;
+    let word = command_argument::BRIGADIER_STRING;
     let mut t = Tree::default();
     let root = t.add(None, Node::Root, false);
+    t.literal(root, "help", true);
+    t.literal(root, "list", true);
+    if !op {
+        return t.packet();
+    }
+
+    // Running the server.
+    for name in ["op", "deop", "pardon"] {
+        let node = t.literal(root, name, false);
+        t.argument(node, "player", word, vec![0]); // a single word
+    }
+    for name in ["ban", "kick"] {
+        let node = t.literal(root, name, false);
+        let player = t.argument(node, "player", word, vec![0]);
+        t.argument(player, "reason", word, vec![2]); // the rest of the line
+    }
+    let whitelist = t.literal(root, "whitelist", false);
+    for name in ["on", "off", "list"] {
+        t.literal(whitelist, name, true);
+    }
+    for name in ["add", "remove"] {
+        let node = t.literal(whitelist, name, false);
+        t.argument(node, "player", word, vec![0]);
+    }
+    let say = t.literal(root, "say", false);
+    t.argument(say, "message", word, vec![2]);
 
     let gamemode = t.literal(root, "gamemode", false);
     for mode in ["survival", "creative"] {
@@ -345,8 +392,6 @@ pub(super) fn command_tree() -> Writer {
     for mob in mobs::SUMMONABLE {
         t.literal(summon, mob, true);
     }
-    t.literal(root, "help", true);
-
     let time = t.literal(root, "time", false);
     let set = t.literal(time, "set", false);
     for name in ["day", "noon", "night", "midnight"] {

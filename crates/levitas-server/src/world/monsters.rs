@@ -18,6 +18,8 @@ use crate::world::survival::Damage;
 
 /// Most monsters around one player.
 const MONSTER_CAP: usize = 70;
+/// Monsters spawn this many chunks around players, whatever the view distance.
+const MOB_SPAWN_CHUNKS: i32 = 8;
 /// Monsters never spawn this close to a player.
 const SPAWN_DISTANCE: f64 = 24.0;
 /// Spawn attempts per player per tick.
@@ -554,9 +556,9 @@ impl World {
     }
 
     fn try_spawn_group(&mut self, center: (i32, i32)) {
-        let span = VIEW_DISTANCE as u32 * 2 + 1;
-        let cx = center.0 - VIEW_DISTANCE + self.rng.below(span) as i32;
-        let cz = center.1 - VIEW_DISTANCE + self.rng.below(span) as i32;
+        let span = MOB_SPAWN_CHUNKS as u32 * 2 + 1;
+        let cx = center.0 - MOB_SPAWN_CHUNKS + self.rng.below(span) as i32;
+        let cz = center.1 - MOB_SPAWN_CHUNKS + self.rng.below(span) as i32;
         let x = cx * 16 + self.rng.below(16) as i32;
         let z = cz * 16 + self.rng.below(16) as i32;
         let Some(top) = self.top_block(x, z) else {

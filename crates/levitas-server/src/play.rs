@@ -10,7 +10,7 @@ use tokio::io::BufReader;
 use tokio::net::tcp::OwnedReadHalf;
 use tokio::sync::mpsc;
 
-use crate::connection::{invalid, read_frame, Conn, Outgoing, Profile};
+use crate::connection::{invalid, read_packet, Conn, Outgoing, Profile};
 use crate::inventory::Stack;
 use crate::world::{self, Event, Frame, OUTGOING_CAPACITY};
 
@@ -29,7 +29,11 @@ const PLAYER_COMMAND_START_SPRINTING: i32 = 1;
 const PLAYER_COMMAND_STOP_SPRINTING: i32 = 2;
 
 pub async fn run(conn: Conn, profile: Profile, world: mpsc::Sender<Event>) -> io::Result<()> {
-    let Conn { mut reader, out } = conn;
+    let Conn {
+        mut reader,
+        out,
+        compressed,
+    } = conn;
     let id = world::next_entity_id();
     let (tx, rx) = mpsc::channel(OUTGOING_CAPACITY);
     let writer = tokio::spawn(write_loop(out, rx));
@@ -48,7 +52,7 @@ pub async fn run(conn: Conn, profile: Profile, world: mpsc::Sender<Event>) -> io
         writer.abort();
         return Ok(());
     }
-    let result = read_loop(&mut reader, id, &current).await;
+    let result = read_loop(&mut reader, id, &current, compressed).await;
     let world = current.borrow().clone();
     let _ = world.send(Event::Leave { id }).await;
     writer.abort();
@@ -81,9 +85,10 @@ async fn read_loop(
     reader: &mut BufReader<OwnedReadHalf>,
     id: i32,
     route: &tokio::sync::watch::Receiver<mpsc::Sender<Event>>,
+    compressed: bool,
 ) -> io::Result<()> {
     loop {
-        let packet = match read_frame(reader).await {
+        let packet = match read_packet(reader, compressed).await {
             Ok(packet) => packet,
             Err(e) if e.kind() == io::ErrorKind::UnexpectedEof => return Ok(()),
             Err(e) => return Err(e),

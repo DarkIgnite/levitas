@@ -12,7 +12,7 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{mpsc, oneshot};
 
 use crate::connection::{handle, read_frame};
-use crate::world::{self, Event, VIEW_DISTANCE};
+use crate::world::{self, view_distance, Event};
 
 /// A fresh, empty world folder for one test.
 fn temp_world() -> PathBuf {
@@ -152,7 +152,7 @@ async fn status_and_ping() {
 #[tokio::test]
 async fn joins_and_streams_chunks() {
     let mut client = join(server().await, "DarkIgnite", 7).await;
-    let side = 2 * VIEW_DISTANCE + 1;
+    let side = 2 * view_distance() + 1;
     let body = read_until(&mut client, play::clientbound::CHUNK_BATCH_FINISHED).await;
     assert_eq!(Reader::new(&body).varint().unwrap(), side * side);
     read_until(&mut client, play::clientbound::PLAYER_POSITION).await;
@@ -176,7 +176,7 @@ async fn generated_world_streams_real_terrain() {
     let dir = temp_world();
     let (addr, world) = server_with(dir.clone(), world::WorldKind::Noise).await;
     let mut client = join(addr, "DarkIgnite", 7).await;
-    let side = 2 * VIEW_DISTANCE + 1;
+    let side = 2 * view_distance() + 1;
     let (mut chunks, mut spawn_y) = (0, None);
     while chunks < side * side || spawn_y.is_none() {
         let packet = read_frame(&mut client).await.unwrap();
@@ -1545,6 +1545,8 @@ async fn joining_players_get_the_command_tree() {
                     }
                 } else if parser == levitas_registry::command_argument::RESOURCE {
                     r.string(32767).unwrap(); // the registry
+                } else if parser == levitas_registry::command_argument::BRIGADIER_STRING {
+                    r.varint().unwrap(); // word, quotable or greedy
                 }
                 name
             }
@@ -1558,6 +1560,8 @@ async fn joining_players_get_the_command_tree() {
     assert_eq!(
         top,
         [
+            "ban",
+            "deop",
             "effect",
             "execute",
             "experience",
@@ -1565,12 +1569,18 @@ async fn joining_players_get_the_command_tree() {
             "give",
             "gm",
             "help",
+            "kick",
             "kill",
+            "list",
+            "op",
+            "pardon",
+            "say",
             "summon",
             "teleport",
             "time",
             "tp",
             "weather",
+            "whitelist",
             "xp"
         ]
     );

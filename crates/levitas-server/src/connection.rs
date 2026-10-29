@@ -3,7 +3,12 @@
 
 use std::io;
 
-use levitas_protocol::{Reader, Writer, GAME_VERSION, MAX_PACKET_LEN, PROTOCOL_VERSION};
+use std::io::{Read, Write};
+
+use flate2::read::ZlibDecoder;
+use flate2::write::ZlibEncoder;
+use flate2::Compression;
+use levitas_protocol::{varint, Reader, Writer, GAME_VERSION, MAX_PACKET_LEN, PROTOCOL_VERSION};
 use levitas_registry::packet::{configuration, login as login_ids};
 use levitas_registry::{SYNCED_REGISTRIES, TAGS};
 use serde_json::json;
@@ -21,10 +26,12 @@ const INTENT_STATUS: i32 = 1;
 const INTENT_LOGIN: i32 = 2;
 const INTENT_TRANSFER: i32 = 3;
 
-/// A client connection without compression or encryption.
+/// A client connection, compressed once login sets that up (no encryption yet).
 pub struct Conn {
     pub reader: BufReader<OwnedReadHalf>,
     pub out: Outgoing,
+    /// Whether packets from the client come compressed.
+    pub compressed: bool,
 }
 
 impl Conn {
@@ -32,12 +39,16 @@ impl Conn {
         let (read, write) = stream.into_split();
         Self {
             reader: BufReader::new(read),
-            out: Outgoing(BufWriter::new(write)),
+            out: Outgoing {
+                writer: BufWriter::new(write),
+                compression: None,
+            },
+            compressed: false,
         }
     }
 
     pub async fn read(&mut self) -> io::Result<Vec<u8>> {
-        read_frame(&mut self.reader).await
+        read_packet(&mut self.reader, self.compressed).await
     }
 
     pub async fn queue(&mut self, packet: Writer) -> io::Result<()> {
@@ -50,7 +61,11 @@ impl Conn {
 }
 
 /// The sending half of a connection. Packets are buffered until flushed.
-pub struct Outgoing(BufWriter<OwnedWriteHalf>);
+pub struct Outgoing {
+    writer: BufWriter<OwnedWriteHalf>,
+    /// Packets at least this long go out compressed, once compression is on.
+    compression: Option<usize>,
+}
 
 impl Outgoing {
     /// Queues a packet; call [`Outgoing::flush`] to send it.
@@ -58,13 +73,20 @@ impl Outgoing {
         self.write_frame(&packet.into_frame()).await
     }
 
-    /// Queues an already length-prefixed packet.
+    /// Queues an already length-prefixed packet, compressing it if that is on.
     pub async fn write_frame(&mut self, frame: &[u8]) -> io::Result<()> {
-        self.0.write_all(frame).await
+        match self.compression {
+            Some(threshold) => {
+                self.writer
+                    .write_all(&compress_frame(frame, threshold)?)
+                    .await
+            }
+            None => self.writer.write_all(frame).await,
+        }
     }
 
     pub async fn flush(&mut self) -> io::Result<()> {
-        self.0.flush().await
+        self.writer.flush().await
     }
 
     pub async fn send(&mut self, packet: Writer) -> io::Result<()> {
@@ -125,12 +147,12 @@ async fn status(conn: &mut Conn) -> io::Result<()> {
 fn status_json() -> serde_json::Value {
     json!({
         "version": { "name": format!("Levitas {GAME_VERSION}"), "protocol": PROTOCOL_VERSION },
-        "players": { "max": 100, "online": 0, "sample": [] },
-        "description": {
-            "text": "Levitas",
-            "color": "aqua",
-            "extra": [{ "text": " - lightweight server in Rust", "color": "gray" }]
+        "players": {
+            "max": crate::config::get().max_players,
+            "online": crate::world::online(),
+            "sample": []
         },
+        "description": { "text": crate::config::get().motd },
         "enforcesSecureChat": false
     })
 }
@@ -151,6 +173,28 @@ async fn login(conn: &mut Conn, protocol: i32) -> io::Result<Option<Profile>> {
         conn.send(Writer::packet(login_ids::clientbound::LOGIN_DISCONNECT).string(&message))
             .await?;
         return Ok(None);
+    }
+
+    // Banned, not on the whitelist, or no room: turned away.
+    let full = crate::world::online() >= crate::config::get().max_players as i32
+        && !crate::access::is_op(&name, uuid);
+    let refusal = crate::access::refusal(&name, uuid)
+        .or_else(|| full.then(|| "The server is full!".to_owned()));
+    if let Some(reason) = refusal {
+        info!(name, "turned away: {reason}");
+        let message = json!({ "text": reason }).to_string();
+        conn.send(Writer::packet(login_ids::clientbound::LOGIN_DISCONNECT).string(&message))
+            .await?;
+        return Ok(None);
+    }
+
+    // From here on, long packets are compressed both ways.
+    let threshold = crate::config::get().compression_threshold;
+    if threshold >= 0 {
+        conn.send(Writer::packet(login_ids::clientbound::LOGIN_COMPRESSION).varint(threshold))
+            .await?;
+        conn.out.compression = Some(threshold as usize);
+        conn.compressed = true;
     }
 
     // Offline mode: trust the name and UUID the client sent.
@@ -222,6 +266,66 @@ async fn configure(conn: &mut Conn) -> io::Result<()> {
     wait_for(conn, serverbound::FINISH_CONFIGURATION).await
 }
 
+/// A length-prefixed packet in the compressed format: the uncompressed length (0 if
+/// the packet is too short to be worth compressing) and the zlib data.
+pub fn compress_frame(frame: &[u8], threshold: usize) -> io::Result<Vec<u8>> {
+    let mut r = Reader::new(frame);
+    let len = r.varint()? as usize;
+    let body = &frame[frame.len() - len..];
+    let mut inner = Vec::with_capacity(len + 5);
+    if body.len() >= threshold {
+        varint::write(&mut inner, body.len() as i32);
+        let mut encoder = ZlibEncoder::new(inner, Compression::default());
+        encoder.write_all(body)?;
+        inner = encoder.finish()?;
+    } else {
+        varint::write(&mut inner, 0);
+        inner.extend_from_slice(body);
+    }
+    let mut out = Vec::with_capacity(inner.len() + 5);
+    varint::write(&mut out, inner.len() as i32);
+    out.extend_from_slice(&inner);
+    Ok(out)
+}
+
+/// The packet inside a compressed one.
+pub fn decompress_packet(packet: &[u8]) -> io::Result<Vec<u8>> {
+    let mut r = Reader::new(packet);
+    let data_len = r.varint()?;
+    let rest = &packet[packet.len() - r.remaining()..];
+    if data_len == 0 {
+        return Ok(rest.to_vec());
+    }
+    let data_len = usize::try_from(data_len)
+        .ok()
+        .filter(|&l| l <= MAX_UNCOMPRESSED)
+        .ok_or_else(|| invalid(format!("bad uncompressed length {data_len}")))?;
+    let mut out = Vec::with_capacity(data_len);
+    ZlibDecoder::new(rest)
+        .take(data_len as u64 + 1)
+        .read_to_end(&mut out)?;
+    if out.len() != data_len {
+        return Err(invalid("compressed packet has the wrong length".to_owned()));
+    }
+    Ok(out)
+}
+
+/// The largest packet a client may send once uncompressed, as vanilla allows.
+const MAX_UNCOMPRESSED: usize = 8 * 1024 * 1024;
+
+/// Reads one packet, uncompressing it if compression is on.
+pub async fn read_packet<R: AsyncRead + Unpin>(
+    reader: &mut R,
+    compressed: bool,
+) -> io::Result<Vec<u8>> {
+    let packet = read_frame(reader).await?;
+    if compressed {
+        decompress_packet(&packet)
+    } else {
+        Ok(packet)
+    }
+}
+
 /// Reads packets until one with `id` arrives, ignoring others (client settings, brand).
 async fn wait_for(conn: &mut Conn, id: i32) -> io::Result<()> {
     loop {
@@ -265,4 +369,29 @@ fn expect_id(r: &mut Reader<'_>, expected: i32, name: &str) -> io::Result<()> {
 
 pub fn invalid(message: String) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, message)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn compressed_packets_round_trip() {
+        for size in [10usize, 5000] {
+            let packet = Writer::packet(0x27).bytes(&vec![7u8; size]);
+            let frame = packet.into_frame();
+            let compressed = compress_frame(&frame, 256).unwrap();
+            if size > 256 {
+                assert!(compressed.len() < frame.len() / 4, "long packets shrink");
+            }
+            // Strip the outer length, as reading a frame does.
+            let mut r = Reader::new(&compressed);
+            let len = r.varint().unwrap() as usize;
+            let inner = &compressed[compressed.len() - len..];
+            let mut f = Reader::new(&frame);
+            let body_len = f.varint().unwrap() as usize;
+            let body = &frame[frame.len() - body_len..];
+            assert_eq!(decompress_packet(inner).unwrap(), body);
+        }
+    }
 }

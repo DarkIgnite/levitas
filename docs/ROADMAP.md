@@ -328,8 +328,16 @@ Known gaps are listed under each phase instead of being hidden.
 - [ ] Game rules and difficulty
 - [ ] Scoreboards, teams, boss bars, titles
 - [ ] Item components on the network (enchantments, names, damage, ...)
-- [ ] Online mode (encryption and Mojang session check), compression
-- [ ] Server configuration file, whitelist, bans, operators
+- [ ] Online mode (encryption and Mojang session check), compression. Compression
+      works (zlib above `network-compression-threshold`, 256 by default); online mode
+      does not yet, so players are trusted by name.
+- [x] Server configuration file, whitelist, bans, operators. `server.properties`
+      (`config.rs`, vanilla keys, written with defaults if missing), `ops.json`,
+      `whitelist.json` and `banned-players.json` (`access.rs`, vanilla formats).
+      Only operators may use commands beyond `/help` and `/list`; `/op`, `/deop`,
+      `/whitelist`, `/ban`, `/pardon`, `/kick`, `/list` and `/say` work in game and in
+      the server console, which also takes `stop`. Banned, unlisted and over-limit
+      players are turned away at login.
 
 ## Phase 12: World generation
 
