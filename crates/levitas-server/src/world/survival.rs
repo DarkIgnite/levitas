@@ -433,7 +433,7 @@ impl World {
 
     pub(super) fn use_item(&mut self, id: i32, hand: i32, sequence: i32) {
         self.ack(id, sequence);
-        if self.use_bucket(id, hand) || self.start_drawing(id, hand) {
+        if self.use_bucket(id, hand) || self.start_drawing(id, hand) || self.throw_held(id, hand) {
             return;
         }
         let tick = self.tick;

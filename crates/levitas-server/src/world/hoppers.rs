@@ -34,7 +34,9 @@ impl World {
                 _ => Vec::new(),
             },
             BlockEntity::Chest(c) => (0..c.items.len()).collect(),
-            BlockEntity::Campfire(_) | BlockEntity::Plain(_) => Vec::new(),
+            BlockEntity::Campfire(_) | BlockEntity::Plain(_) | BlockEntity::Spawner(_) => {
+                Vec::new()
+            }
         }
     }
 
@@ -50,7 +52,9 @@ impl World {
                 }
             }
             BlockEntity::Chest(c) => (0..c.items.len()).collect(),
-            BlockEntity::Campfire(_) | BlockEntity::Plain(_) => Vec::new(),
+            BlockEntity::Campfire(_) | BlockEntity::Plain(_) | BlockEntity::Spawner(_) => {
+                Vec::new()
+            }
         }
     }
 

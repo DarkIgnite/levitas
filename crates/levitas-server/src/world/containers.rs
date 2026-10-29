@@ -31,6 +31,7 @@ pub enum BlockEntity {
     Campfire(super::campfire::Campfire),
     /// A block entity holding nothing Levitas tracks (daylight detectors, bells).
     Plain(Plain),
+    Spawner(super::spawners::Spawner),
 }
 
 pub struct Plain {
@@ -91,6 +92,7 @@ impl BlockEntity {
                 ("minecraft:bell", &[][..])
             }
             BlockEntity::Plain(_) => ("minecraft:daylight_detector", &[][..]),
+            BlockEntity::Spawner(_) => ("minecraft:mob_spawner", &[][..]),
         };
         let mut nbt = Compound::new()
             .with("id", id)
@@ -109,6 +111,9 @@ impl BlockEntity {
         if let BlockEntity::Campfire(c) = self {
             c.to_nbt(&mut nbt);
         }
+        if let BlockEntity::Spawner(s) = self {
+            s.to_nbt(&mut nbt);
+        }
         nbt
     }
 
@@ -116,6 +121,7 @@ impl BlockEntity {
     pub fn network_data(&self) -> Option<Compound> {
         match self {
             BlockEntity::Campfire(c) => Some(c.network_data()),
+            BlockEntity::Spawner(s) => Some(s.network_data()),
             _ => None,
         }
     }
@@ -140,6 +146,9 @@ impl BlockEntity {
             "minecraft:campfire" => Self::for_block(block::CAMPFIRE)?,
             "minecraft:soul_campfire" => Self::for_block(block::SOUL_CAMPFIRE)?,
             "minecraft:bell" => Self::for_block(block::BELL)?,
+            "minecraft:mob_spawner" => {
+                BlockEntity::Spawner(super::spawners::Spawner::read_nbt(nbt)?)
+            }
             "minecraft:daylight_detector" => Self::for_block(block::DAYLIGHT_DETECTOR)?,
             _ => return None,
         };
@@ -220,6 +229,7 @@ impl BlockEntity {
             },
             BlockEntity::Campfire(_) => block_entity_type::CAMPFIRE,
             BlockEntity::Plain(p) => p.kind,
+            BlockEntity::Spawner(_) => block_entity_type::MOB_SPAWNER,
         }
     }
 
@@ -237,7 +247,7 @@ impl BlockEntity {
             BlockEntity::Chest(c) => &c.items[..],
             BlockEntity::Furnace(f) => &f.items,
             BlockEntity::Campfire(c) => &c.items,
-            BlockEntity::Plain(_) => &[],
+            BlockEntity::Plain(_) | BlockEntity::Spawner(_) => &[],
         }
     }
 
@@ -246,7 +256,7 @@ impl BlockEntity {
             BlockEntity::Chest(c) => &mut c.items[..],
             BlockEntity::Furnace(f) => &mut f.items,
             BlockEntity::Campfire(c) => &mut c.items,
-            BlockEntity::Plain(_) => &mut [],
+            BlockEntity::Plain(_) | BlockEntity::Spawner(_) => &mut [],
         }
     }
 
@@ -256,6 +266,7 @@ impl BlockEntity {
             BlockEntity::Furnace(f) => &mut f.viewers,
             BlockEntity::Campfire(c) => &mut c.viewers,
             BlockEntity::Plain(p) => &mut p.viewers,
+            BlockEntity::Spawner(s) => &mut s.viewers,
         }
     }
 }

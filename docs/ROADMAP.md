@@ -125,7 +125,10 @@ Known gaps are listed under each phase instead of being hidden.
       shields yet; protection enchantments work.
 - [ ] Bows, crossbows, tridents, arrows, snowballs, eggs, ender pearls. Bows and arrows
       work (`world/arrows.rs`): draw strength, gravity and drag, damage from speed,
-      critical shots, sticking in blocks, pickup. The rest is missing.
+      critical shots, sticking in blocks, pickup. Ender pearls, snowballs and eggs are
+      thrown (`world/thrown.rs`): pearls teleport their thrower for 5 damage with a
+      one-second cooldown, snowballs hurt blazes, eggs hatch chicks. Missing:
+      crossbows, tridents.
 - [x] Status effects on players (`world/effects.rs`): given by food (golden apples,
       rotten flesh, pufferfish, ...) and `/effect`, cleared by milk and death, removed
       by honey, shown to the client and saved. Regeneration, poison, wither, hunger,
@@ -176,7 +179,12 @@ Known gaps are listed under each phase instead of being hidden.
       for a second when they see a player and spit large fireballs (power 1 explosions
       with fire) that players can hit back; blazes glow, then throw three small
       fireballs that set things alight, and hit in melee up close. Ghasts spawn in the
-      Nether one time in twenty; blazes only by `/summon` until fortresses spawn them.
+      Nether one time in twenty; blazes come from fortress spawners. Endermen stay
+      calm until a player looks them in the eyes (a carved pumpkin hides that) or
+      hits them, then hunt, now and then teleporting closer; they dodge arrows, thrown
+      things and fireballs by teleporting, and teleport away from water and rain.
+      Monster spawners (`world/spawners.rs`) in generated chunks spawn blazes in the
+      Nether and zombies, skeletons or spiders in the overworld, with players near.
       Missing: baby/husk/drowned/stray variants, piglins, hoglins, striders, wither
       skeletons, endermen, and the rest.
 - [ ] Mob drops, experience, equipment, babies, riding. Drops come from the vanilla

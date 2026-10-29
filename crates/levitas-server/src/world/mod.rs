@@ -29,8 +29,10 @@ mod pathfinding;
 mod piston;
 mod portal;
 mod redstone;
+mod spawners;
 mod storage;
 mod survival;
+mod thrown;
 mod time;
 mod tnt;
 pub mod travel;
@@ -339,6 +341,8 @@ struct Player {
     /// Ticks spent standing in a portal, and ticks until one may take them again.
     portal_ticks: u32,
     portal_cooldown: u32,
+    /// The tick from which an ender pearl can be thrown again.
+    pearl_ready: u64,
     /// Ticks left of the short invulnerability after being hurt, and the hit that
     /// started it: only harder hits get through meanwhile, and only by the difference.
     hurt_ticks: u32,
@@ -400,6 +404,7 @@ impl Player {
             route: None,
             portal_ticks: 0,
             portal_cooldown: 0,
+            pearl_ready: 0,
             hurt_ticks: 0,
             last_damage: 0.0,
             effects: Vec::new(),
@@ -473,6 +478,8 @@ struct World {
     /// Lit TNT waiting to explode.
     tnt: HashMap<i32, tnt::PrimedTnt>,
     fireballs: HashMap<i32, fireballs::Fireball>,
+    /// Ender pearls, snowballs and eggs in flight.
+    thrown: HashMap<i32, thrown::Thrown>,
     /// Blocks changed this tick, for redstone to look around.
     redstone_dirty: Vec<BlockPos>,
     /// Comparators' output levels, which their block states do not hold.
@@ -569,6 +576,7 @@ impl World {
             falling_blocks: HashMap::new(),
             tnt: HashMap::new(),
             fireballs: HashMap::new(),
+            thrown: HashMap::new(),
             redstone_dirty: Vec::new(),
             comparators: HashMap::new(),
             landings: Vec::new(),
@@ -846,6 +854,7 @@ impl World {
         }
         packets.extend(self.arrow_packets());
         packets.extend(self.fireball_packets());
+        packets.extend(self.thrown_packets());
         packets.extend(self.orb_packets());
         for packet in packets {
             self.send(id, packet);
@@ -1207,6 +1216,7 @@ impl World {
         self.tick_mobs();
         self.tick_arrows();
         self.tick_fireballs();
+        self.tick_thrown();
         self.tick_orbs();
         self.tick_monster_spawning();
         self.tick_survival();
@@ -1218,6 +1228,7 @@ impl World {
         self.tick_campfires();
         self.tick_hoppers();
         self.tick_daylight_detectors();
+        self.tick_spawners();
         if self.tick.is_multiple_of(AUTOSAVE_TICKS) {
             self.save_all();
         }
@@ -1375,6 +1386,7 @@ impl World {
             new.push(pos);
         }
         for (x, z) in fresh {
+            self.find_spawners(x, z);
             self.spawn_animals_in_chunk(x, z);
         }
         let ids: Vec<i32> = self.players.keys().copied().collect();

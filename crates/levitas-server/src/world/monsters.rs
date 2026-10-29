@@ -90,8 +90,11 @@ impl World {
     /// the monster is gone (a creeper that exploded).
     pub(super) fn hunt(&mut self, id: i32, mob: &mut Mob) -> bool {
         mob.attack_cooldown = mob.attack_cooldown.saturating_sub(1);
-        // Zombified piglins leave players alone unless angered.
-        if mob.kind == MobKind::ZombifiedPiglin {
+        if mob.kind == MobKind::Enderman {
+            self.enderman_senses(id, mob);
+        }
+        // Zombified piglins and endermen leave players alone unless angered.
+        if matches!(mob.kind, MobKind::ZombifiedPiglin | MobKind::Enderman) {
             mob.anger = mob.anger.saturating_sub(1);
             if mob.anger == 0 {
                 mob.hunting = None;
@@ -178,6 +181,10 @@ impl World {
             self.ghast_attack(id, mob, target);
             return false;
         }
+        // An enderman far from its prey now and then teleports closer.
+        if mob.kind == MobKind::Enderman && distance > 12.0 && self.rng.below(40) == 0 {
+            self.teleport_enderman(mob, target, 8.0);
+        }
         if mob.kind == MobKind::Blaze && distance > 2.0 {
             self.blaze_attack(id, mob, target, distance);
             return false;
@@ -198,6 +205,65 @@ impl World {
             self.push_player(pid, [-yaw.sin() * KNOCKBACK, 0.36, yaw.cos() * KNOCKBACK]);
         }
         false
+    }
+
+    /// An enderman turns on a player who looks it in the eyes (unless they wear a carved
+    /// pumpkin), and teleports away from water.
+    fn enderman_senses(&mut self, id: i32, mob: &mut Mob) {
+        let head = [mob.pos[0], mob.pos[1] + 2.55, mob.pos[2]];
+        let feet = BlockPos::new(
+            mob.pos[0].floor() as i32,
+            mob.pos[1].floor() as i32,
+            mob.pos[2].floor() as i32,
+        );
+        let wet = self
+            .loaded_block_at(feet)
+            .and_then(fluid_at)
+            .is_some_and(|f| f.fluid == Fluid::Water)
+            || (self.weather.is_raining()
+                && self.dimension.has_sky()
+                && self.light_at(feet).is_some_and(|(sky, _)| sky == 15));
+        if wet {
+            if self.tick.is_multiple_of(10) {
+                self.hurt_mob(id, mob, 1.0, "minecraft:drown");
+            }
+            let at = mob.pos;
+            self.teleport_enderman(mob, at, 32.0);
+        }
+        if mob.anger > 0 {
+            return;
+        }
+        let pumpkin = ItemInfo::id_of("minecraft:carved_pumpkin");
+        let staring = self
+            .players
+            .iter()
+            .filter(|(_, p)| p.alive && p.survival())
+            .filter(|(_, p)| Some(p.inventory.slots[5].item) != pumpkin)
+            .find(|(_, p)| {
+                let (eye, look, _) = p.eye_ray();
+                let to = [0, 1, 2].map(|i| head[i] - eye[i]);
+                let distance = (to[0] * to[0] + to[1] * to[1] + to[2] * to[2]).sqrt();
+                if distance > 64.0 || distance < 1e-6 {
+                    return false;
+                }
+                let dot: f64 = (0..3).map(|i| look[i] * to[i] / distance).sum();
+                dot > 1.0 - 0.025 / distance && self.line_of_sight(eye, head)
+            })
+            .map(|(&pid, _)| pid);
+        if let Some(pid) = staring {
+            mob.anger = super::mobs::ENDERMAN_ANGER;
+            mob.hunting = Some(pid);
+            self.play_sound_at("minecraft:entity.enderman.stare", mob.pos, 2.5, 1.0, None);
+            self.send_to_viewers(
+                mob,
+                Writer::packet(clientbound::SET_ENTITY_DATA)
+                    .varint(id)
+                    .u8(17) // screaming
+                    .varint(8) // boolean
+                    .bool(true)
+                    .u8(0xFF),
+            );
+        }
     }
 
     /// A ghast that sees its target charges for a second, crying out halfway, then

@@ -115,6 +115,16 @@ impl PalettedContainer {
         old
     }
 
+    /// Whether `value` might be in the container: a quick check of the palette, which
+    /// may still list values since replaced.
+    pub fn may_contain(&self, value: u16) -> bool {
+        match &self.storage {
+            Storage::Single(v) => *v == value,
+            Storage::Indirect { palette, .. } => palette.contains(&value),
+            Storage::Direct(_) => true,
+        }
+    }
+
     /// Builds a container holding `values` (one per entry), in the most compact form.
     pub fn from_values(kind: Kind, values: &[u16]) -> Self {
         assert_eq!(values.len(), kind.entries);

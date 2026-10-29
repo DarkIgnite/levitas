@@ -2139,3 +2139,15 @@ async fn players_travel_to_the_nether_and_respawn_in_the_overworld() {
         "minecraft:overworld"
     );
 }
+
+#[tokio::test]
+async fn ender_pearls_carry_their_thrower_for_five_damage() {
+    let mut alice = join(server().await, "Alice", 1).await;
+    read_until(&mut alice, play::clientbound::PLAYER_POSITION).await;
+    give(&mut alice, "ender_pearl", 1).await;
+    stand_looking_down(&mut alice, 4, 4).await;
+    send(&mut alice, use_item(1)).await;
+    spawned(&mut alice, entity_type::ENDER_PEARL).await;
+    read_until(&mut alice, play::clientbound::PLAYER_POSITION).await;
+    assert_eq!(health_below(&mut alice, 20.0).await, 15.0);
+}

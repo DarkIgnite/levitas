@@ -37,6 +37,8 @@ const DEFAULT_CREATURE_PROBABILITY: f64 = 0.1;
 const DATA_SHEEP_WOOL: u8 = 17;
 const DATA_SLIME_SIZE: u8 = 16;
 const SERIALIZER_INT: i32 = 1;
+/// How long an enderman stays angry after being looked at or hit.
+pub const ENDERMAN_ANGER: u32 = 600;
 /// How far a hit zombified piglin's anger spreads to others.
 const PIGLIN_ALERT_RANGE: f64 = 20.0;
 const SERIALIZER_BYTE: i32 = 0;
@@ -78,6 +80,7 @@ pub enum MobKind {
     MagmaCube,
     Ghast,
     Blaze,
+    Enderman,
 }
 
 impl MobKind {
@@ -95,6 +98,7 @@ impl MobKind {
             "minecraft:magma_cube" => Some(MobKind::MagmaCube),
             "minecraft:ghast" => Some(MobKind::Ghast),
             "minecraft:blaze" => Some(MobKind::Blaze),
+            "minecraft:enderman" => Some(MobKind::Enderman),
             _ => None,
         }
     }
@@ -113,6 +117,7 @@ impl MobKind {
             MobKind::MagmaCube => "minecraft:magma_cube",
             MobKind::Ghast => "minecraft:ghast",
             MobKind::Blaze => "minecraft:blaze",
+            MobKind::Enderman => "minecraft:enderman",
         }
     }
 
@@ -131,6 +136,7 @@ impl MobKind {
             MobKind::MagmaCube => "Magma Cube",
             MobKind::Ghast => "Ghast",
             MobKind::Blaze => "Blaze",
+            MobKind::Enderman => "Enderman",
         }
     }
 
@@ -145,6 +151,7 @@ impl MobKind {
                 | MobKind::MagmaCube
                 | MobKind::Ghast
                 | MobKind::Blaze
+                | MobKind::Enderman
         )
     }
 
@@ -169,6 +176,7 @@ impl MobKind {
             // With its golden sword.
             MobKind::ZombifiedPiglin => 8.0,
             MobKind::Blaze => 6.0,
+            MobKind::Enderman => 7.0,
             _ => 0.0,
         }
     }
@@ -177,7 +185,7 @@ impl MobKind {
     pub fn follow_range(self) -> f64 {
         match self {
             MobKind::Zombie | MobKind::ZombifiedPiglin => 35.0,
-            MobKind::Ghast => 64.0,
+            MobKind::Ghast | MobKind::Enderman => 64.0,
             MobKind::Blaze => 48.0,
             _ => 16.0,
         }
@@ -201,6 +209,7 @@ impl MobKind {
             MobKind::MagmaCube => entity_type::MAGMA_CUBE,
             MobKind::Ghast => entity_type::GHAST,
             MobKind::Blaze => entity_type::BLAZE,
+            MobKind::Enderman => entity_type::ENDERMAN,
         }
     }
 
@@ -216,6 +225,7 @@ impl MobKind {
             MobKind::MagmaCube => 1.0,
             MobKind::Ghast => 10.0,
             MobKind::Blaze => 20.0,
+            MobKind::Enderman => 40.0,
         }
     }
 
@@ -234,6 +244,7 @@ impl MobKind {
             MobKind::MagmaCube => (0.52, 0.52),
             MobKind::Ghast => (4.0, 4.0),
             MobKind::Blaze => (0.6, 1.8),
+            MobKind::Enderman => (0.6, 2.9),
         }
     }
 
@@ -249,6 +260,7 @@ impl MobKind {
             MobKind::MagmaCube => 0.0,
             MobKind::Ghast => 0.08,
             MobKind::Blaze => 0.06,
+            MobKind::Enderman => 0.15,
             _ => 0.1,
         }
     }
@@ -268,6 +280,7 @@ impl MobKind {
             MobKind::MagmaCube => "magma_cube",
             MobKind::Ghast => "ghast",
             MobKind::Blaze => "blaze",
+            MobKind::Enderman => "enderman",
         }
     }
 }
@@ -613,7 +626,7 @@ struct SpawnList {
 }
 
 /// Mobs `/summon` knows.
-pub const SUMMONABLE: [&str; 12] = [
+pub const SUMMONABLE: [&str; 13] = [
     "cow",
     "pig",
     "sheep",
@@ -626,6 +639,7 @@ pub const SUMMONABLE: [&str; 12] = [
     "magma_cube",
     "ghast",
     "blaze",
+    "enderman",
 ];
 
 fn spawners(list: &Value) -> Vec<Spawner> {
@@ -854,6 +868,45 @@ impl World {
             Some(p) if !panicking => yaw_towards(eyes, p),
             _ => mob.yaw,
         };
+    }
+
+    /// An enderman vanishes and turns up somewhere within `range` of `around`: on solid
+    /// ground with room for it and out of water. Returns whether it found a spot.
+    pub(super) fn teleport_enderman(
+        &mut self,
+        mob: &mut Mob,
+        around: [f64; 3],
+        range: f64,
+    ) -> bool {
+        for _ in 0..16 {
+            let r = |rng: &mut Rng| (rng.f64() - 0.5) * 2.0 * range;
+            let x = (around[0] + r(&mut self.rng)).floor() as i32;
+            let z = (around[2] + r(&mut self.rng)).floor() as i32;
+            let mut y = (around[1] + r(&mut self.rng) / 2.0).floor() as i32;
+            // Down to the ground.
+            while y > MIN_Y
+                && self
+                    .loaded_state(BlockPos::new(x, y - 1, z))
+                    .is_some_and(is_air)
+            {
+                y -= 1;
+            }
+            let ground = self.loaded_state(BlockPos::new(x, y - 1, z));
+            let feet = self.loaded_state(BlockPos::new(x, y, z));
+            let solid = ground.is_some_and(|g| crate::blocks::sturdy(g, crate::blocks::Dir::Up));
+            let wet = feet.and_then(fluid_at).is_some();
+            let at = [f64::from(x) + 0.5, f64::from(y), f64::from(z) + 0.5];
+            if solid && !wet && self.mob_fits(MobKind::Enderman, at) {
+                let from = mob.pos;
+                mob.pos = at;
+                mob.path.clear();
+                mob.target = None;
+                self.play_sound_at("minecraft:entity.enderman.teleport", from, 1.0, 1.0, None);
+                self.play_sound_at("minecraft:entity.enderman.teleport", at, 1.0, 1.0, None);
+                return true;
+            }
+        }
+        false
     }
 
     /// Magma cubes move only by hopping: towards their prey, or anywhere, now and then.
@@ -1294,6 +1347,18 @@ impl World {
         let Some(mut mob) = self.mobs.remove(&target) else {
             return false;
         };
+        // Endermen dodge what is thrown or shot at them.
+        if mob.kind == MobKind::Enderman
+            && matches!(
+                damage_type,
+                "minecraft:arrow" | "minecraft:thrown" | "minecraft:fireball"
+            )
+        {
+            let at = mob.pos;
+            self.teleport_enderman(&mut mob, at, 32.0);
+            self.mobs.insert(target, mob);
+            return false;
+        }
         let dealt = if mob.hurt_ticks > 0 {
             damage - mob.last_damage
         } else {
@@ -1309,6 +1374,10 @@ impl World {
         mob.hurt_ticks = HURT_TICKS;
         mob.health -= dealt;
         let anger_piglins = by_player.filter(|_| mob.kind == MobKind::ZombifiedPiglin);
+        if let (Some(attacker), MobKind::Enderman) = (by_player, mob.kind) {
+            mob.anger = mob.anger.max(ENDERMAN_ANGER);
+            mob.hunting = Some(attacker);
+        }
         if let Some(attacker) = by_player {
             mob.killed_by_player = true;
             mob.looting = self
@@ -1844,5 +1913,31 @@ mod path_tests {
             .collect();
         assert!((2..=4).contains(&small.len()), "{}", small.len());
         assert!(small.iter().all(|m| m.slime_size == 2 && m.health == 4.0));
+    }
+
+    #[test]
+    fn endermen_turn_on_players_who_stare_and_dodge_arrows() {
+        let mut world = flat_world();
+        let player = next_entity_id();
+        let profile = crate::connection::Profile {
+            name: "Alice".to_owned(),
+            uuid: 1,
+        };
+        let (out, _frames) = mpsc::channel(1000);
+        let mut alice = Player::new(profile, out, [0.5, -60.0, 0.5]);
+        alice.yaw = 0.0; // facing south, towards +z
+        alice.pitch = -6.0;
+        world.players.insert(player, alice);
+        let id = next_entity_id();
+        let mut enderman = Mob::new(MobKind::Enderman, [0.5, -60.0, 10.5], &mut world.rng);
+        world.hunt(id, &mut enderman);
+        assert_eq!(enderman.hunting, Some(player), "stared at");
+
+        let before = enderman.pos;
+        world.mobs.insert(id, enderman);
+        assert!(!world.hit_mob(id, 5.0, Some(player), [0.0, 1.0], "minecraft:arrow"));
+        let after = &world.mobs[&id];
+        assert_eq!(after.health, 40.0, "unhurt");
+        assert_ne!(after.pos, before, "gone elsewhere");
     }
 }
