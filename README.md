@@ -11,7 +11,7 @@
   <img alt="Java Edition 1.21.8" src="https://img.shields.io/badge/Java%20Edition-1.21.8-f74c00">
   <img alt="Written in Rust" src="https://img.shields.io/badge/written%20in-Rust-b7410e?logo=rust">
   <img alt="License: GPL-3.0-only" src="https://img.shields.io/badge/license-GPL--3.0--only-blue">
-  <img alt="Progress: about 59%" src="https://img.shields.io/badge/progress-~62%25-orange">
+  <img alt="Progress: about 59%" src="https://img.shields.io/badge/progress-~64%25-orange">
 </p>
 
 # Levitas
@@ -23,10 +23,10 @@ written from scratch in Rust. The goal is a server that plays like vanilla survi
 runs on a fraction of the memory and CPU a JVM-based server (Paper, Purpur, Leaf, ...)
 needs, with a plugin API for survival-economy servers on top.
 
-> **Status: playable, early.** You can join a generated world and play survival: mine,
-> craft, farm, fight monsters and save your progress. Redstone, the Nether and End,
-> villagers and plugins are still to come. Overall progress: **about 62%** of the
-> [roadmap](docs/ROADMAP.md).
+> **Status: playable.** You can join a generated world and play survival: mine, craft,
+> farm, fight monsters, enchant, brew, build redstone, trade with villagers, and go to
+> the Nether and the End to fight the dragon. Raids, minecarts and plugins are still to
+> come. Overall progress: **about 64%** of the [roadmap](docs/ROADMAP.md).
 
 ## Progress
 
@@ -44,12 +44,12 @@ counts half. The roadmap lists exactly what is done and what is missing in each 
 | 7. Redstone | 62% | `██████▏░░░` |
 | 8. Progression (enchanting, brewing, ...) | 58% | `█████▊░░░░` |
 | 9. Dimensions (Nether, End) | 60% | `██████░░░░` |
-| 10. Villagers and raids | 0% | `░░░░░░░░░░` |
+| 10. Villagers and raids | 25% | `██▌░░░░░░░` |
 | 11. Everything else (commands, config, ...) | 48% | `████▊░░░░░` |
 | 12. World generation | 60% | `██████░░░░` |
 | 13. Plugins and economy | 0% | `░░░░░░░░░░` |
 | Infrastructure (CI, parallel ticking, benchmarks) | 0% | `░░░░░░░░░░` |
-| **Overall** | **~62%** | `██████▏░░░` |
+| **Overall** | **~64%** | `██████▍░░░` |
 
 ## What works today
 
@@ -73,9 +73,9 @@ counts half. The roadmap lists exactly what is done and what is missing in each 
 - **Saving:** everything is stored in the vanilla Anvil format (`region/`, `entities/`,
   `playerdata/`, `level.dat`), so vanilla and Leaf can open Levitas worlds.
 
-Not there yet: redstone, the Nether and End, villagers, enchanting and brewing, boats
-and minecarts, online mode (Mojang account checks) and plugins. See the
-[roadmap](docs/ROADMAP.md) for the full list.
+Not there yet: raids, iron golems, boats and minecarts, item frames and armor stands,
+advancements, tipped arrows and plugins. See the [roadmap](docs/ROADMAP.md) for the
+full list.
 
 ## Playing
 

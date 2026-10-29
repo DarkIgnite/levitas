@@ -625,6 +625,7 @@ mod tests {
             pos: (5, 5),
             chunk,
             block_entities: vec![nbt],
+            entities: Vec::new(),
         }]);
         let heart = ItemInfo::id_of("minecraft:heart_of_the_sea").unwrap();
         let Some(BlockEntity::Chest(c)) = w.block_entities.get(&pos) else {

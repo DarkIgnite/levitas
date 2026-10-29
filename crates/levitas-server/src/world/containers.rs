@@ -19,7 +19,7 @@ const FURNACE_INPUT: usize = 0;
 const FURNACE_FUEL: usize = 1;
 const FURNACE_OUTPUT: usize = 2;
 /// Window IDs cycle through 1..=100 like vanilla's.
-const MAX_WINDOW_ID: i32 = 100;
+pub(super) const MAX_WINDOW_ID: i32 = 100;
 /// Block event that sets how many players have a chest open (it animates the lid).
 const BLOCK_EVENT_CHEST_VIEWERS: u8 = 1;
 /// The player inventory part of a container window: main inventory then hotbar.
@@ -318,6 +318,8 @@ pub enum View {
     Stonecutter(BlockPos),
     Smithing(BlockPos),
     Brewing(BlockPos),
+    /// Trading with the villager of this entity ID.
+    Merchant(i32),
 }
 
 impl View {
@@ -334,6 +336,7 @@ impl View {
             View::Stonecutter(_) => 2,
             View::Smithing(_) => 4,
             View::Brewing(_) => super::brewing::SLOTS,
+            View::Merchant(_) => 3,
         }
     }
 
@@ -348,7 +351,8 @@ impl View {
             | View::Anvil(_)
             | View::Grindstone(_)
             | View::Stonecutter(_)
-            | View::Smithing(_) => Vec::new(),
+            | View::Smithing(_)
+            | View::Merchant(_) => Vec::new(),
         }
     }
 
@@ -365,6 +369,7 @@ impl View {
             View::Stonecutter(_) => click::Layout::Stonecutter,
             View::Smithing(_) => click::Layout::Smithing,
             View::Brewing(_) => click::Layout::Brewing,
+            View::Merchant(_) => click::Layout::Merchant,
         }
     }
 }
@@ -376,7 +381,7 @@ pub struct Open {
     /// The crafting table grid, or the enchanting table's item and lapis; they live in
     /// the window, not in the world.
     pub grid: [Stack; 9],
-    result: Stack,
+    pub result: Stack,
     /// What the enchanting table offers in its three slots.
     pub offers: [super::enchanting_table::Offer; 3],
     /// The stonecutter recipe picked.
@@ -530,6 +535,10 @@ impl World {
                 let open = p.open.as_ref().expect("window is open");
                 open.grid[..4].to_vec()
             }
+            View::Merchant(_) => {
+                let open = p.open.as_ref().expect("window is open");
+                open.grid[..3].to_vec()
+            }
             View::Chest(..) | View::Furnace(..) | View::DoubleChest(..) | View::Brewing(..) => {
                 let mut slots = vec![Stack::EMPTY; view.container_len()];
                 for (part, first) in view.parts() {
@@ -584,6 +593,11 @@ impl World {
                 let open = p.open.as_mut().expect("window is open");
                 open.grid[..4].copy_from_slice(&slots[..4]);
             }
+            View::Merchant(_) => {
+                let p = self.players.get_mut(&id).expect("player exists");
+                let open = p.open.as_mut().expect("window is open");
+                open.grid[..3].copy_from_slice(&slots[..3]);
+            }
             View::Chest(..) | View::Furnace(..) | View::DoubleChest(..) | View::Brewing(..) => {
                 for (part, first) in view.parts() {
                     if let Some(entity) = self.block_entities.get_mut(&part) {
@@ -627,6 +641,15 @@ impl World {
             _ => return,
         };
         let layout = view.layout();
+        let trades = match view {
+            View::Merchant(target) => self
+                .mobs
+                .get(&target)
+                .and_then(|m| m.villager.as_ref())
+                .map(|v| v.trades())
+                .unwrap_or_default(),
+            _ => Vec::new(),
+        };
         let before = self.window_slots(id, view);
         let mut slots = before.clone();
         let p = self.players.get_mut(&id).expect("player exists");
@@ -644,6 +667,7 @@ impl World {
             xp_level: p.xp_level,
             used: None,
             choice: p.open.as_ref().and_then(|o| o.choice),
+            trades,
         };
         let thrown = click::click(&mut w, click::Click { slot, button, mode });
         let used = w.used;
@@ -696,6 +720,9 @@ impl World {
         }
         match (view, used) {
             (View::Anvil(pos), Some(click::Used::Levels(cost))) => self.anvil_used(id, pos, cost),
+            (View::Merchant(target), Some(click::Used::Trade { index, times })) => {
+                self.traded(id, target, index, times)
+            }
             (View::Grindstone(pos), Some(click::Used::Experience(xp))) => {
                 self.grindstone_used(pos, xp)
             }
@@ -917,6 +944,10 @@ impl World {
             View::Anvil(_) | View::Grindstone(_) => returned.extend(&open.grid[..2]),
             View::Stonecutter(_) => returned.push(open.grid[0]),
             View::Smithing(_) => returned.extend(&open.grid[..3]),
+            View::Merchant(target) => {
+                returned.extend(&open.grid[..2]);
+                self.stop_trading(id, target);
+            }
             View::Chest(..) | View::Furnace(..) | View::DoubleChest(..) | View::Brewing(..) => {
                 let mut last_viewer = false;
                 for (part, _) in open.view.parts() {

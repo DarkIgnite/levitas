@@ -332,7 +332,17 @@ Known gaps are listed under each phase instead of being hidden.
 
 ## Phase 10: Villagers and raids
 
-- [ ] Villagers: professions, workstations, trading, restocking, gossip
+- [ ] Villagers: professions, workstations, trading, restocking, gossip. Villages
+      generate with their villagers (and Pumpkin's structure entities come out with
+      each chunk). Villagers (`world/villagers.rs`) wander, claim an unclaimed
+      workstation within 16 blocks and take its profession, and trade from the
+      wiki's tables for all 13 professions (enchanted gear and books included).
+      Trading earns them experience up to master, each level adding two trades;
+      they restock twice a day while they have a workstation; one that never traded
+      loses its profession with its workstation. Picking a trade pulls the payment
+      from the inventory. Saved in vanilla's format. Missing: gossip and prices that
+      change with demand or reputation, breeding, sleeping in beds, schedules and
+      walking to work, explorer maps, iron golems and cats.
 - [ ] Wandering traders, iron golems, zombie villagers and curing
 - [ ] Raids and bad omen
 

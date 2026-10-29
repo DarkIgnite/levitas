@@ -178,10 +178,15 @@ impl PumpkinTerrain {
             for z in z0..z0 + size {
                 let i = grid.index(x, z);
                 match grid.chunks[i].take() {
-                    Some(PumpkinChunk::Proto(proto)) => out.push(Generated {
+                    Some(PumpkinChunk::Proto(mut proto)) => out.push(Generated {
                         pos: (x, z),
                         chunk: self.translate(&proto),
                         block_entities: proto.pending_block_entities.iter().map(compound).collect(),
+                        entities: proto
+                            .take_pending_structure_entities()
+                            .iter()
+                            .map(compound)
+                            .collect(),
                     }),
                     _ => unreachable!("generation stops before the full stage"),
                 }
@@ -798,5 +803,18 @@ mod tests {
         }
         assert!(!tables.is_empty(), "no loot chests in six areas");
         eprintln!("{tables:?}");
+    }
+
+    #[test]
+    #[ignore]
+    fn print_structure_entities() {
+        let terrain = PumpkinTerrain::new(-4254893504593453935);
+        for (ax, az) in [(0, 0), (1, 0), (0, 1), (-1, 0), (0, -1), (1, 1)] {
+            for g in terrain.generate_area(ax, az) {
+                for e in &g.entities {
+                    eprintln!("{:?} {:?}", g.pos, e);
+                }
+            }
+        }
     }
 }

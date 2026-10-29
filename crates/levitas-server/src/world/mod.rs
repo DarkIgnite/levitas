@@ -42,6 +42,7 @@ mod thrown;
 mod time;
 mod tnt;
 pub mod travel;
+mod villagers;
 
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
@@ -210,6 +211,11 @@ pub enum Event {
         id: i32,
         window: i32,
         button: i32,
+    },
+    /// A trade picked on a villager's trading screen.
+    SelectTrade {
+        id: i32,
+        index: i32,
     },
     /// The text typed into a sign's editor.
     SignUpdate {
@@ -738,6 +744,7 @@ impl World {
                 front,
                 lines,
             } => self.update_sign(id, pos, front, lines),
+            Event::SelectTrade { id, index } => self.select_trade(id, index),
             Event::ContainerButton { id, window, button } => self.window_button(id, window, button),
             Event::HeldSlot { id, slot } => {
                 if let (Some(p), Ok(slot)) = (self.players.get_mut(&id), usize::try_from(slot)) {
@@ -1447,10 +1454,12 @@ impl World {
         }
         let mut new = Vec::with_capacity(area.len());
         let mut fresh = Vec::new();
+        let mut structure_mobs = Vec::new();
         for Generated {
             pos,
             chunk,
             block_entities,
+            entities,
         } in area
         {
             // Chunks generated on the spot meanwhile, or saved before, stay as they are.
@@ -1470,10 +1479,13 @@ impl World {
                     for nbt in &block_entities {
                         self.add_block_entity(nbt, pos.0, pos.1);
                     }
+                    // Villages come with their villagers.
+                    structure_mobs.extend(entities);
                 }
             }
             new.push(pos);
         }
+        self.spawn_structure_mobs(&structure_mobs);
         for (x, z) in fresh {
             self.find_spawners(x, z);
             self.spawn_animals_in_chunk(x, z);

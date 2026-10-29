@@ -54,6 +54,33 @@ pub enum Layout {
     /// A brewing stand: three bottles, the ingredient, the fuel, then main inventory
     /// and hotbar.
     Brewing,
+    /// A villager's trading screen: two payment slots, the result, then main inventory
+    /// and hotbar.
+    Merchant,
+}
+
+/// A trade as the trading screen offers it.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Trade {
+    pub buy: Stack,
+    pub buy_b: Stack,
+    pub sell: Stack,
+    /// Trades left before it sells out.
+    pub left: i32,
+}
+
+impl Trade {
+    /// Whether `a` and `b` pay for it.
+    pub fn paid_by(&self, a: Stack, b: Stack) -> bool {
+        let covers = |have: Stack, cost: Stack| {
+            if cost.is_empty() {
+                have.is_empty()
+            } else {
+                have.item == cost.item && have.potion == cost.potion && have.count >= cost.count
+            }
+        };
+        self.left > 0 && covers(a, self.buy) && covers(b, self.buy_b)
+    }
 }
 
 /// What taking a result costs or gives, settled by the world after the click.
@@ -63,6 +90,8 @@ pub enum Used {
     Levels(i32),
     /// Experience a grindstone gives back, before its random part.
     Experience(i32),
+    /// Times a villager's trade (by index) was made.
+    Trade { index: usize, times: i32 },
 }
 
 impl Layout {
@@ -77,6 +106,7 @@ impl Layout {
             Layout::Stonecutter => 2,
             Layout::Smithing => 4,
             Layout::Brewing => 5,
+            Layout::Merchant => 3,
         }
     }
 
@@ -104,6 +134,7 @@ impl Layout {
             Layout::Anvil | Layout::Grindstone => Some(2),
             Layout::Stonecutter => Some(1),
             Layout::Smithing => Some(3),
+            Layout::Merchant => Some(2),
             _ => None,
         }
     }
@@ -172,6 +203,25 @@ fn is_bucket(stack: &Stack) -> bool {
     ItemInfo::get(stack.item).is_some_and(|i| i.name == "minecraft:bucket")
 }
 
+/// The trade the payment slots pay for, and whether they hold its items the other way
+/// round: the one picked if paid, else the first that is.
+fn merchant_trade(w: &Window) -> Option<(usize, bool)> {
+    let (a, b) = (w.slots[0], w.slots[1]);
+    let pays = |i: usize| {
+        let t = w.trades.get(i)?;
+        if t.paid_by(a, b) {
+            Some((i, false))
+        } else if t.paid_by(b, a) {
+            Some((i, true))
+        } else {
+            None
+        }
+    };
+    w.choice
+        .and_then(pays)
+        .or_else(|| (0..w.trades.len()).find_map(pays))
+}
+
 fn is_glass_bottle(stack: &Stack) -> bool {
     ItemInfo::get(stack.item).is_some_and(|i| i.name == "minecraft:glass_bottle")
 }
@@ -224,6 +274,8 @@ pub struct Window<'a> {
     pub used: Option<Used>,
     /// The stonecutter recipe picked, as an index into the options for its input.
     pub choice: Option<usize>,
+    /// A villager's trades, for its trading screen.
+    pub trades: Vec<Trade>,
 }
 
 /// Applies one click. Returns the stacks the player threw out.
@@ -295,6 +347,12 @@ fn refresh_result(w: &mut Window) {
         Layout::Smithing => {
             w.slots[3] = w.recipes.smithing(w.slots[0], w.slots[1], w.slots[2]);
         }
+        Layout::Merchant => {
+            w.slots[2] = match merchant_trade(w) {
+                Some((index, _)) => w.trades[index].sell,
+                None => Stack::EMPTY,
+            };
+        }
         Layout::Stonecutter => {
             let options = w.recipes.stonecutting(w.slots[0].item);
             w.slots[1] = match w.choice {
@@ -331,6 +389,25 @@ fn take_result(w: &mut Window) -> Stack {
             w.used = Some(Used::Levels(r.cost));
             refresh_result(w);
             return r.result;
+        }
+        Layout::Merchant => {
+            let Some((index, swapped)) = merchant_trade(w) else {
+                return Stack::EMPTY;
+            };
+            let trade = w.trades[index];
+            let (a, b) = if swapped { (1, 0) } else { (0, 1) };
+            w.slots[a] = w.slots[a].with_count(w.slots[a].count - trade.buy.count);
+            w.slots[b] = w.slots[b].with_count(w.slots[b].count - trade.buy_b.count);
+            w.trades[index].left -= 1;
+            w.used = match w.used {
+                Some(Used::Trade { index: i, times }) if i == index => Some(Used::Trade {
+                    index,
+                    times: times + 1,
+                }),
+                _ => Some(Used::Trade { index, times: 1 }),
+            };
+            refresh_result(w);
+            return trade.sell;
         }
         Layout::Smithing => {
             let result = w.slots[3];
@@ -555,6 +632,20 @@ fn quick_move(w: &mut Window, s: usize) {
                 move_into(w, stack, 0..n, false)
             } else {
                 move_into(w, stack, player, true)
+            }
+        }
+        Layout::Merchant => {
+            if !in_player {
+                move_into(w, stack, player, true)
+            } else {
+                let rest = move_into(w, stack, 0..2, false);
+                if rest != stack {
+                    rest
+                } else if main.contains(&s) {
+                    move_into(w, stack, hotbar, false)
+                } else {
+                    move_into(w, stack, main, false)
+                }
             }
         }
         Layout::Brewing => {

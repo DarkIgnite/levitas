@@ -425,6 +425,16 @@ fn items_and_entities(data: &Path, block_defaults: &HashMap<String, u64>, out: &
         ("mob_effect", "minecraft:mob_effect", "Status effect IDs."),
         ("potion", "minecraft:potion", "Potion IDs."),
         (
+            "villager_profession",
+            "minecraft:villager_profession",
+            "Villager profession IDs.",
+        ),
+        (
+            "villager_type",
+            "minecraft:villager_type",
+            "Villager type IDs.",
+        ),
+        (
             "command_argument",
             "minecraft:command_argument_type",
             "Command argument parser IDs (`BRIGADIER_INTEGER`, `ITEM_STACK`, ...).",

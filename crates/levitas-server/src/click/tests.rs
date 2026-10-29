@@ -55,6 +55,7 @@ impl Test {
             xp_level: self.xp_level,
             used: None,
             choice: self.choice,
+            trades: Vec::new(),
         };
         let thrown = click(&mut w, Click { slot, button, mode });
         self.used = w.used;

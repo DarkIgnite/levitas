@@ -81,6 +81,7 @@ pub enum MobKind {
     Ghast,
     Blaze,
     Enderman,
+    Villager,
 }
 
 impl MobKind {
@@ -99,6 +100,7 @@ impl MobKind {
             "minecraft:ghast" => Some(MobKind::Ghast),
             "minecraft:blaze" => Some(MobKind::Blaze),
             "minecraft:enderman" => Some(MobKind::Enderman),
+            "minecraft:villager" => Some(MobKind::Villager),
             _ => None,
         }
     }
@@ -118,6 +120,7 @@ impl MobKind {
             MobKind::Ghast => "minecraft:ghast",
             MobKind::Blaze => "minecraft:blaze",
             MobKind::Enderman => "minecraft:enderman",
+            MobKind::Villager => "minecraft:villager",
         }
     }
 
@@ -137,6 +140,7 @@ impl MobKind {
             MobKind::Ghast => "Ghast",
             MobKind::Blaze => "Blaze",
             MobKind::Enderman => "Enderman",
+            MobKind::Villager => "Villager",
         }
     }
 
@@ -210,6 +214,7 @@ impl MobKind {
             MobKind::Ghast => entity_type::GHAST,
             MobKind::Blaze => entity_type::BLAZE,
             MobKind::Enderman => entity_type::ENDERMAN,
+            MobKind::Villager => entity_type::VILLAGER,
         }
     }
 
@@ -226,6 +231,7 @@ impl MobKind {
             MobKind::Ghast => 10.0,
             MobKind::Blaze => 20.0,
             MobKind::Enderman => 40.0,
+            MobKind::Villager => 20.0,
         }
     }
 
@@ -245,6 +251,7 @@ impl MobKind {
             MobKind::Ghast => (4.0, 4.0),
             MobKind::Blaze => (0.6, 1.8),
             MobKind::Enderman => (0.6, 2.9),
+            MobKind::Villager => (0.6, 1.95),
         }
     }
 
@@ -281,6 +288,7 @@ impl MobKind {
             MobKind::Ghast => "ghast",
             MobKind::Blaze => "blaze",
             MobKind::Enderman => "enderman",
+            MobKind::Villager => "villager",
         }
     }
 }
@@ -343,6 +351,8 @@ pub struct Mob {
     sent_angles: (u8, u8),
     /// Players who can see this mob.
     viewers: HashSet<i32>,
+    /// A villager's profession, trades and workstation.
+    pub villager: Option<Box<super::villagers::Villager>>,
 }
 
 impl Mob {
@@ -401,6 +411,8 @@ impl Mob {
             sent_pos: pos,
             sent_angles: (0, 0),
             viewers: HashSet::new(),
+            villager: (kind == MobKind::Villager)
+                .then(|| Box::new(super::villagers::Villager::new("minecraft:plains"))),
         }
     }
 
@@ -465,6 +477,9 @@ impl Mob {
             .i16(0)];
         if self.kind == MobKind::Sheep {
             packets.push(self.wool_data(id));
+        }
+        if let Some(v) = &self.villager {
+            packets.push(v.data_packet(id));
         }
         if self.age < 0 {
             packets.push(super::breeding::baby_data(id, true));
@@ -549,7 +564,15 @@ impl Mob {
             MobKind::ZombifiedPiglin => nbt.insert("AngerTime", self.anger as i32),
             _ => {}
         }
+        if let Some(v) = &self.villager {
+            v.write_nbt(&mut nbt);
+        }
         nbt
+    }
+
+    /// A mob from its saved form, or a structure's.
+    pub(super) fn read(nbt: &Compound, rng: &mut Rng) -> Option<Mob> {
+        Mob::from_nbt(nbt, rng)
     }
 
     fn from_nbt(nbt: &Compound, rng: &mut Rng) -> Option<Mob> {
@@ -585,6 +608,9 @@ impl Mob {
         mob.love = nbt.int("InLove").unwrap_or(0).max(0) as u32;
         if let Some(t) = nbt.int("EggLayTime") {
             mob.egg_ticks = t.max(0) as u32;
+        }
+        if kind == MobKind::Villager {
+            mob.villager = Some(Box::new(super::villagers::Villager::read_nbt(nbt)));
         }
         mob.sent_pos = mob.pos;
         Some(mob)
@@ -626,7 +652,7 @@ struct SpawnList {
 }
 
 /// Mobs `/summon` knows.
-pub const SUMMONABLE: [&str; 13] = [
+pub const SUMMONABLE: [&str; 14] = [
     "cow",
     "pig",
     "sheep",
@@ -640,6 +666,7 @@ pub const SUMMONABLE: [&str; 13] = [
     "ghast",
     "blaze",
     "enderman",
+    "villager",
 ];
 
 fn spawners(list: &Value) -> Vec<Spawner> {
@@ -806,6 +833,13 @@ impl World {
                 continue;
             }
             self.think(&mut mob);
+            if mob.kind == MobKind::Villager {
+                self.tick_villager(id, &mut mob);
+                if mob.villager.as_ref().is_some_and(|v| v.customer.is_some()) {
+                    mob.target = None;
+                    mob.path.clear();
+                }
+            }
             if !mob.kind.is_monster() {
                 self.tick_breeding(id, &mut mob);
             }
@@ -1507,6 +1541,10 @@ impl World {
         }
         let slot = p.hand_slot(hand);
         let held = ItemInfo::get(p.inventory.slots[slot].item).map_or("", |i| i.name);
+        if mob.kind == MobKind::Villager {
+            self.open_trading(id, target);
+            return;
+        }
         if super::breeding::is_food(mob.kind, held) {
             self.feed_animal(id, target, slot);
             return;
@@ -1658,7 +1696,14 @@ impl World {
             return String::new();
         };
         let pos = p.pos;
-        let mob = Mob::new(kind, pos, &mut self.rng);
+        let mob = if kind == MobKind::Villager {
+            let biome = self
+                .biome_at(pos[0] as i32, pos[1] as i32, pos[2] as i32)
+                .unwrap_or_default();
+            super::villagers::summoned(pos, &biome, &mut self.rng)
+        } else {
+            Mob::new(kind, pos, &mut self.rng)
+        };
         self.mobs.insert(next_entity_id(), mob);
         format!("Summoned new {}", kind.display())
     }

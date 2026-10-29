@@ -241,6 +241,10 @@ fn decode(id: i32, packet: &[u8]) -> io::Result<Option<Event>> {
             window: r.varint()?,
             button: r.varint()?,
         },
+        serverbound::SELECT_TRADE => Event::SelectTrade {
+            id,
+            index: r.varint()?,
+        },
         serverbound::SIGN_UPDATE => {
             let pos = r.position()?;
             let front = r.bool()?;
