@@ -13,6 +13,7 @@ mod devices;
 pub mod dimension;
 mod effects;
 mod enchanting_table;
+mod end_portal;
 mod experience;
 mod explosion;
 mod falling;
@@ -275,6 +276,7 @@ pub fn spawn(dir: impl Into<PathBuf>, new: NewWorld) -> mpsc::Sender<Event> {
 fn terrain_for(kind: WorldKind, seed: i64, dimension: Dimension) -> Arc<dyn Terrain> {
     match (dimension, kind) {
         (Dimension::Nether, _) => Arc::new(PumpkinTerrain::nether(seed)),
+        (Dimension::End, _) => Arc::new(PumpkinTerrain::end(seed)),
         (Dimension::Overworld, WorldKind::Flat) => Arc::new(FlatGenerator::new()),
         (Dimension::Overworld, WorldKind::Noise) => Arc::new(PumpkinTerrain::new(seed)),
     }
@@ -480,6 +482,7 @@ struct World {
     fireballs: HashMap<i32, fireballs::Fireball>,
     /// Ender pearls, snowballs and eggs in flight.
     thrown: HashMap<i32, thrown::Thrown>,
+    eyes: HashMap<i32, end_portal::EyeOfEnder>,
     /// Blocks changed this tick, for redstone to look around.
     redstone_dirty: Vec<BlockPos>,
     /// Comparators' output levels, which their block states do not hold.
@@ -577,6 +580,7 @@ impl World {
             tnt: HashMap::new(),
             fireballs: HashMap::new(),
             thrown: HashMap::new(),
+            eyes: HashMap::new(),
             redstone_dirty: Vec::new(),
             comparators: HashMap::new(),
             landings: Vec::new(),
@@ -746,7 +750,7 @@ impl World {
         let saved_in = self.load_player(id);
         // A player who logged out in another dimension goes back there.
         if let Some(other) = saved_in.filter(|&d| d != self.dimension) {
-            if self.hand_over(id, other, None, true, false, false) {
+            if self.hand_over(id, other, None, travel::Via::Login) {
                 return;
             }
         }
@@ -765,6 +769,7 @@ impl World {
             .varint(Dimension::ALL.len() as i32) // dimension names
             .string(Dimension::Overworld.name())
             .string(Dimension::Nether.name())
+            .string(Dimension::End.name())
             .varint(100) // max players (unused by the client)
             .varint(VIEW_DISTANCE)
             .varint(VIEW_DISTANCE) // simulation distance
@@ -855,6 +860,7 @@ impl World {
         packets.extend(self.arrow_packets());
         packets.extend(self.fireball_packets());
         packets.extend(self.thrown_packets());
+        packets.extend(self.eye_packets());
         packets.extend(self.orb_packets());
         for packet in packets {
             self.send(id, packet);
@@ -1217,11 +1223,13 @@ impl World {
         self.tick_arrows();
         self.tick_fireballs();
         self.tick_thrown();
+        self.tick_eyes();
         self.tick_orbs();
         self.tick_monster_spawning();
         self.tick_survival();
         self.tick_hazards();
         self.tick_portals();
+        self.tick_end_portals();
         self.tick_effects();
         self.tick_items();
         self.tick_furnaces();

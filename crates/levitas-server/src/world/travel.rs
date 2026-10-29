@@ -10,16 +10,26 @@ use super::*;
 /// Where a connection sends its events: the dimension its player is in.
 pub type Route = watch::Sender<mpsc::Sender<Event>>;
 
+/// How a player comes into a dimension.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Via {
+    /// Logging in, having logged out here.
+    Login,
+    /// Respawning here after dying elsewhere.
+    Respawn,
+    /// Through a Nether portal: they come out of one here.
+    NetherPortal,
+    /// Through an End portal: onto the End's platform, or back to their spawn point.
+    EndPortal,
+    /// Sent by a command, to the position given.
+    Command,
+}
+
 /// A player on their way into this dimension.
 pub struct Arrival {
     pub(super) id: i32,
     pub(super) player: Box<Player>,
-    /// Just logging in (saved in this dimension), rather than travelling.
-    pub(super) logging_in: bool,
-    /// Coming back from death in another dimension, to respawn here.
-    pub(super) respawning: bool,
-    /// Coming through a portal: they come out of one here.
-    pub(super) portal: bool,
+    pub(super) via: Via,
 }
 
 /// What the data-kept field of the respawn packet keeps: attributes and entity data.
@@ -28,12 +38,12 @@ const KEEP_ALL_DATA: u8 = 0x03;
 impl World {
     /// Hands player `id` over to `to`, arriving at `pos`. Returns whether they left.
     pub(super) fn travel(&mut self, id: i32, to: Dimension, pos: [f64; 3]) -> bool {
-        self.hand_over(id, to, Some(pos), false, false, false)
+        self.hand_over(id, to, Some(pos), Via::Command)
     }
 
     /// Sends player `id` through a portal to `to`, to come out near `pos`.
     pub(super) fn hand_over_through_portal(&mut self, id: i32, to: Dimension, pos: [f64; 3]) {
-        self.hand_over(id, to, Some(pos), false, false, true);
+        self.hand_over(id, to, Some(pos), Via::NetherPortal);
     }
 
     pub(super) fn hand_over(
@@ -41,10 +51,9 @@ impl World {
         id: i32,
         to: Dimension,
         pos: Option<[f64; 3]>,
-        logging_in: bool,
-        respawning: bool,
-        portal: bool,
+        via: Via,
     ) -> bool {
+        let logging_in = via == Via::Login;
         let Some(link) = self.links.get(&to).cloned() else {
             return false;
         };
@@ -83,9 +92,7 @@ impl World {
         let arrival = Arrival {
             id,
             player: Box::new(player),
-            logging_in,
-            respawning,
-            portal,
+            via,
         };
         tokio::spawn(async move {
             let _ = link.send(Event::Arrive(Box::new(arrival))).await;
@@ -95,25 +102,26 @@ impl World {
 
     /// A player arriving from another dimension, or logging in to this one.
     pub(super) fn arrive(&mut self, arrival: Arrival) {
-        let Arrival {
-            id,
-            player,
-            logging_in,
-            respawning,
-            portal,
-        } = arrival;
+        let Arrival { id, player, via } = arrival;
         self.players.insert(id, *player);
-        if logging_in {
-            self.welcome(id);
-            return;
-        }
-        if respawning {
-            self.respawn(id);
-            return;
-        }
-        if portal {
-            let near = self.players[&id].pos;
-            let exit = self.portal_exit(near);
+        let exit = match via {
+            Via::Login => {
+                self.welcome(id);
+                return;
+            }
+            Via::Respawn => {
+                self.respawn(id);
+                return;
+            }
+            Via::NetherPortal => {
+                let near = self.players[&id].pos;
+                Some(self.portal_exit(near))
+            }
+            Via::EndPortal if self.dimension == Dimension::End => Some(self.end_platform()),
+            Via::EndPortal => Some(self.respawn_point(id)),
+            Via::Command => None,
+        };
+        if let Some(exit) = exit {
             let p = self.players.get_mut(&id).expect("just arrived");
             p.pos = exit;
             p.sent_pos = exit;
@@ -141,7 +149,7 @@ impl World {
         for packet in spawn_player(id, &self.players[&id]) {
             self.broadcast(packet, Some(id));
         }
-        if portal {
+        if matches!(via, Via::NetherPortal | Via::EndPortal) {
             self.after_portal_arrival(id);
         }
     }

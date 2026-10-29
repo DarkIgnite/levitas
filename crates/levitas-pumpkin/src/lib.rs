@@ -16,11 +16,15 @@ use levitas_world::{
 use pumpkin_config::lighting::LightingEngineConfig;
 use pumpkin_data::chunk::Biome;
 use pumpkin_data::dimension::Dimension;
+use pumpkin_data::structures::StructureSet;
 use pumpkin_data::{BlockStateId, Mirror, Rotation};
 use pumpkin_util::world_seed::Seed;
 use pumpkin_world::chunk::format::LightContainer;
 use pumpkin_world::chunk_system::generation_cache::Cache;
 use pumpkin_world::chunk_system::{Chunk as PumpkinChunk, StagedChunkEnum};
+use pumpkin_world::generation::generator::structure_finder::{
+    find_nearest_structure, StructureSearch,
+};
 use pumpkin_world::generation::generator::WorldGenerator;
 use pumpkin_world::generation::get_world_gen;
 use pumpkin_world::generation::proto_chunk::ProtoChunk;
@@ -52,6 +56,7 @@ pub type Generated = ((i32, i32), Chunk);
 /// Terrain of one dimension for one seed.
 pub struct PumpkinTerrain {
     generator: Box<WorldGenerator>,
+    seed: i64,
     /// The sections the dimension's terrain fills; the rest stay empty.
     span: Span,
     /// The 1.21.8 state of every Pumpkin block state, by Pumpkin state ID.
@@ -70,6 +75,35 @@ impl PumpkinTerrain {
     /// Nether terrain, from y = 0 to 255.
     pub fn nether(seed: i64) -> Self {
         Self::of(seed, Dimension::THE_NETHER, Span::NETHER)
+    }
+
+    /// End terrain, from y = 0 to 255.
+    pub fn end(seed: i64) -> Self {
+        Self::of(seed, Dimension::THE_END, Span::NETHER)
+    }
+
+    /// The nearest stronghold to block (`x`, `z`), as vanilla's eye of ender finds it:
+    /// `Ok(None)` if there is none, `Err(())` while their places are still being
+    /// worked out (on first use), so the caller can try again shortly.
+    #[allow(clippy::result_unit_err)]
+    pub fn stronghold_near(&self, x: i32, z: i32) -> Result<Option<[i32; 3]>, ()> {
+        let Some(cache) = self.generator.global_structure_cache() else {
+            return Ok(None);
+        };
+        let Some(strongholds) = StructureSet::get("strongholds") else {
+            return Ok(None);
+        };
+        match find_nearest_structure(
+            pumpkin_util::math::position::BlockPos::new(x, 64, z),
+            &[&strongholds.placement],
+            100,
+            self.seed,
+            cache,
+        ) {
+            StructureSearch::Found(pos) => Ok(Some([pos.0.x, pos.0.y, pos.0.z])),
+            StructureSearch::NotFound => Ok(None),
+            StructureSearch::Pending => Err(()),
+        }
     }
 
     fn of(seed: i64, dimension: Dimension, span: Span) -> Self {
@@ -96,6 +130,7 @@ impl PumpkinTerrain {
             .collect();
         Self {
             generator,
+            seed,
             span,
             states,
             biomes,
@@ -518,6 +553,35 @@ impl WorldPortalExt for Portals {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn the_end_has_its_main_island() {
+        let end = PumpkinTerrain::end(1);
+        let chunk = end.generate(0, 0);
+        let end_stone = (0..256)
+            .filter(|&y| BlockInfo::of(chunk.get(8, y, 8)).name == "minecraft:end_stone")
+            .count();
+        assert!(end_stone > 10, "{end_stone}");
+    }
+
+
+    #[test]
+    fn strongholds_lie_in_the_first_ring() {
+        let overworld = PumpkinTerrain::new(1);
+        let start = std::time::Instant::now();
+        let found = loop {
+            match overworld.stronghold_near(0, 0) {
+                Ok(found) => break found,
+                Err(()) => {
+                    assert!(start.elapsed().as_secs() < 120, "still working them out");
+                    std::thread::sleep(std::time::Duration::from_millis(100));
+                }
+            }
+        };
+        let [x, _, z] = found.expect("a stronghold");
+        let distance = f64::from(x).hypot(f64::from(z));
+        assert!((1000.0..3200.0).contains(&distance), "{distance}");
+    }
 
     #[test]
     fn nether_has_a_bedrock_floor_and_roof_and_netherrack_between() {

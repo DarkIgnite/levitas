@@ -35,6 +35,11 @@ pub trait Terrain: Send + Sync {
     fn is_cheap(&self) -> bool {
         false
     }
+
+    /// The nearest stronghold, for eyes of ender: `Err` while still being worked out.
+    fn stronghold_near(&self, _x: i32, _z: i32) -> Result<Option<[i32; 3]>, ()> {
+        Ok(None)
+    }
 }
 
 impl Terrain for PumpkinTerrain {
@@ -52,6 +57,10 @@ impl Terrain for PumpkinTerrain {
 
     fn generate_area(&self, ax: i32, az: i32) -> Vec<Generated> {
         PumpkinTerrain::generate_area(self, ax, az)
+    }
+
+    fn stronghold_near(&self, x: i32, z: i32) -> Result<Option<[i32; 3]>, ()> {
+        PumpkinTerrain::stronghold_near(self, x, z)
     }
 }
 

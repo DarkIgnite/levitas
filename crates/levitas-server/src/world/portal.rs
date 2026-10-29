@@ -112,6 +112,7 @@ impl World {
         let (to, scale) = match self.dimension {
             Dimension::Overworld => (Dimension::Nether, 1.0 / 8.0),
             Dimension::Nether => (Dimension::Overworld, 8.0),
+            Dimension::End => return,
         };
         let target = [pos[0] * scale, pos[1], pos[2] * scale];
         self.hand_over_through_portal(id, to, target);
@@ -122,7 +123,7 @@ impl World {
     pub(super) fn portal_exit(&mut self, near: [f64; 3]) -> [f64; 3] {
         let radius = match self.dimension {
             Dimension::Nether => 16,
-            Dimension::Overworld => 128,
+            _ => 128,
         };
         let (nx, nz) = (near[0].floor() as i32, near[2].floor() as i32);
         let mut candidates: Vec<KnownPortal> = self
@@ -149,7 +150,9 @@ impl World {
     fn portal_heights(&self, near_y: i32) -> (i32, i32) {
         match self.dimension {
             Dimension::Nether => (32, 120),
-            Dimension::Overworld => ((near_y - 40).max(MIN_Y + 1), (near_y + 40).min(MAX_Y - 5)),
+            Dimension::Overworld | Dimension::End => {
+                ((near_y - 40).max(MIN_Y + 1), (near_y + 40).min(MAX_Y - 5))
+            }
         }
     }
 

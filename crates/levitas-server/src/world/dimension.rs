@@ -11,16 +11,18 @@ use levitas_world::Span;
 pub enum Dimension {
     Overworld,
     Nether,
+    End,
 }
 
 impl Dimension {
-    pub const ALL: [Dimension; 2] = [Dimension::Overworld, Dimension::Nether];
+    pub const ALL: [Dimension; 3] = [Dimension::Overworld, Dimension::Nether, Dimension::End];
 
     /// The dimension's name, which is also its dimension type's.
     pub fn name(self) -> &'static str {
         match self {
             Dimension::Overworld => "minecraft:overworld",
             Dimension::Nether => "minecraft:the_nether",
+            Dimension::End => "minecraft:the_end",
         }
     }
 
@@ -44,7 +46,7 @@ impl Dimension {
     pub fn span(self) -> Span {
         match self {
             Dimension::Overworld => Span::OVERWORLD,
-            Dimension::Nether => Span::NETHER,
+            Dimension::Nether | Dimension::End => Span::NETHER,
         }
     }
 
@@ -68,6 +70,7 @@ impl Dimension {
         match self {
             Dimension::Overworld => world.to_path_buf(),
             Dimension::Nether => world.join("DIM-1"),
+            Dimension::End => world.join("DIM1"),
         }
     }
 
@@ -75,6 +78,7 @@ impl Dimension {
         match self {
             Dimension::Overworld => 63,
             Dimension::Nether => 32,
+            Dimension::End => 0,
         }
     }
 }
