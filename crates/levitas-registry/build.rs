@@ -13,6 +13,7 @@ const VERSION: &str = "26.3";
 /// Data-driven registries the client expects during the configuration phase.
 const SYNCED_REGISTRIES: &[&str] = &[
     "banner_pattern",
+    "block_transformer",
     "cat_sound_variant",
     "cat_variant",
     "chat_type",
@@ -21,6 +22,7 @@ const SYNCED_REGISTRIES: &[&str] = &[
     "cow_sound_variant",
     "cow_variant",
     "damage_type",
+    "decorated_pot_pattern",
     "dialog",
     "dimension_type",
     "enchantment",
@@ -40,6 +42,7 @@ const SYNCED_REGISTRIES: &[&str] = &[
     "wolf_variant",
     "world_clock",
     "worldgen/biome",
+    "worldgen/block_state_provider",
     "zombie_nautilus_variant",
 ];
 

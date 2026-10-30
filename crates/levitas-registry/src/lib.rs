@@ -291,6 +291,28 @@ mod tests {
     }
 
     #[test]
+    fn registries_26_3_clients_need() {
+        // A vanilla 26.3 server sends these too; without them the client cannot build
+        // item components (shovels reference minecraft:block_transformer/shovel).
+        let transformers = SyncedRegistry::get("minecraft:block_transformer").unwrap();
+        assert!(transformers.id_of("minecraft:shovel").is_some());
+        assert_eq!(
+            SyncedRegistry::get("minecraft:decorated_pot_pattern")
+                .unwrap()
+                .entries
+                .len(),
+            23
+        );
+        assert_eq!(
+            SyncedRegistry::get("minecraft:worldgen/block_state_provider")
+                .unwrap()
+                .entries
+                .len(),
+            8
+        );
+    }
+
+    #[test]
     fn block_properties() {
         let info = BlockInfo::of(block::GRASS_BLOCK);
         assert_eq!(info.name, "minecraft:grass_block");
