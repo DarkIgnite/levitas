@@ -5,11 +5,11 @@ GPL-3.0-only. The owner (DarkIgnite) runs a Leaf survival-economy server today a
 Levitas to be much lighter while staying vanilla-compatible. They speak Indonesian; reply
 in casual Indonesian. Code, comments, commits and docs are in English.
 
-**Target version: 26.3.** On 2026-10-29 the owner moved the target from 1.21.8 to 26.3.
-The code still speaks 1.21.8 (protocol 772) until the migration milestone at the top of
-docs/ROADMAP.md is done; that migration comes before any new feature. Check packet and
-entity data layouts against the minecraft.wiki protocol pages for 26.3 (the current
-revisions), not 1.21.8 ones.
+**Target version: 26.3.** On 2026-10-29 the owner moved the target from 1.21.8 to 26.3,
+and the migration was finished on 2026-10-30: the server speaks 26.3 and saves worlds
+as 26.3 does. Check packet and entity data layouts against the minecraft.wiki protocol
+pages for 26.3 (the current revisions), and against a real vanilla 26.3 server where the
+wiki is behind (see docs/HANDOFF.md).
 
 ## Before writing code
 

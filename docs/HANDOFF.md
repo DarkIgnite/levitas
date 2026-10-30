@@ -235,8 +235,15 @@ owner wants for their server.
   everywhere (harmless).
 - Fluids: placing a waterloggable block into water does not waterlog it; flowing water
   does not push items; fluids never tick in chunks until something changes nearby.
-- No entities besides players and dropped items; no mobs, no day/night, no weather.
-- Structure chests are empty (see next step 4).
+- The minecraft.wiki protocol pages lagged 26.3 in places (light masks, synced
+  registries, slot display IDs, item stack templates). When a real client disconnects,
+  its report is in the Modrinth profile "Remarkably Optimized" under `debug/`; compare
+  with a throwaway vanilla 26.3 server (`generated/server-26.3.jar`, offline mode,
+  whitelist off) by logging in to both with the same small probe client.
+- 26.3 changed some tags' contents silently (grass is no longer in `dirt`); when a
+  tag-based rule misbehaves, check the tag in `generated/26.3/data/minecraft/tags`.
+- `tools/deploy.ps1` occasionally fails to build right after the server stops (the exe
+  is still locked); run it again.
 - Spawn point: Pumpkin's spawn finder plus the highest non-tree block; the player always
   spawns exactly there (no spawn radius).
 - Old worlds made before light was stored load with full daylight everywhere.

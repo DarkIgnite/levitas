@@ -2,7 +2,7 @@
 
 Start with [docs/HANDOFF.md](docs/HANDOFF.md): the full context, what works, what to do
 next and the pitfalls. The target version is Minecraft: Java Edition **26.3** (protocol
-777); the code is being migrated from 1.21.8 (see the migration milestone at the top of
+777); the move from 1.21.8 is done (see the migration milestone at the top of
 [docs/ROADMAP.md](docs/ROADMAP.md)). The project rules are in [CLAUDE.md](CLAUDE.md) and apply to every
 agent, not only Claude:
 
