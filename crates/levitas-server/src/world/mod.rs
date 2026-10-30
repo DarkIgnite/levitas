@@ -434,6 +434,10 @@ struct Player {
     absorption: f32,
     /// Seeds what enchanting tables offer; changes with every enchanting.
     enchant_seed: i32,
+    /// Hand using a spyglass.
+    pub using_spyglass: Option<i32>,
+    /// Dimension and position where the player last died (for recovery compass).
+    pub last_death: Option<(&'static str, BlockPos)>,
 }
 
 impl Player {
@@ -497,6 +501,8 @@ impl Player {
             effects: Vec::new(),
             absorption: 0.0,
             enchant_seed: profile_seed,
+            using_spyglass: None,
+            last_death: None,
         }
     }
 
@@ -602,6 +608,8 @@ struct World {
     recipes: Recipes,
     rng: Rng,
     tick: u64,
+    /// Counter for map IDs (the `map` count in `idcounts.dat`).
+    pub next_map_id: i32,
 }
 
 fn frame(packet: Writer) -> Frame {
@@ -636,6 +644,7 @@ impl World {
                 .seed
                 .unwrap_or_else(|| Rng::from_time().next_u64() as i64),
             kind: new.kind,
+            next_map_id: 0,
         });
         let terrain = terrain_for(level.kind, level.seed, dimension);
         if created && dimension == Dimension::Overworld {
@@ -702,6 +711,7 @@ impl World {
             recipes: Recipes::load(),
             rng: Rng::from_time(),
             tick: level.time.max(0) as u64,
+            next_map_id: level.next_map_id,
         };
         (world, generated)
     }
@@ -794,15 +804,22 @@ impl World {
             Event::RenameItem { id, name } => self.rename_item(id, &name),
             Event::ContainerButton { id, window, button } => self.window_button(id, window, button),
             Event::HeldSlot { id, slot } => {
+                let mut lower = false;
+                let mut stop_glass = false;
                 if let (Some(p), Ok(slot)) = (self.players.get_mut(&id), usize::try_from(slot)) {
                     if slot < 9 {
                         p.held = slot;
                         p.eating = None;
                         p.attack_reset = self.tick;
-                        if p.blocking.is_some_and(|(hand, _)| hand == 0) {
-                            self.lower_shield(id);
-                        }
+                        lower = p.blocking.is_some_and(|(hand, _)| hand == 0);
+                        stop_glass = p.using_spyglass.is_some_and(|hand| hand == 0);
                     }
+                }
+                if lower {
+                    self.lower_shield(id);
+                }
+                if stop_glass {
+                    self.stop_spyglass(id);
                 }
             }
             Event::Swing { id, hand } => {
@@ -921,7 +938,7 @@ impl World {
             .bool(crate::rules::bool("reduced_debug_info"))
             .bool(!crate::rules::bool("immediate_respawn")) // respawn screen
             .bool(crate::rules::bool("limited_crafting"));
-        login = spawn_info(login, mode, self.dimension)
+        login = spawn_info(login, mode, self.dimension, self.players[&id].last_death)
             .bool(crate::config::get().online_mode)
             .bool(false); // enforces secure chat
         self.send(id, login);
@@ -1206,6 +1223,7 @@ impl World {
                     p.eating = None;
                 }
                 self.lower_shield(id);
+                self.stop_spyglass(id);
                 self.release_bow(id);
             }
             _ => {}
@@ -1743,18 +1761,37 @@ impl World {
 }
 
 /// The spawn information shared by the login and respawn packets.
-fn spawn_info(packet: Writer, mode: u8, dimension: Dimension) -> Writer {
-    packet
+fn spawn_info(
+    packet: Writer,
+    mode: u8,
+    dimension: Dimension,
+    death: Option<(&str, BlockPos)>,
+) -> Writer {
+    let mut packet = packet
         .varint(dimension.type_id())
         .string(dimension.name())
         .i64(0) // hashed seed
         .varint(i32::from(mode))
         .varint(0) // previous game mode: none
         .bool(false) // debug world
-        .bool(true) // flat world
-        .bool(false) // no death location
+        .bool(true); // flat world
+    if let Some((dim, pos)) = death {
+        packet = packet.bool(true).string(dim).position(pos);
+    } else {
+        packet = packet.bool(false);
+    }
+    packet
         .varint(0) // portal cooldown
         .varint(dimension.sea_level())
+}
+
+pub fn map_packet(map_id: i32, scale: i8, locked: bool) -> Writer {
+    Writer::packet(clientbound::MAP_ITEM_DATA)
+        .varint(map_id)
+        .i8(scale)
+        .bool(locked)
+        .bool(false) // no icons
+        .u8(0) // no pixel updates
 }
 
 fn position_packet(pos: [f64; 3], yaw: f32, pitch: f32) -> Writer {

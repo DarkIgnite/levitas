@@ -342,3 +342,61 @@ fn smithing_tables_upgrade_gear_using_up_one_of_each_input() {
     t.click(at as i16, 0, QUICK_MOVE);
     assert_eq!(t.slots[1].item, item("diamond_chestplate"));
 }
+
+#[test]
+fn cartography_table_cloning_locking_and_zooming() {
+    let mut t = Test::new(Layout::Cartography);
+    let mut filled = stack("filled_map", 1);
+    filled.map_id = Some(15);
+    t.slots[0] = filled;
+    t.slots[1] = stack("map", 2);
+    t.click(OUTSIDE, 0, PICKUP);
+    // Cloning
+    assert_eq!(t.slots[2].item, item("filled_map"));
+    assert_eq!(t.slots[2].map_id, Some(15));
+    assert_eq!(t.slots[2].count, 2);
+    t.click(2, 0, PICKUP);
+    assert_eq!(t.carried.count, 2);
+    assert_eq!(t.carried.map_id, Some(15));
+    assert_eq!(t.used, Some(Used::Cartography));
+    assert!(t.slots[0].is_empty());
+    assert_eq!(t.slots[1].count, 1);
+    t.carried = Stack::EMPTY;
+
+    // Locking
+    t.slots[0] = filled;
+    t.slots[1] = stack("glass_pane", 1);
+    t.click(OUTSIDE, 0, PICKUP);
+    assert!(t.slots[2].map_locked);
+    assert_eq!(t.slots[2].map_id, Some(15));
+    t.click(2, 0, PICKUP);
+    let locked_map = t.carried;
+    assert!(locked_map.map_locked);
+    t.carried = Stack::EMPTY;
+
+    // Zooming unlocked map with paper
+    t.slots[0] = filled;
+    t.slots[1] = stack("paper", 3);
+    t.click(OUTSIDE, 0, PICKUP);
+    assert_eq!(t.slots[2].item, item("filled_map"));
+    assert_eq!(t.slots[2].count, 1);
+
+    // Locked map cannot be zoomed or locked again
+    t.slots[0] = locked_map;
+    t.slots[1] = stack("paper", 3);
+    t.click(OUTSIDE, 0, PICKUP);
+    assert!(t.slots[2].is_empty(), "locked map cannot be zoomed");
+
+    t.slots[1] = stack("glass_pane", 1);
+    t.click(OUTSIDE, 0, PICKUP);
+    assert!(
+        t.slots[2].is_empty(),
+        "already locked map cannot be locked again"
+    );
+
+    // Paper alone makes an empty map
+    t.slots[0] = stack("paper", 1);
+    t.slots[1] = Stack::EMPTY;
+    t.click(OUTSIDE, 0, PICKUP);
+    assert_eq!(t.slots[2], stack("map", 1));
+}

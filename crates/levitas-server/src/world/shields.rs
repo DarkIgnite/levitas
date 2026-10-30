@@ -13,10 +13,10 @@ const ENTITY_EVENT_SHIELD_BLOCK: i8 = 29;
 const ENTITY_EVENT_SHIELD_DISABLED: i8 = 30;
 const ENTITY_EVENT_OFFHAND_BREAK: i8 = 48;
 /// Living entity flags: whether a hand is in use, and which.
-const DATA_LIVING_FLAGS: u8 = 8;
-const SERIALIZER_BYTE: i32 = 0;
-const HAND_ACTIVE: u8 = 0x01;
-const OFFHAND_ACTIVE: u8 = 0x02;
+pub(super) const DATA_LIVING_FLAGS: u8 = 8;
+pub(super) const SERIALIZER_BYTE: i32 = 0;
+pub(super) const HAND_ACTIVE: u8 = 0x01;
+pub(super) const OFFHAND_ACTIVE: u8 = 0x02;
 
 fn is_shield(stack: Stack) -> bool {
     ItemInfo::get(stack.item).is_some_and(|i| i.name == "minecraft:shield")
@@ -113,7 +113,7 @@ impl World {
     }
 }
 
-fn living_flags(id: i32, flags: u8) -> Writer {
+pub(super) fn living_flags(id: i32, flags: u8) -> Writer {
     Writer::packet(clientbound::SET_ENTITY_DATA)
         .varint(id)
         .u8(DATA_LIVING_FLAGS)

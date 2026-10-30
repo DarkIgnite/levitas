@@ -41,6 +41,7 @@ pub struct LevelData {
     pub weather: super::time::Weather,
     pub seed: i64,
     pub kind: WorldKind,
+    pub next_map_id: i32,
 }
 
 impl LevelData {
@@ -79,6 +80,9 @@ impl LevelData {
                         .and_then(|o| o.compound("generator"))
                         .and_then(|g| g.str("type"))
                         .unwrap_or("minecraft:flat");
+                    let next_map_id = saved_data(dir, "idcounts")
+                        .and_then(|c| c.int("map"))
+                        .unwrap_or(0) as i32;
                     return Some(LevelData {
                         spawn,
                         time: data.int("Time").unwrap_or(0),
@@ -110,6 +114,7 @@ impl LevelData {
                         } else {
                             WorldKind::Flat
                         },
+                        next_map_id,
                     });
                 }
                 Err(e) => error!("{} is unreadable: {e}", path.display()),
@@ -277,6 +282,11 @@ impl LevelData {
         )?;
         save_data(
             dir,
+            "idcounts",
+            Compound::new().with("map", i64::from(self.next_map_id)),
+        )?;
+        save_data(
+            dir,
             "world_gen_settings",
             Compound::new()
                 .with("seed", self.seed)
@@ -437,7 +447,7 @@ impl Player {
             .with("SelectedItemSlot", self.held as i32)
             .with("Inventory", inventory)
             .with("equipment", equipment);
-        match self.respawn {
+        let mut nbt = match self.respawn {
             Some(bed) => nbt.with(
                 "respawn",
                 Compound::new()
@@ -447,7 +457,16 @@ impl Player {
                     .with("forced", false),
             ),
             None => nbt,
+        };
+        if let Some((dim, pos)) = self.last_death {
+            nbt.insert(
+                "LastDeathLocation",
+                Compound::new()
+                    .with("dimension", dim)
+                    .with("pos", vec![pos.x, pos.y, pos.z]),
+            );
         }
+        nbt
     }
 
     /// Applies saved data. A player saved while dead comes back alive at spawn.
@@ -494,6 +513,18 @@ impl Player {
                 &[x, y, z] => Some(BlockPos::new(x, y, z)),
                 _ => None,
             });
+        self.last_death = nbt.compound("LastDeathLocation").and_then(|c| {
+            let dim = match c.str("dimension") {
+                Some("minecraft:the_nether") => "minecraft:the_nether",
+                Some("minecraft:the_end") => "minecraft:the_end",
+                _ => "minecraft:overworld",
+            };
+            let pos = match c.int_array("pos")? {
+                &[x, y, z] => BlockPos::new(x, y, z),
+                _ => return None,
+            };
+            Some((dim, pos))
+        });
 
         let health = nbt.float("Health").unwrap_or(f64::from(MAX_HEALTH)) as f32;
         if health <= 0.0 {
@@ -675,6 +706,7 @@ impl World {
             weather: self.weather.clone(),
             seed: self.seed,
             kind: self.kind,
+            next_map_id: self.next_map_id,
         };
         if let Err(e) = level.save(&self.dir) {
             error!("could not save level.dat: {e}");
@@ -780,6 +812,7 @@ mod tests {
             },
             seed: -42,
             kind: WorldKind::Noise,
+            next_map_id: 7,
         };
         level.save(&dir).unwrap();
         // Saving twice keeps the previous copy as level.dat_old.
@@ -791,6 +824,7 @@ mod tests {
         assert!(loaded.weather.raining && !loaded.weather.thundering);
         assert_eq!(loaded.weather.rain_time, 777);
         assert_eq!((loaded.seed, loaded.kind), (-42, WorldKind::Noise));
+        assert_eq!(loaded.next_map_id, 7);
         fs::remove_dir_all(dir).unwrap();
     }
 

@@ -379,7 +379,16 @@ Known gaps are listed under each phase instead of being hidden.
       and spiders ignore poison; resistance and fire resistance protect mobs. Missing:
       lingering clouds (they splash for now), splash colours.
 - [ ] Beacons, conduits
-- [ ] Maps, compasses, recovery compasses, clocks, spyglass
+- [x] Maps, compasses, recovery compasses, clocks, spyglass. `inventory.rs` serializes and saves
+      `minecraft:lodestone_tracker` and `minecraft:map_id` item components. Right-clicking a lodestone
+      with a compass binds it (`item.lodestone_compass.lock`) to that position and dimension. Dying
+      records `LastDeathLocation: {dimension, pos}` in player NBT and sends it in login and respawn
+      packets so recovery compasses point to the player's last death. Right-clicking an empty map
+      creates a filled map with a sequential ID (`idcounts.dat`) and plays `ui.cartography_table.take_result`.
+      Cartography tables (`menu::CARTOGRAPHY_TABLE`) support map cloning (filled map + empty map),
+      locking (filled map + glass pane -> `map_locked`), zooming (filled map + paper), and empty map crafting.
+      Using a spyglass raises living flags and plays `item.spyglass.use`; releasing, switching slots,
+      or dying stops usage and plays `item.spyglass.stop_using`. Clocks reflect day/night time ticks.
 
 ## Phase 9: Dimensions
 

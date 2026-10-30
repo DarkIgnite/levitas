@@ -320,6 +320,8 @@ pub enum View {
     Brewing(BlockPos),
     /// Trading with the villager of this entity ID.
     Merchant(i32),
+    /// A cartography table: map and material input, result output.
+    Cartography(BlockPos),
 }
 
 impl View {
@@ -332,7 +334,7 @@ impl View {
             View::Chest(_, slots) => slots,
             View::DoubleChest(..) => 2 * CHEST_SLOTS,
             View::Enchanting(_) => 2,
-            View::Anvil(_) | View::Grindstone(_) => 3,
+            View::Anvil(_) | View::Grindstone(_) | View::Cartography(_) => 3,
             View::Stonecutter(_) => 2,
             View::Smithing(_) => 4,
             View::Brewing(_) => super::brewing::SLOTS,
@@ -352,6 +354,7 @@ impl View {
             | View::Grindstone(_)
             | View::Stonecutter(_)
             | View::Smithing(_)
+            | View::Cartography(_)
             | View::Merchant(_) => Vec::new(),
         }
     }
@@ -370,6 +373,7 @@ impl View {
             View::Smithing(_) => click::Layout::Smithing,
             View::Brewing(_) => click::Layout::Brewing,
             View::Merchant(_) => click::Layout::Merchant,
+            View::Cartography(_) => click::Layout::Cartography,
         }
     }
 }
@@ -406,6 +410,11 @@ impl World {
             ),
             "minecraft:stonecutter" => (View::Stonecutter(pos), menu::STONECUTTER, "Stonecutter"),
             "minecraft:smithing_table" => (View::Smithing(pos), menu::SMITHING, "Upgrade Gear"),
+            "minecraft:cartography_table" => (
+                View::Cartography(pos),
+                menu::CARTOGRAPHY_TABLE,
+                "Cartography Table",
+            ),
             "minecraft:brewing_stand" => (View::Brewing(pos), menu::BREWING_STAND, "Brewing Stand"),
             "minecraft:chest" | "minecraft:trapped_chest" => {
                 let partner = blocks::chest_partner(state, pos)
@@ -526,7 +535,7 @@ impl World {
                 let open = p.open.as_ref().expect("enchanting window is open");
                 open.grid[..2].to_vec()
             }
-            View::Anvil(_) | View::Grindstone(_) => {
+            View::Anvil(_) | View::Grindstone(_) | View::Cartography(_) => {
                 let open = p.open.as_ref().expect("window is open");
                 open.grid[..3].to_vec()
             }
@@ -581,7 +590,7 @@ impl World {
                 let open = p.open.as_mut().expect("enchanting window is open");
                 open.grid[..2].copy_from_slice(&slots[..2]);
             }
-            View::Anvil(_) | View::Grindstone(_) => {
+            View::Anvil(_) | View::Grindstone(_) | View::Cartography(_) => {
                 let p = self.players.get_mut(&id).expect("player exists");
                 let open = p.open.as_mut().expect("window is open");
                 open.grid[..3].copy_from_slice(&slots[..3]);
@@ -734,6 +743,9 @@ impl World {
             }
             (View::Grindstone(pos), Some(click::Used::Experience(xp))) => {
                 self.grindstone_used(pos, xp)
+            }
+            (View::Cartography(pos), Some(click::Used::Cartography)) => {
+                self.play_sound("minecraft:ui.cartography_table.take_result", pos, None);
             }
             _ => {}
         }
@@ -970,7 +982,9 @@ impl World {
         match open.view {
             View::Crafting => returned.extend(open.grid),
             View::Enchanting(_) => returned.extend(&open.grid[..2]),
-            View::Anvil(_) | View::Grindstone(_) => returned.extend(&open.grid[..2]),
+            View::Anvil(_) | View::Grindstone(_) | View::Cartography(_) => {
+                returned.extend(&open.grid[..2])
+            }
             View::Stonecutter(_) => returned.push(open.grid[0]),
             View::Smithing(_) => returned.extend(&open.grid[..3]),
             View::Merchant(target) => {

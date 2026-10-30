@@ -57,6 +57,9 @@ pub enum Layout {
     /// A villager's trading screen: two payment slots, the result, then main inventory
     /// and hotbar.
     Merchant,
+    /// A cartography table: map slot, material slot, result slot, then main inventory
+    /// and hotbar.
+    Cartography,
 }
 
 /// A trade as the trading screen offers it.
@@ -92,6 +95,8 @@ pub enum Used {
     Experience(i32),
     /// Times a villager's trade (by index) was made.
     Trade { index: usize, times: i32 },
+    /// Cartography table craft performed.
+    Cartography,
 }
 
 impl Layout {
@@ -106,7 +111,7 @@ impl Layout {
             Layout::Stonecutter => 2,
             Layout::Smithing => 4,
             Layout::Brewing => 5,
-            Layout::Merchant => 3,
+            Layout::Merchant | Layout::Cartography => 3,
         }
     }
 
@@ -131,7 +136,7 @@ impl Layout {
     pub fn result_slot(self) -> Option<usize> {
         match self {
             Layout::Inventory | Layout::Crafting => Some(0),
-            Layout::Anvil | Layout::Grindstone => Some(2),
+            Layout::Anvil | Layout::Grindstone | Layout::Cartography => Some(2),
             Layout::Stonecutter => Some(1),
             Layout::Smithing => Some(3),
             Layout::Merchant => Some(2),
@@ -362,6 +367,9 @@ fn refresh_result(w: &mut Window) {
                 _ => Stack::EMPTY,
             };
         }
+        Layout::Cartography => {
+            w.slots[2] = cartography_recipe(w.slots[0], w.slots[1]);
+        }
         _ => {
             if let Some((grid, size)) = w.layout.grid() {
                 w.slots[0] = w.recipes.craft(&w.slots[grid], size);
@@ -373,6 +381,42 @@ fn refresh_result(w: &mut Window) {
 /// The level cost of the anvil's current result, for showing on the screen.
 pub fn anvil_cost(slots: &[Stack], rename: Option<&str>) -> i32 {
     repair::anvil_named(slots[0], slots[1], rename).map_or(0, |r| r.cost)
+}
+
+/// The recipe result of a cartography table from its map and modifier inputs.
+pub fn cartography_recipe(map: Stack, material: Stack) -> Stack {
+    if map.is_empty() {
+        return Stack::EMPTY;
+    }
+    let map_name = ItemInfo::get(map.item).map_or("", |i| i.name);
+    let mat_name = ItemInfo::get(material.item).map_or("", |i| i.name);
+    let is_glass_pane = mat_name == "minecraft:glass_pane" || mat_name.ends_with("_glass_pane");
+
+    if map_name == "minecraft:filled_map" {
+        // Cloning: filled map + empty map -> 2 copies of filled map
+        if mat_name == "minecraft:map" {
+            return map.with_count(2);
+        }
+        // Locking: filled map (not already locked) + glass pane -> locked filled map
+        if is_glass_pane && !map.map_locked {
+            let mut locked = map.with_count(1);
+            locked.map_locked = true;
+            return locked;
+        }
+        // Zooming / extending: filled map (not locked) + paper -> zoomed filled map
+        if mat_name == "minecraft:paper" && !map.map_locked {
+            return map.with_count(1);
+        }
+    } else if map_name == "minecraft:paper" && material.is_empty() {
+        // Craft empty map from single paper
+        if let Some(empty_map) = ItemInfo::id_of("minecraft:map") {
+            return Stack::new(empty_map, 1);
+        }
+    } else if map_name == "minecraft:map" && mat_name == "minecraft:compass" {
+        // Locator map
+        return map.with_count(1);
+    }
+    Stack::EMPTY
 }
 
 /// Takes the result: one craft, using up one of each ingredient, or an anvil's or
@@ -442,6 +486,20 @@ fn take_result(w: &mut Window) -> Stack {
                 w.slots[s] = w.slots[s].with_count(w.slots[s].count - 1);
             }
             w.used = Some(Used::Experience(xp));
+            refresh_result(w);
+            return result;
+        }
+        Layout::Cartography => {
+            let result = w.slots[2];
+            if result.is_empty() {
+                return Stack::EMPTY;
+            }
+            for s in 0..2 {
+                if !w.slots[s].is_empty() {
+                    w.slots[s] = w.slots[s].with_count(w.slots[s].count - 1);
+                }
+            }
+            w.used = Some(Used::Cartography);
             refresh_result(w);
             return result;
         }
@@ -693,7 +751,7 @@ fn quick_move(w: &mut Window, s: usize) {
                 move_into(w, stack, main, false)
             }
         }
-        Layout::Anvil | Layout::Grindstone => {
+        Layout::Anvil | Layout::Grindstone | Layout::Cartography => {
             if !in_player {
                 move_into(w, stack, player, true)
             } else {

@@ -379,10 +379,24 @@ impl World {
             self.drop_xp_on_death(id);
         }
         self.close_container(id);
+        self.lower_shield(id);
+        self.stop_spyglass(id);
         let p = self.players.get_mut(&id).expect("player exists");
         p.alive = false;
         p.eating = None;
         p.fall_distance = 0.0;
+        let pos = p.pos;
+        let death_pos = BlockPos::new(
+            pos[0].floor() as i32,
+            pos[1].floor() as i32,
+            pos[2].floor() as i32,
+        );
+        let death_dim = match self.dimension {
+            super::dimension::Dimension::Nether => "minecraft:the_nether",
+            super::dimension::Dimension::End => "minecraft:the_end",
+            super::dimension::Dimension::Overworld => "minecraft:overworld",
+        };
+        p.last_death = Some((death_dim, death_pos));
         let mut message = kind.death_message(&p.profile.name);
         if let Damage::Player(killer) = kind {
             if let Some(k) = self.players.get(&killer) {
@@ -456,7 +470,14 @@ impl World {
         p.loaded.clear();
         let mode = p.mode;
 
-        let respawn = spawn_info(Writer::packet(clientbound::RESPAWN), mode, self.dimension).u8(0); // keep no data
+        let death = p.last_death;
+        let respawn = spawn_info(
+            Writer::packet(clientbound::RESPAWN),
+            mode,
+            self.dimension,
+            death,
+        )
+        .u8(0); // keep no data
         self.send(id, respawn);
         self.send(
             id,
@@ -482,6 +503,99 @@ impl World {
         }
     }
 
+    pub(super) fn use_spyglass(&mut self, id: i32, hand: i32) -> bool {
+        let Some(p) = self.players.get_mut(&id) else {
+            return false;
+        };
+        let stack = p.inventory.slots[p.hand_slot(hand)];
+        if ItemInfo::get(stack.item).is_none_or(|i| i.name != "minecraft:spyglass") {
+            return false;
+        }
+        if p.alive {
+            p.using_spyglass = Some(hand);
+            let at = p.pos;
+            let flags = super::shields::HAND_ACTIVE
+                | if hand == 1 {
+                    super::shields::OFFHAND_ACTIVE
+                } else {
+                    0
+                };
+            self.broadcast(super::shields::living_flags(id, flags), Some(id));
+            self.play_sound_at("minecraft:item.spyglass.use", at, 1.0, 1.0, None);
+        }
+        true
+    }
+
+    pub(super) fn stop_spyglass(&mut self, id: i32) {
+        if let Some(p) = self.players.get_mut(&id) {
+            if p.using_spyglass.take().is_some() {
+                let at = p.pos;
+                self.broadcast(super::shields::living_flags(id, 0), Some(id));
+                self.play_sound_at("minecraft:item.spyglass.stop_using", at, 1.0, 1.0, None);
+            }
+        }
+    }
+
+    pub(super) fn open_empty_map(&mut self, id: i32, hand: i32) -> bool {
+        let Some(p) = self.players.get_mut(&id) else {
+            return false;
+        };
+        let slot = p.hand_slot(hand);
+        let stack = p.inventory.slots[slot];
+        if ItemInfo::get(stack.item).is_none_or(|i| i.name != "minecraft:map") {
+            return false;
+        }
+        let Some(filled_id) = ItemInfo::id_of("minecraft:filled_map") else {
+            return false;
+        };
+        let map_id = self.next_map_id;
+        self.next_map_id += 1;
+        let mut filled = Stack::new(filled_id, 1);
+        filled.map_id = Some(map_id);
+        let survival = p.survival();
+        let at = p.pos;
+        if stack.count == 1 {
+            p.inventory.slots[slot] = filled;
+            let update = p.inventory.set_slot_packet(slot);
+            self.send(id, update);
+        } else if survival {
+            p.inventory.take(slot, 1);
+            let (changed, over) = p.inventory.add(filled);
+            let mut updates: Vec<Writer> = changed
+                .into_iter()
+                .map(|s| p.inventory.set_slot_packet(s))
+                .collect();
+            updates.push(p.inventory.set_slot_packet(slot));
+            for update in updates {
+                self.send(id, update);
+            }
+            if over > 0 {
+                self.scatter_item(at, filled.with_count(over));
+            }
+        } else {
+            let (changed, over) = p.inventory.add(filled);
+            let updates: Vec<Writer> = changed
+                .into_iter()
+                .map(|s| p.inventory.set_slot_packet(s))
+                .collect();
+            for update in updates {
+                self.send(id, update);
+            }
+            if over > 0 {
+                self.scatter_item(at, filled.with_count(over));
+            }
+        }
+        self.send(id, map_packet(map_id, 0, false));
+        self.play_sound_at(
+            "minecraft:ui.cartography_table.take_result",
+            at,
+            1.0,
+            1.0,
+            None,
+        );
+        true
+    }
+
     pub(super) fn use_item(&mut self, id: i32, hand: i32, sequence: i32) {
         self.ack(id, sequence);
         if self.use_bucket(id, hand)
@@ -490,6 +604,8 @@ impl World {
             || self.start_drawing(id, hand)
             || self.throw_held(id, hand)
             || self.throw_eye(id, hand)
+            || self.use_spyglass(id, hand)
+            || self.open_empty_map(id, hand)
         {
             return;
         }
@@ -726,5 +842,93 @@ mod tests {
         // Flowers break at once, bedrock never.
         assert!(break_progress(block::POPPY, 0) >= 1.0);
         assert_eq!(break_progress(block::BEDROCK, 0), 0.0);
+    }
+
+    #[test]
+    fn spyglass_use_and_stop() {
+        let dir = std::env::temp_dir().join(format!("levitas-spyglass-{}", next_entity_id()));
+        let (mut world, _) = World::new(
+            dir,
+            NewWorld {
+                kind: WorldKind::Flat,
+                seed: Some(0),
+            },
+        );
+        let (out, _frames) = mpsc::channel(100);
+        let id = next_entity_id();
+        let profile = crate::connection::Profile {
+            name: "Bob".to_owned(),
+            uuid: 2,
+            properties: Vec::new(),
+        };
+        let mut player = Player::new(profile, out, [0.0, 64.0, 0.0]);
+        let spyglass = ItemInfo::id_of("minecraft:spyglass").unwrap();
+        player.inventory.slots[crate::inventory::HOTBAR] = Stack::new(spyglass, 1);
+        world.players.insert(id, player);
+
+        assert!(world.use_spyglass(id, 0));
+        assert_eq!(world.players[&id].using_spyglass, Some(0));
+
+        world.stop_spyglass(id);
+        assert_eq!(world.players[&id].using_spyglass, None);
+    }
+
+    #[test]
+    fn death_tracks_last_death_location() {
+        let dir = std::env::temp_dir().join(format!("levitas-death-{}", next_entity_id()));
+        let (mut world, _) = World::new(
+            dir,
+            NewWorld {
+                kind: WorldKind::Flat,
+                seed: Some(0),
+            },
+        );
+        let (out, _frames) = mpsc::channel(100);
+        let id = next_entity_id();
+        let profile = crate::connection::Profile {
+            name: "Charlie".to_owned(),
+            uuid: 3,
+            properties: Vec::new(),
+        };
+        let player = Player::new(profile, out, [12.7, 65.2, -34.8]);
+        world.players.insert(id, player);
+
+        world.die(id, Damage::Kill);
+        let p = &world.players[&id];
+        assert!(!p.alive);
+        let (dim, pos) = p.last_death.expect("last death should be recorded");
+        assert_eq!(dim, "minecraft:overworld");
+        assert_eq!(pos, BlockPos::new(12, 65, -35));
+    }
+
+    #[test]
+    fn empty_map_opens_into_filled_map() {
+        let dir = std::env::temp_dir().join(format!("levitas-map-{}", next_entity_id()));
+        let (mut world, _) = World::new(
+            dir,
+            NewWorld {
+                kind: WorldKind::Flat,
+                seed: Some(0),
+            },
+        );
+        let (out, _frames) = mpsc::channel(100);
+        let id = next_entity_id();
+        let profile = crate::connection::Profile {
+            name: "Dave".to_owned(),
+            uuid: 4,
+            properties: Vec::new(),
+        };
+        let mut player = Player::new(profile, out, [0.0, 64.0, 0.0]);
+        let empty_map = ItemInfo::id_of("minecraft:map").unwrap();
+        let filled_map = ItemInfo::id_of("minecraft:filled_map").unwrap();
+        player.inventory.slots[crate::inventory::HOTBAR] = Stack::new(empty_map, 1);
+        world.players.insert(id, player);
+
+        let initial_map_id = world.next_map_id;
+        assert!(world.open_empty_map(id, 0));
+        let held = world.players[&id].inventory.slots[crate::inventory::HOTBAR];
+        assert_eq!(held.item, filled_map);
+        assert_eq!(held.map_id, Some(initial_map_id));
+        assert_eq!(world.next_map_id, initial_map_id + 1);
     }
 }

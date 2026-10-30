@@ -2,7 +2,7 @@
 //! 0 crafting result, 1-4 crafting grid, 5-8 armor, 9-35 main, 36-44 hotbar, 45 offhand.
 
 use levitas_nbt::{Compound, Tag};
-use levitas_protocol::Writer;
+use levitas_protocol::{BlockPos, Writer};
 use levitas_registry::{component, ItemInfo, SyncedRegistry};
 
 use crate::enchanting::Enchantments;
@@ -11,6 +11,14 @@ pub const SLOTS: usize = 46;
 pub const CRAFTING_GRID: std::ops::RangeInclusive<usize> = 1..=4;
 pub const HOTBAR: usize = 36;
 pub const OFFHAND: usize = 45;
+
+/// A lodestone compass's tracking target.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LodestoneTracker {
+    pub dimension: &'static str,
+    pub pos: BlockPos,
+    pub tracked: bool,
+}
 
 /// An item stack. A count of zero or less means the slot is empty.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -33,6 +41,12 @@ pub struct Stack {
     /// The colour of dyed leather armor, `0xRRGGBB` (the `minecraft:dyed_color`
     /// component).
     pub color: Option<i32>,
+    /// A lodestone compass target (the `minecraft:lodestone_tracker` component).
+    pub lodestone: Option<LodestoneTracker>,
+    /// A map ID (the `minecraft:map_id` component).
+    pub map_id: Option<i32>,
+    /// Whether a map is locked with a glass pane.
+    pub map_locked: bool,
 }
 
 /// An armor trim: entries of the trim material and trim pattern registries.
@@ -81,6 +95,9 @@ impl Stack {
         potion: None,
         name: None,
         color: None,
+        lodestone: None,
+        map_id: None,
+        map_locked: false,
     };
 
     pub fn new(item: i32, count: i32) -> Self {
@@ -110,6 +127,9 @@ impl Stack {
             && self.potion == other.potion
             && self.name == other.name
             && self.color == other.color
+            && self.lodestone == other.lodestone
+            && self.map_id == other.map_id
+            && self.map_locked == other.map_locked
     }
 
     pub fn is_empty(&self) -> bool {
@@ -165,6 +185,23 @@ impl Stack {
                     .with("pattern", trim.pattern_name()),
             );
         }
+        if let Some(tracker) = self.lodestone {
+            let target = Compound::new()
+                .with("dimension", tracker.dimension)
+                .with("pos", vec![tracker.pos.x, tracker.pos.y, tracker.pos.z]);
+            components.insert(
+                "minecraft:lodestone_tracker",
+                Compound::new()
+                    .with("target", target)
+                    .with("tracked", tracker.tracked),
+            );
+        }
+        if let Some(map_id) = self.map_id {
+            components.insert("minecraft:map_id", map_id);
+        }
+        if self.map_locked {
+            components.insert("minecraft:map_post_processing", 1);
+        }
         if !components.is_empty() {
             nbt.insert("components", components);
         }
@@ -191,6 +228,32 @@ impl Stack {
             .and_then(|c| c.int("minecraft:repair_cost"))
             .unwrap_or(0)
             .clamp(0, i64::from(i32::MAX)) as i32;
+        let lodestone = components
+            .and_then(|c| c.compound("minecraft:lodestone_tracker"))
+            .and_then(|c| {
+                let tracked = c.int("tracked") != Some(0);
+                let target = c.compound("target")?;
+                let dim = match target.str("dimension") {
+                    Some("minecraft:the_nether") => "minecraft:the_nether",
+                    Some("minecraft:the_end") => "minecraft:the_end",
+                    _ => "minecraft:overworld",
+                };
+                let pos = match target.int_array("pos")? {
+                    &[x, y, z] => BlockPos::new(x, y, z),
+                    _ => return None,
+                };
+                Some(LodestoneTracker {
+                    dimension: dim,
+                    pos,
+                    tracked,
+                })
+            });
+        let map_id = components
+            .and_then(|c| c.int("minecraft:map_id"))
+            .map(|id| id as i32);
+        let map_locked = components
+            .and_then(|c| c.int("minecraft:map_post_processing"))
+            .is_some_and(|v| v != 0);
         Stack {
             item,
             count,
@@ -215,6 +278,9 @@ impl Stack {
             color: components
                 .and_then(|c| c.int("minecraft:dyed_color"))
                 .map(|c| c as i32 & 0xFF_FFFF),
+            lodestone,
+            map_id,
+            map_locked,
         }
     }
 }
@@ -265,13 +331,17 @@ fn write_components(packet: Writer, stack: &Stack) -> Writer {
     let brewed = stack.potion.is_some();
     let named = stack.name.is_some();
     let dyed = stack.color.is_some();
+    let lodestone = stack.lodestone.is_some();
+    let mapped = stack.map_id.is_some();
     let added = i32::from(damaged)
         + i32::from(dyed)
         + i32::from(enchanted)
         + i32::from(worked)
         + i32::from(trimmed)
         + i32::from(brewed)
-        + i32::from(named);
+        + i32::from(named)
+        + i32::from(lodestone)
+        + i32::from(mapped);
     let mut packet = packet.varint(added).varint(0);
     if damaged {
         packet = packet.varint(component::DAMAGE).varint(stack.damage);
@@ -312,6 +382,17 @@ fn write_components(packet: Writer, stack: &Stack) -> Writer {
             .varint(component::TRIM)
             .varint(i32::from(trim.material) + 1)
             .varint(i32::from(trim.pattern) + 1);
+    }
+    if let Some(tracker) = stack.lodestone {
+        packet = packet
+            .varint(component::LODESTONE_TRACKER)
+            .bool(true)
+            .string(tracker.dimension)
+            .position(tracker.pos)
+            .bool(tracker.tracked);
+    }
+    if let Some(map_id) = stack.map_id {
+        packet = packet.varint(component::MAP_ID).varint(map_id);
     }
     packet
 }
@@ -551,5 +632,58 @@ mod tests {
             .compound("minecraft:stored_enchantments")
             .is_some());
         assert!(!stack.same_kind(&Stack::new(stack.item, 1)));
+    }
+
+    #[test]
+    fn lodestone_compass_nbt_and_packet() {
+        let compass = item("minecraft:compass");
+        let tracker = LodestoneTracker {
+            dimension: "minecraft:overworld",
+            pos: BlockPos::new(10, 64, -20),
+            tracked: true,
+        };
+        let mut stack = Stack::new(compass, 1);
+        stack.lodestone = Some(tracker);
+
+        let nbt = stack.to_nbt();
+        let loaded = Stack::from_nbt(&nbt);
+        assert_eq!(loaded, stack);
+
+        let sent = write_stack(Writer::packet(0), stack).into_frame();
+        let expected = Writer::packet(0)
+            .varint(1)
+            .varint(compass)
+            .varint(1) // 1 component added
+            .varint(0) // 0 removed
+            .varint(component::LODESTONE_TRACKER)
+            .bool(true)
+            .string("minecraft:overworld")
+            .position(BlockPos::new(10, 64, -20))
+            .bool(true)
+            .into_frame();
+        assert_eq!(sent, expected);
+    }
+
+    #[test]
+    fn map_id_and_locked_nbt_and_packet() {
+        let filled_map = item("minecraft:filled_map");
+        let mut stack = Stack::new(filled_map, 1);
+        stack.map_id = Some(42);
+        stack.map_locked = true;
+
+        let nbt = stack.to_nbt();
+        let loaded = Stack::from_nbt(&nbt);
+        assert_eq!(loaded, stack);
+
+        let sent = write_stack(Writer::packet(0), stack).into_frame();
+        let expected = Writer::packet(0)
+            .varint(1)
+            .varint(filled_map)
+            .varint(1) // 1 component added (map_id)
+            .varint(0)
+            .varint(component::MAP_ID)
+            .varint(42)
+            .into_frame();
+        assert_eq!(sent, expected);
     }
 }

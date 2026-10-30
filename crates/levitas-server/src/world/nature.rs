@@ -287,6 +287,9 @@ impl World {
             }
             return true;
         }
+        if held == "minecraft:compass" && blocks::name(clicked) == "minecraft:lodestone" {
+            return self.bind_lodestone(id, slot, pos);
+        }
         if self.use_on_campfire(id, slot, pos) || self.fill_frame(id, slot, pos) {
             return true;
         }
@@ -313,6 +316,55 @@ impl World {
             return true;
         }
         false
+    }
+
+    /// Right-clicking a lodestone with a compass locks the compass onto that block.
+    pub(super) fn bind_lodestone(&mut self, id: i32, slot: usize, pos: BlockPos) -> bool {
+        let Some(p) = self.players.get_mut(&id) else {
+            return false;
+        };
+        let compass = p.inventory.slots[slot];
+        if compass.is_empty() {
+            return false;
+        }
+        let tracker = crate::inventory::LodestoneTracker {
+            dimension: self.dimension.name(),
+            pos,
+            tracked: true,
+        };
+        let sound_pos = pos;
+        let player_pos = p.pos;
+        let survival = p.survival();
+        if compass.count == 1 {
+            let p = self.players.get_mut(&id).expect("player exists");
+            p.inventory.slots[slot].lodestone = Some(tracker);
+            let update = p.inventory.set_slot_packet(slot);
+            self.send(id, update);
+        } else if survival {
+            let p = self.players.get_mut(&id).expect("player exists");
+            p.inventory.take(slot, 1);
+            let mut bound = compass.with_count(1);
+            bound.lodestone = Some(tracker);
+            let (changed, over) = p.inventory.add(bound);
+            let mut updates: Vec<Writer> = changed
+                .into_iter()
+                .map(|s| p.inventory.set_slot_packet(s))
+                .collect();
+            updates.push(p.inventory.set_slot_packet(slot));
+            for update in updates {
+                self.send(id, update);
+            }
+            if over > 0 {
+                self.scatter_item(player_pos, bound.with_count(over));
+            }
+        } else {
+            let p = self.players.get_mut(&id).expect("player exists");
+            p.inventory.slots[slot].lodestone = Some(tracker);
+            let update = p.inventory.set_slot_packet(slot);
+            self.send(id, update);
+        }
+        self.play_sound("minecraft:item.lodestone_compass.lock", sound_pos, None);
+        true
     }
 
     /// Bone meal on a block: crops jump ahead, saplings may grow at once, grass sprouts
@@ -513,5 +565,34 @@ mod tests {
             world.random_tick(grass, g);
         }
         assert_eq!(blocks::name(world.block(dirt)), "minecraft:grass_block");
+    }
+
+    #[test]
+    fn lodestone_compass_binding() {
+        let mut world = flat_world();
+        let (out, _frames) = mpsc::channel(100);
+        let id = next_entity_id();
+        let profile = crate::connection::Profile {
+            name: "Alice".to_owned(),
+            uuid: 1,
+            properties: Vec::new(),
+        };
+        let mut player = Player::new(profile, out, [0.0, 0.0, 0.0]);
+        let compass = ItemInfo::id_of("minecraft:compass").unwrap();
+        player.inventory.slots[crate::inventory::HOTBAR] = Stack::new(compass, 1);
+        world.players.insert(id, player);
+
+        let lodestone_pos = BlockPos::new(5, -60, 5);
+        world.set_block(lodestone_pos, state("minecraft:lodestone"));
+
+        assert!(world.bind_lodestone(id, crate::inventory::HOTBAR, lodestone_pos));
+        let bound = world.players[&id].inventory.slots[crate::inventory::HOTBAR];
+        assert_eq!(bound.item, compass);
+        let tracker = bound
+            .lodestone
+            .expect("compass should be bound to lodestone");
+        assert_eq!(tracker.pos, lodestone_pos);
+        assert_eq!(tracker.dimension, "minecraft:overworld");
+        assert!(tracker.tracked);
     }
 }

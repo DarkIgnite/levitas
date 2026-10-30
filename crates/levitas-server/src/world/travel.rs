@@ -136,8 +136,13 @@ impl World {
         }
         let p = &self.players[&id];
         let (pos, yaw, pitch, mode) = (p.pos, p.yaw, p.pitch, p.mode);
-        let respawn = spawn_info(Writer::packet(clientbound::RESPAWN), mode, self.dimension)
-            .u8(KEEP_ALL_DATA);
+        let respawn = spawn_info(
+            Writer::packet(clientbound::RESPAWN),
+            mode,
+            self.dimension,
+            p.last_death,
+        )
+        .u8(KEEP_ALL_DATA);
         self.send(id, respawn);
         self.send(
             id,
