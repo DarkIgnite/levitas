@@ -196,6 +196,15 @@ pub fn is_ingredient(stack: Stack) -> bool {
     ) || MIXES.iter().any(|&(_, i, _)| i == short)
 }
 
+/// Every item a brewing stand takes as an ingredient, by full name.
+pub fn reagents() -> Vec<String> {
+    let mut names: Vec<&str> = MIXES.iter().map(|&(_, i, _)| i).collect();
+    names.extend(["redstone", "glowstone_dust", "gunpowder", "dragon_breath"]);
+    names.sort_unstable();
+    names.dedup();
+    names.iter().map(|n| format!("minecraft:{n}")).collect()
+}
+
 /// What `ingredient` brews `bottle` into, if anything.
 pub fn brew(ingredient: Stack, bottle: Stack) -> Option<Stack> {
     if ingredient.is_empty() || !is_potion(bottle) {

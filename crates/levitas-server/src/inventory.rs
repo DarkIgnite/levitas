@@ -240,7 +240,17 @@ pub fn write_stack(packet: Writer, stack: Stack) -> Writer {
     if stack.is_empty() {
         return packet.varint(0);
     }
-    let packet = packet.varint(stack.count).varint(stack.item);
+    write_components(packet.varint(stack.count).varint(stack.item), &stack)
+}
+
+/// Appends a stack the way 26.3 writes item stack templates (the result of a recipe in a
+/// slot display): item, count, then the components. A template is never empty.
+pub fn write_template(packet: Writer, stack: Stack) -> Writer {
+    write_components(packet.varint(stack.item).varint(stack.count), &stack)
+}
+
+/// The components of a stack that differ from its item's defaults.
+fn write_components(packet: Writer, stack: &Stack) -> Writer {
     // Both counts come first (components to add, then to remove), then the components.
     let damaged = stack.damage > 0;
     let enchanted = !stack.enchants.is_empty();
@@ -271,7 +281,7 @@ pub fn write_stack(packet: Writer, stack: Stack) -> Writer {
             .varint(component::REPAIR_COST)
             .varint(stack.repair_cost);
     }
-    if let Some(name) = stack.name {
+    if let Some(name) = &stack.name {
         // A text component, as a plain NBT string.
         packet = packet.varint(component::CUSTOM_NAME).text(name);
     }

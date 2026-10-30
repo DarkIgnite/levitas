@@ -522,6 +522,11 @@ fn items_and_entities(data: &Path, block_defaults: &HashMap<String, u64>, out: &
             "Item data component type IDs.",
         ),
         ("particle", "minecraft:particle_type", "Particle type IDs."),
+        (
+            "slot_display",
+            "minecraft:slot_display",
+            "Slot display type IDs, as recipe packets use them.",
+        ),
         ("mob_effect", "minecraft:mob_effect", "Status effect IDs."),
         ("potion", "minecraft:potion", "Potion IDs."),
         (

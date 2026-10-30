@@ -6,10 +6,10 @@ use std::collections::HashMap;
 
 use levitas_protocol::Writer;
 use levitas_registry::packet::play::clientbound;
-use levitas_registry::{ItemInfo, TagRegistry, RECIPES_JSON};
+use levitas_registry::{slot_display, ItemInfo, TagRegistry, RECIPES_JSON};
 use serde_json::Value;
 
-use crate::inventory::{write_stack, Stack, Trim};
+use crate::inventory::{write_template, Stack, Trim};
 
 /// Item IDs an ingredient slot accepts, sorted.
 type Ingredient = Vec<i32>;
@@ -72,9 +72,6 @@ pub struct Recipes {
     stonecutting: Vec<(Ingredient, Stack)>,
     smithing: Vec<Smithing>,
 }
-
-/// Slot display types, as numbered by the `slot_display` registry.
-const SLOT_DISPLAY_ITEM_STACK: i32 = 3;
 
 impl Recipes {
     pub fn load() -> Self {
@@ -282,8 +279,25 @@ impl Recipes {
             ("minecraft:smithing_base", |r| &r.base),
             ("minecraft:smithing_addition", |r| &r.addition),
         ];
+        // What a brewing stand's bottle and ingredient slots take.
+        let ids = |names: &[String]| -> Vec<i32> {
+            let mut ids: Vec<i32> = names.iter().filter_map(|n| ItemInfo::id_of(n)).collect();
+            ids.sort_unstable();
+            ids
+        };
+        let bottles: Vec<String> = ["potion", "splash_potion", "lingering_potion"]
+            .iter()
+            .map(|n| format!("minecraft:{n}"))
+            .collect();
+        let brewing = [
+            ("minecraft:brewing_input", ids(&bottles)),
+            (
+                "minecraft:brewing_reagent",
+                ids(&crate::potions::reagents()),
+            ),
+        ];
         let mut packet = Writer::packet(clientbound::UPDATE_RECIPES)
-            .varint((sets.len() + smithing.len()) as i32);
+            .varint((sets.len() + smithing.len() + brewing.len()) as i32);
         let write_set = |packet: Writer, name: &str, items: Vec<i32>| {
             let mut packet = packet.string(name).varint(items.len() as i32);
             for item in items {
@@ -304,6 +318,9 @@ impl Recipes {
         for (name, part) in smithing {
             packet = write_set(packet, name, self.smithing_items(part));
         }
+        for (name, items) in brewing {
+            packet = write_set(packet, name, items);
+        }
         packet = packet.varint(self.stonecutting.len() as i32);
         for (input, result) in &self.stonecutting {
             // A holder set listed directly: its size plus one, then the items.
@@ -311,7 +328,7 @@ impl Recipes {
             for &item in input {
                 packet = packet.varint(item);
             }
-            packet = write_stack(packet.varint(SLOT_DISPLAY_ITEM_STACK), *result);
+            packet = write_template(packet.varint(slot_display::ITEM_STACK), *result);
         }
         packet
     }
@@ -582,6 +599,39 @@ mod tests {
             .stonecutting(stone)
             .iter()
             .any(|s| s.item == item("minecraft:stone_bricks")));
+    }
+
+    #[test]
+    fn the_recipe_packet_is_laid_out_as_26_3_reads_it() {
+        use levitas_protocol::Reader;
+        let frame = Recipes::load().update_packet().into_frame();
+        let mut r = Reader::new(&frame);
+        r.varint().unwrap(); // length
+        r.varint().unwrap(); // packet ID
+        let mut sets = Vec::new();
+        for _ in 0..r.varint().unwrap() {
+            let name = r.string(32767).unwrap().to_owned();
+            let items: Vec<i32> = (0..r.varint().unwrap())
+                .map(|_| r.varint().unwrap())
+                .collect();
+            sets.push((name, items));
+        }
+        // A vanilla 26.3 server lists 21 brewing reagents and 3 kinds of bottle.
+        let set = |name: &str| sets.iter().find(|(n, _)| n == name).unwrap().1.len();
+        assert_eq!(set("minecraft:brewing_reagent"), 21);
+        assert_eq!(set("minecraft:brewing_input"), 3);
+        // Each stonecutter recipe: its input as an ID set (size + 1, then the items),
+        // then an item stack template: item, count, no component changes.
+        assert!(r.varint().unwrap() > 200);
+        let inputs = r.varint().unwrap() - 1;
+        for _ in 0..inputs {
+            r.varint().unwrap();
+        }
+        assert_eq!(r.varint().unwrap(), slot_display::ITEM_STACK);
+        let result = r.varint().unwrap();
+        assert!(ItemInfo::get(result).is_some(), "item {result}");
+        assert!((1..=64).contains(&r.varint().unwrap()));
+        assert_eq!((r.varint().unwrap(), r.varint().unwrap()), (0, 0));
     }
 
     #[test]
