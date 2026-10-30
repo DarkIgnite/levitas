@@ -400,3 +400,28 @@ fn cartography_table_cloning_locking_and_zooming() {
     t.click(OUTSIDE, 0, PICKUP);
     assert_eq!(t.slots[2], stack("map", 1));
 }
+
+#[test]
+fn beacon_container_shift_clicking_and_payment_limits() {
+    let mut t = Test::new(Layout::Beacon);
+    // Beacon window: slot 0 is payment, 1..28 is main inventory, 28..37 is hotbar.
+
+    // Shift-clicking a diamond in inventory moves 1 into slot 0.
+    t.slots[1] = stack("diamond", 5);
+    t.click(1, 0, QUICK_MOVE);
+    assert_eq!(t.slots[0], stack("diamond", 1));
+    assert_eq!(t.slots[1], stack("diamond", 4));
+
+    // Shift-clicking from slot 0 moves it back to player inventory.
+    t.click(0, 0, QUICK_MOVE);
+    assert!(t.slots[0].is_empty());
+    assert_eq!(t.slots[1], stack("diamond", 5));
+
+    // Non-payment item (e.g. dirt) cannot be placed in slot 0.
+    t.carried = stack("dirt", 64);
+    assert!(!Layout::Beacon.may_place(0, &t.carried));
+    assert!(Layout::Beacon.may_place(0, &stack("netherite_ingot", 1)));
+    assert!(Layout::Beacon.may_place(0, &stack("gold_ingot", 1)));
+    assert!(Layout::Beacon.may_place(0, &stack("iron_ingot", 1)));
+    assert!(Layout::Beacon.may_place(0, &stack("emerald", 1)));
+}

@@ -60,6 +60,8 @@ pub enum Layout {
     /// A cartography table: map slot, material slot, result slot, then main inventory
     /// and hotbar.
     Cartography,
+    /// A beacon: one payment slot, then main inventory and hotbar.
+    Beacon,
 }
 
 /// A trade as the trading screen offers it.
@@ -112,6 +114,7 @@ impl Layout {
             Layout::Smithing => 4,
             Layout::Brewing => 5,
             Layout::Merchant | Layout::Cartography => 3,
+            Layout::Beacon => 1,
         }
     }
 
@@ -176,6 +179,7 @@ impl Layout {
             Layout::Furnace(_) if slot == 2 => false,
             Layout::Furnace(_) if slot == 1 => fuel_ticks(stack.item) > 0 || is_bucket(stack),
             Layout::Enchanting if slot == 1 => is_lapis(stack),
+            Layout::Beacon if slot == 0 => is_beacon_payment(stack),
             Layout::Brewing => match slot {
                 0..=2 => potions::is_potion(*stack) || is_glass_bottle(stack),
                 3 => potions::is_ingredient(*stack),
@@ -192,12 +196,26 @@ impl Layout {
         let bucket_fuel = matches!(self, Layout::Furnace(_)) && slot == 1 && is_bucket(stack);
         let enchanted = self == Layout::Enchanting && slot == 0;
         let bottle = self == Layout::Brewing && slot < 3;
-        if armor || bucket_fuel || enchanted || bottle {
+        let beacon = self == Layout::Beacon && slot == 0;
+        if armor || bucket_fuel || enchanted || bottle || beacon {
             1
         } else {
             stack.max_stack()
         }
     }
+}
+
+pub fn is_beacon_payment(stack: &Stack) -> bool {
+    ItemInfo::get(stack.item).is_some_and(|i| {
+        matches!(
+            i.name,
+            "minecraft:netherite_ingot"
+                | "minecraft:emerald"
+                | "minecraft:diamond"
+                | "minecraft:gold_ingot"
+                | "minecraft:iron_ingot"
+        )
+    })
 }
 
 fn is_lapis(stack: &Stack) -> bool {
@@ -771,6 +789,17 @@ fn quick_move(w: &mut Window, s: usize) {
             } else if is_lapis(&stack) {
                 move_into(w, stack, 1..2, false)
             } else if w.slots[0].is_empty() {
+                move_into(w, stack, 0..1, false)
+            } else if main.contains(&s) {
+                move_into(w, stack, hotbar, false)
+            } else {
+                move_into(w, stack, main, false)
+            }
+        }
+        Layout::Beacon => {
+            if !in_player {
+                move_into(w, stack, player, true)
+            } else if is_beacon_payment(&stack) && w.slots[0].is_empty() {
                 move_into(w, stack, 0..1, false)
             } else if main.contains(&s) {
                 move_into(w, stack, hotbar, false)

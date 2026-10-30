@@ -86,7 +86,9 @@ impl World {
         // Air: used up under water, then drowning; refilled quickly above it.
         let breathes_water = p
             .effect(levitas_registry::mob_effect::WATER_BREATHING)
-            .is_some();
+            .is_some()
+            || p.effect(levitas_registry::mob_effect::CONDUIT_POWER)
+                .is_some();
         // Respiration keeps air in by level in level + 1.
         let respiration = p.inventory.slots[5]
             .enchants

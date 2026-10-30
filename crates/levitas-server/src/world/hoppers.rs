@@ -50,7 +50,9 @@ impl World {
             BlockEntity::Campfire(_)
             | BlockEntity::Plain(_)
             | BlockEntity::Spawner(_)
-            | BlockEntity::Sign(_) => Vec::new(),
+            | BlockEntity::Sign(_)
+            | BlockEntity::Beacon(_)
+            | BlockEntity::Conduit(_) => Vec::new(),
         }
     }
 
@@ -71,7 +73,9 @@ impl World {
             BlockEntity::Campfire(_)
             | BlockEntity::Plain(_)
             | BlockEntity::Spawner(_)
-            | BlockEntity::Sign(_) => Vec::new(),
+            | BlockEntity::Sign(_)
+            | BlockEntity::Beacon(_)
+            | BlockEntity::Conduit(_) => Vec::new(),
         }
     }
 

@@ -378,7 +378,17 @@ Known gaps are listed under each phase instead of being hidden.
       arrows; Infinity does not spare them. Undead mobs invert healing and harming; undead
       and spiders ignore poison; resistance and fire resistance protect mobs. Missing:
       lingering clouds (they splash for now), splash colours.
-- [ ] Beacons, conduits
+- [x] Beacons, conduits. Beacons (`world/beacon.rs`) calculate pyramid layers (1 to 4) of
+      mineral blocks (`minecraft:beacon_base_blocks`), verify unobstructed sky above
+      (`light_filter < 15`), provide container (`menu::BEACON`) with payment slot for
+      netherite/emerald/diamond/gold/iron ingots (`click::Layout::Beacon`), support
+      `serverbound::SET_BEACON` to configure primary and secondary powers, broadcast
+      `BLOCK_ENTITY_DATA` to render the beam, and pulse status effects (Speed, Haste, Resistance,
+      Jump Boost, Strength, Regeneration) every 80 ticks to players in range. Conduits
+      (`world/conduit.rs`) activate underwater inside a 3x3x3 water cage and 16 to 42
+      prismarine/sea lantern frame blocks, grant Conduit Power (underwater breathing, night vision,
+      mining speed) to nearby players in water or rain, and attack hostile mobs with 4 magic damage
+      every 40 ticks when fully framed (42 blocks).
 - [x] Maps, compasses, recovery compasses, clocks, spyglass. `inventory.rs` serializes and saves
       `minecraft:lodestone_tracker` and `minecraft:map_id` item components. Right-clicking a lodestone
       with a compass binds it (`item.lodestone_compass.lock`) to that position and dimension. Dying

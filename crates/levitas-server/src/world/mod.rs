@@ -5,6 +5,7 @@
 mod admin;
 mod armor_stands;
 mod arrows;
+mod beacon;
 mod boats;
 mod breeding;
 mod brewing;
@@ -12,6 +13,7 @@ mod building;
 mod campfire;
 mod combat;
 mod commands;
+mod conduit;
 mod containers;
 mod devices;
 pub mod dimension;
@@ -234,6 +236,12 @@ pub enum Event {
         pos: BlockPos,
         front: bool,
         lines: [String; 4],
+    },
+    /// The effects chosen in a beacon window.
+    SetBeacon {
+        id: i32,
+        primary: Option<i32>,
+        secondary: Option<i32>,
     },
     ContainerClose {
         id: i32,
@@ -801,6 +809,11 @@ impl World {
                 lines,
             } => self.update_sign(id, pos, front, lines),
             Event::SelectTrade { id, index } => self.select_trade(id, index),
+            Event::SetBeacon {
+                id,
+                primary,
+                secondary,
+            } => self.set_beacon(id, primary, secondary),
             Event::RenameItem { id, name } => self.rename_item(id, &name),
             Event::ContainerButton { id, window, button } => self.window_button(id, window, button),
             Event::HeldSlot { id, slot } => {
@@ -1424,6 +1437,8 @@ impl World {
         self.tick_furnaces();
         self.tick_campfires();
         self.tick_hoppers();
+        self.tick_beacons();
+        self.tick_conduits();
         self.tick_daylight_detectors();
         self.tick_spawners();
         if self.tick.is_multiple_of(AUTOSAVE_TICKS) {

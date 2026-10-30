@@ -265,6 +265,21 @@ fn decode(id: i32, packet: &[u8]) -> io::Result<Option<Event>> {
             id,
             index: r.varint()?,
         },
+        serverbound::SET_BEACON => {
+            let has_primary = r.bool()?;
+            let primary = if has_primary { Some(r.varint()?) } else { None };
+            let has_secondary = r.bool()?;
+            let secondary = if has_secondary {
+                Some(r.varint()?)
+            } else {
+                None
+            };
+            Event::SetBeacon {
+                id,
+                primary,
+                secondary,
+            }
+        }
         serverbound::SIGN_UPDATE => {
             let pos = r.position()?;
             let mut lines: [String; 4] = Default::default();

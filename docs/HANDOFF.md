@@ -248,6 +248,15 @@ economy the owner wants for their server.
 - Spawn point: Pumpkin's spawn finder plus the highest non-tree block; the player always
   spawns exactly there (no spawn radius).
 - Old worlds made before light was stored load with full daylight everywhere.
+- Beacons & Conduits (2026-10-30):
+  - Beacons (`world/beacon.rs`): mineral pyramids of 1 to 4 layers (`minecraft:beacon_base_blocks`),
+    sky clearance checks (`light_filter < 15`), container `menu::BEACON` with transient payment slot
+    (`click::Layout::Beacon`), `serverbound::SET_BEACON` (packet ID 53) power selection, beam rendering
+    via `BLOCK_ENTITY_DATA`, and 80-tick pulse of Speed, Haste, Resistance, Jump Boost, Strength,
+    and Regeneration up to 50 blocks.
+  - Conduits (`world/conduit.rs`): 3x3x3 water cage and 16-42 prismarine/sea lantern frame blocks,
+    grants Conduit Power to players submerged or in rain, and attacks hostile mobs with 4 magic damage
+    every 40 ticks when complete (42 blocks). Prevents drowning in `hazards.rs`.
 
 ## 9. Testing pattern
 

@@ -34,6 +34,8 @@ pub enum BlockEntity {
     Spawner(super::spawners::Spawner),
     Sign(Box<super::signs::Sign>),
     Brewing(Box<super::brewing::Brewer>),
+    Beacon(Box<super::beacon::Beacon>),
+    Conduit(Box<super::conduit::Conduit>),
 }
 
 pub struct Plain {
@@ -97,6 +99,8 @@ impl BlockEntity {
             BlockEntity::Spawner(_) => ("minecraft:mob_spawner", &[][..]),
             BlockEntity::Sign(s) => (s.id(), &[][..]),
             BlockEntity::Brewing(b) => ("minecraft:brewing_stand", &b.items[..]),
+            BlockEntity::Beacon(_) => ("minecraft:beacon", &[][..]),
+            BlockEntity::Conduit(_) => ("minecraft:conduit", &[][..]),
         };
         let mut nbt = Compound::new()
             .with("id", id)
@@ -104,7 +108,10 @@ impl BlockEntity {
             .with("y", pos.y)
             .with("z", pos.z)
             .with("keepPacked", false);
-        if !matches!(self, BlockEntity::Sign(_)) {
+        if !matches!(
+            self,
+            BlockEntity::Sign(_) | BlockEntity::Beacon(_) | BlockEntity::Conduit(_)
+        ) {
             nbt.insert("Items", items_to_nbt(items.iter().copied().enumerate()));
         }
         if let BlockEntity::Furnace(f) = self {
@@ -126,6 +133,12 @@ impl BlockEntity {
         if let BlockEntity::Brewing(b) = self {
             b.write_nbt(&mut nbt);
         }
+        if let BlockEntity::Beacon(b) = self {
+            b.write_nbt(&mut nbt);
+        }
+        if let BlockEntity::Conduit(c) = self {
+            c.write_nbt(&mut nbt);
+        }
         nbt
     }
 
@@ -135,6 +148,8 @@ impl BlockEntity {
             BlockEntity::Campfire(c) => Some(c.network_data()),
             BlockEntity::Spawner(s) => Some(s.network_data()),
             BlockEntity::Sign(s) => Some(s.network_data()),
+            BlockEntity::Beacon(b) => Some(b.network_data()),
+            BlockEntity::Conduit(c) => Some(c.network_data()),
             _ => None,
         }
     }
@@ -164,6 +179,8 @@ impl BlockEntity {
             }
             "minecraft:daylight_detector" => Self::for_block(block::DAYLIGHT_DETECTOR)?,
             "minecraft:brewing_stand" => BlockEntity::Brewing(Box::default()),
+            "minecraft:beacon" => BlockEntity::Beacon(Box::default()),
+            "minecraft:conduit" => BlockEntity::Conduit(Box::default()),
             id @ ("minecraft:sign" | "minecraft:hanging_sign") => BlockEntity::Sign(Box::new(
                 super::signs::Sign::read_nbt(id == "minecraft:hanging_sign", nbt),
             )),
@@ -189,6 +206,12 @@ impl BlockEntity {
         }
         if let BlockEntity::Brewing(b) = &mut entity {
             b.read_nbt(nbt);
+        }
+        if let BlockEntity::Beacon(b) = &mut entity {
+            b.read_nbt(nbt);
+        }
+        if let BlockEntity::Conduit(c) = &mut entity {
+            c.read_nbt(nbt);
         }
         Some((pos, entity))
     }
@@ -235,6 +258,8 @@ impl BlockEntity {
                 }))
             }
             "minecraft:brewing_stand" => Some(BlockEntity::Brewing(Box::default())),
+            "minecraft:beacon" => Some(BlockEntity::Beacon(Box::default())),
+            "minecraft:conduit" => Some(BlockEntity::Conduit(Box::default())),
             _ => super::signs::sign_kind(state)
                 .map(|hanging| BlockEntity::Sign(Box::new(super::signs::Sign::new(hanging)))),
         }
@@ -254,6 +279,8 @@ impl BlockEntity {
             BlockEntity::Spawner(_) => block_entity_type::MOB_SPAWNER,
             BlockEntity::Sign(s) => s.type_id(),
             BlockEntity::Brewing(b) => b.type_id(),
+            BlockEntity::Beacon(b) => b.type_id(),
+            BlockEntity::Conduit(c) => c.type_id(),
         }
     }
 
@@ -272,7 +299,11 @@ impl BlockEntity {
             BlockEntity::Furnace(f) => &f.items,
             BlockEntity::Campfire(c) => &c.items,
             BlockEntity::Brewing(b) => &b.items,
-            BlockEntity::Plain(_) | BlockEntity::Spawner(_) | BlockEntity::Sign(_) => &[],
+            BlockEntity::Plain(_)
+            | BlockEntity::Spawner(_)
+            | BlockEntity::Sign(_)
+            | BlockEntity::Beacon(_)
+            | BlockEntity::Conduit(_) => &[],
         }
     }
 
@@ -282,7 +313,11 @@ impl BlockEntity {
             BlockEntity::Furnace(f) => &mut f.items,
             BlockEntity::Campfire(c) => &mut c.items,
             BlockEntity::Brewing(b) => &mut b.items,
-            BlockEntity::Plain(_) | BlockEntity::Spawner(_) | BlockEntity::Sign(_) => &mut [],
+            BlockEntity::Plain(_)
+            | BlockEntity::Spawner(_)
+            | BlockEntity::Sign(_)
+            | BlockEntity::Beacon(_)
+            | BlockEntity::Conduit(_) => &mut [],
         }
     }
 
@@ -295,6 +330,8 @@ impl BlockEntity {
             BlockEntity::Spawner(s) => &mut s.viewers,
             BlockEntity::Sign(s) => &mut s.viewers,
             BlockEntity::Brewing(b) => &mut b.viewers,
+            BlockEntity::Beacon(b) => &mut b.viewers,
+            BlockEntity::Conduit(c) => &mut c.viewers,
         }
     }
 }
@@ -322,6 +359,8 @@ pub enum View {
     Merchant(i32),
     /// A cartography table: map and material input, result output.
     Cartography(BlockPos),
+    /// A beacon: one payment slot.
+    Beacon(BlockPos),
 }
 
 impl View {
@@ -339,13 +378,17 @@ impl View {
             View::Smithing(_) => 4,
             View::Brewing(_) => super::brewing::SLOTS,
             View::Merchant(_) => 3,
+            View::Beacon(_) => 1,
         }
     }
 
     /// The block entities shown in the window, each with its first window slot.
     fn parts(self) -> Vec<(BlockPos, usize)> {
         match self {
-            View::Chest(pos, _) | View::Furnace(pos, _) | View::Brewing(pos) => vec![(pos, 0)],
+            View::Chest(pos, _)
+            | View::Furnace(pos, _)
+            | View::Brewing(pos)
+            | View::Beacon(pos) => vec![(pos, 0)],
             View::DoubleChest(first, second) => vec![(first, 0), (second, CHEST_SLOTS)],
             View::Inventory
             | View::Crafting
@@ -374,6 +417,7 @@ impl View {
             View::Brewing(_) => click::Layout::Brewing,
             View::Merchant(_) => click::Layout::Merchant,
             View::Cartography(_) => click::Layout::Cartography,
+            View::Beacon(_) => click::Layout::Beacon,
         }
     }
 }
@@ -415,6 +459,7 @@ impl World {
                 menu::CARTOGRAPHY_TABLE,
                 "Cartography Table",
             ),
+            "minecraft:beacon" => (View::Beacon(pos), menu::BEACON, "Beacon"),
             "minecraft:brewing_stand" => (View::Brewing(pos), menu::BREWING_STAND, "Brewing Stand"),
             "minecraft:chest" | "minecraft:trapped_chest" => {
                 let partner = blocks::chest_partner(state, pos)
@@ -511,6 +556,14 @@ impl World {
                     }
                 }
             }
+            View::Beacon(pos) => {
+                if let Some(BlockEntity::Beacon(b)) = self.block_entities.get(&pos) {
+                    let data = super::beacon::beacon_data(window, b);
+                    for packet in data {
+                        self.send(id, packet);
+                    }
+                }
+            }
             _ => {}
         }
         // The screen first, then the sound, as vanilla orders them.
@@ -550,6 +603,10 @@ impl World {
             View::Merchant(_) => {
                 let open = p.open.as_ref().expect("window is open");
                 open.grid[..3].to_vec()
+            }
+            View::Beacon(_) => {
+                let open = p.open.as_ref().expect("window is open");
+                open.grid[..1].to_vec()
             }
             View::Chest(..) | View::Furnace(..) | View::DoubleChest(..) | View::Brewing(..) => {
                 let mut slots = vec![Stack::EMPTY; view.container_len()];
@@ -609,6 +666,11 @@ impl World {
                 let p = self.players.get_mut(&id).expect("player exists");
                 let open = p.open.as_mut().expect("window is open");
                 open.grid[..3].copy_from_slice(&slots[..3]);
+            }
+            View::Beacon(_) => {
+                let p = self.players.get_mut(&id).expect("player exists");
+                let open = p.open.as_mut().expect("window is open");
+                open.grid[..1].copy_from_slice(&slots[..1]);
             }
             View::Chest(..) | View::Furnace(..) | View::DoubleChest(..) | View::Brewing(..) => {
                 for (part, first) in view.parts() {
@@ -991,6 +1053,14 @@ impl World {
                 returned.extend(&open.grid[..2]);
                 self.stop_trading(id, target);
             }
+            View::Beacon(_) => {
+                returned.push(open.grid[0]);
+                for (part, _) in open.view.parts() {
+                    if let Some(entity) = self.block_entities.get_mut(&part) {
+                        entity.viewers_mut().remove(&id);
+                    }
+                }
+            }
             View::Chest(..) | View::Furnace(..) | View::DoubleChest(..) | View::Brewing(..) => {
                 let mut last_viewer = false;
                 for (part, _) in open.view.parts() {
@@ -1052,6 +1122,16 @@ impl World {
             }
         }
         let entity = self.block_entities.remove(&pos).expect("checked above");
+        if let BlockEntity::Beacon(b) = &entity {
+            if b.levels > 0 {
+                self.play_sound("minecraft:block.beacon.deactivate", pos, None);
+            }
+        }
+        if let BlockEntity::Conduit(c) = &entity {
+            if c.active {
+                self.play_sound("minecraft:block.conduit.deactivate", pos, None);
+            }
+        }
         for &stack in entity.items() {
             self.drop_at_block(pos, stack);
         }
