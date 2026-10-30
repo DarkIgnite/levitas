@@ -18,7 +18,7 @@ use crate::world::survival::{Damage, MAX_HEALTH};
 const FLAG_SHOW_ICON: u8 = 0x04;
 const FLAG_SHOW_PARTICLES: u8 = 0x02;
 /// Entity data index of a player's extra (absorption) health, a float.
-const DATA_ABSORPTION: u8 = 15;
+const DATA_ABSORPTION: u8 = 17;
 const SERIALIZER_FLOAT: i32 = 3;
 /// A duration of -1 lasts forever.
 pub const INFINITE: i32 = -1;

@@ -137,15 +137,19 @@ impl Recipes {
             | "minecraft:smoking"
             | "minecraft:blasting"
             | "minecraft:campfire_cooking") => {
-                let (cooker, default_time) = match kind {
-                    "minecraft:smoking" => (Cooker::Smoker, 100),
-                    "minecraft:blasting" => (Cooker::BlastFurnace, 100),
-                    "minecraft:campfire_cooking" => (Cooker::Campfire, 600),
-                    _ => (Cooker::Furnace, 200),
+                // Since 26.x a recipe gives a furnace's time; smokers and blast
+                // furnaces work twice as fast.
+                let (cooker, speed) = match kind {
+                    "minecraft:smoking" => (Cooker::Smoker, 2),
+                    "minecraft:blasting" => (Cooker::BlastFurnace, 2),
+                    "minecraft:campfire_cooking" => (Cooker::Campfire, 1),
+                    _ => (Cooker::Furnace, 1),
                 };
+                let default_time = if cooker == Cooker::Campfire { 600 } else { 200 };
+                let time = recipe["cookingtime"].as_i64().unwrap_or(default_time) as i32;
                 let smelting = Smelting {
                     result: result(&recipe["result"])?,
-                    cook_time: recipe["cookingtime"].as_i64().unwrap_or(default_time) as i32,
+                    cook_time: (time / speed).max(1),
                 };
                 for item in ingredient(&recipe["ingredient"])? {
                     self.cooking

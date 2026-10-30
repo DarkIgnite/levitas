@@ -388,14 +388,11 @@ impl World {
 
     /// Gives a player a push (knockback); the client moves itself.
     pub(super) fn push_player(&mut self, id: i32, velocity: [f64; 3]) {
-        let v = |x: f64| (x.clamp(-3.9, 3.9) * 8000.0) as i16;
         self.send(
             id,
             Writer::packet(clientbound::SET_ENTITY_MOTION)
                 .varint(id)
-                .i16(v(velocity[0]))
-                .i16(v(velocity[1]))
-                .i16(v(velocity[2])),
+                .lp_vec3(velocity),
         );
     }
 

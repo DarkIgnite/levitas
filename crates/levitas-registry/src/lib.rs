@@ -315,7 +315,19 @@ mod tests {
         assert_eq!(stairs.property(east, "half"), Some("top"));
         assert_eq!(stairs.properties_of(east).len(), stairs.properties.len());
         assert!(BlockInfo::by_name("minecraft:not_a_block").is_none());
-        assert_eq!(DATA_VERSION, 4440);
+        assert_eq!(DATA_VERSION, 5023, "26.3");
+        // Blocks 26.3 added take hardness and shapes from their older relatives.
+        let poplar = BlockInfo::by_name("minecraft:poplar_planks").unwrap();
+        assert_eq!(poplar.hardness, BlockInfo::of(block::OAK_PLANKS).hardness);
+        let wool_stairs = BlockInfo::by_name("minecraft:white_wool_stairs").unwrap();
+        assert_eq!(
+            wool_stairs.hardness,
+            BlockInfo::of(block::WHITE_WOOL).hardness
+        );
+        assert_eq!(
+            collision_boxes(wool_stairs.default_state),
+            collision_boxes(block::OAK_STAIRS)
+        );
 
         assert_eq!(BlockInfo::of(block::STONE).hardness, 1.5);
         assert_eq!(BlockInfo::of(block::BEDROCK).hardness, -1.0);

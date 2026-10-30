@@ -139,12 +139,10 @@ impl World {
                     self.broadcast(
                         Writer::packet(clientbound::ENTITY_POSITION_SYNC)
                             .varint(id)
+                            .varint(0) // a linear path
                             .f64(arrow.pos[0])
                             .f64(arrow.pos[1])
                             .f64(arrow.pos[2])
-                            .f64(0.0)
-                            .f64(0.0)
-                            .f64(0.0)
                             .f32(0.0)
                             .f32(0.0)
                             .bool(false),
@@ -403,7 +401,6 @@ fn find_arrows(p: &Player) -> Option<usize> {
 }
 
 fn arrow_spawn(id: i32, arrow: &Arrow) -> Writer {
-    let v = |x: f64| (x.clamp(-3.9, 3.9) * 8000.0) as i16;
     let yaw = (arrow.vel[0].atan2(arrow.vel[2])).to_degrees() as f32;
     let pitch = (arrow.vel[1].atan2(arrow.vel[0].hypot(arrow.vel[2]))).to_degrees() as f32;
     Writer::packet(clientbound::ADD_ENTITY)
@@ -413,11 +410,9 @@ fn arrow_spawn(id: i32, arrow: &Arrow) -> Writer {
         .f64(arrow.pos[0])
         .f64(arrow.pos[1])
         .f64(arrow.pos[2])
+        .lp_vec3([arrow.vel[0], arrow.vel[1], arrow.vel[2]])
         .u8(angle(pitch))
         .u8(angle(yaw))
         .u8(0)
         .varint(arrow.shooter + 1)
-        .i16(v(arrow.vel[0]))
-        .i16(v(arrow.vel[1]))
-        .i16(v(arrow.vel[2]))
 }

@@ -26,7 +26,7 @@ const GAME_EVENT_THUNDER_LEVEL: u8 = 8;
 /// Entity data: the pose (index 6, serializer 21) and the bed being slept in (index 14,
 /// an optional block position, serializer 11).
 const DATA_POSE: u8 = 6;
-const SERIALIZER_POSE: i32 = 21;
+const SERIALIZER_POSE: i32 = 20;
 const DATA_SLEEPING_POS: u8 = 14;
 const SERIALIZER_OPTIONAL_POS: i32 = 11;
 const POSE_STANDING: i32 = 0;
@@ -67,10 +67,25 @@ fn uniform(rng: &mut Rng, from: i32, to: i32) -> i32 {
 
 impl World {
     pub(super) fn time_packet(&self) -> Writer {
-        Writer::packet(clientbound::SET_TIME)
+        // The world's age, then its clocks: the time each shows and how fast the
+        // client should run it on between updates.
+        let clocks = SyncedRegistry::get("minecraft:world_clock").map_or(&[][..], |r| r.entries);
+        let rate = if crate::rules::bool("doDaylightCycle") {
+            1.0
+        } else {
+            0.0
+        };
+        let mut packet = Writer::packet(clientbound::SET_TIME)
             .i64(self.tick as i64)
-            .i64(self.day_time)
-            .bool(true) // the client keeps the day moving between updates
+            .varint(clocks.len() as i32);
+        for id in 0..clocks.len() {
+            packet = packet
+                .varint(id as i32)
+                .varlong(self.day_time)
+                .f32(0.0)
+                .f32(rate);
+        }
+        packet
     }
 
     /// Time and weather for a player who just joined or respawned.

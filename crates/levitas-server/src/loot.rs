@@ -7,6 +7,7 @@ use std::collections::HashMap;
 
 use levitas_registry::{
     BlockInfo, ItemInfo, TagRegistry, BLOCK_LOOT_JSON, CHEST_LOOT_JSON, ENTITY_LOOT_JSON,
+    PREDICATES_JSON,
 };
 use serde_json::Value;
 
@@ -58,10 +59,17 @@ impl LootTables {
             .enumerate()
             .map(|(id, item)| (item.name, id as i32))
             .collect();
+        let predicates: serde_json::Map<String, Value> =
+            serde_json::from_str(PREDICATES_JSON).expect("predicates are valid JSON");
+        let tidy = |m: serde_json::Map<String, Value>| {
+            m.into_iter()
+                .map(|(name, table)| (name, normalize(table, &predicates)))
+                .collect()
+        };
         Self {
-            blocks: blocks.into_iter().collect(),
-            entities: entities.into_iter().collect(),
-            chests: chests.into_iter().collect(),
+            blocks: tidy(blocks),
+            entities: tidy(entities),
+            chests: tidy(chests),
             item_ids,
         }
     }
@@ -287,6 +295,138 @@ fn shuffle<T>(list: &mut [T], rng: &mut Rng) {
     for i in (1..list.len()).rev() {
         list.swap(i, rng.below(i as u32 + 1) as usize);
     }
+}
+
+/// 26.x loot tables in the shape this evaluator reads: a `condition` (one inline
+/// condition with a `type`, a named predicate, or a list) becomes a `conditions` list of
+/// conditions keyed `condition`; a `modifier` (one or a list, keyed `type`) becomes a
+/// `functions` list keyed `function`; renamed conditions and entity predicate fields get
+/// their older names. Older tables pass through unchanged.
+fn normalize(value: Value, predicates: &serde_json::Map<String, Value>) -> Value {
+    match value {
+        Value::Array(list) => {
+            Value::Array(list.into_iter().map(|v| normalize(v, predicates)).collect())
+        }
+        Value::Object(map) => {
+            let mut out = serde_json::Map::new();
+            for (key, v) in map {
+                match key.as_str() {
+                    "condition"
+                        if !v.is_string()
+                            || v.as_str().is_some_and(|s| predicates.contains_key(s)) =>
+                    {
+                        let list: Vec<Value> = match v {
+                            Value::Array(l) => l,
+                            one => vec![one],
+                        };
+                        let conditions = list
+                            .into_iter()
+                            .map(|c| condition_of(c, predicates))
+                            .collect();
+                        out.insert("conditions".to_owned(), Value::Array(conditions));
+                    }
+                    "modifier" => {
+                        let list: Vec<Value> = match v {
+                            Value::Array(l) => l,
+                            one => vec![one],
+                        };
+                        let functions = list
+                            .into_iter()
+                            .map(|f| {
+                                let mut f = normalize(f, predicates);
+                                if let Some(obj) = f.as_object_mut() {
+                                    if let Some(t) = obj.remove("type") {
+                                        obj.insert("function".to_owned(), t);
+                                    }
+                                }
+                                f
+                            })
+                            .collect();
+                        out.insert("functions".to_owned(), Value::Array(functions));
+                    }
+                    "predicate" => {
+                        out.insert(key, entity_predicate(normalize(v, predicates)));
+                    }
+                    _ => {
+                        out.insert(key, normalize(v, predicates));
+                    }
+                }
+            }
+            Value::Object(out)
+        }
+        other => other,
+    }
+}
+
+/// One condition in the older shape, keyed `condition`.
+fn condition_of(c: Value, predicates: &serde_json::Map<String, Value>) -> Value {
+    let c = match c {
+        Value::String(name) => predicates.get(&name).cloned().unwrap_or(Value::Null),
+        other => other,
+    };
+    let mut c = normalize(c, predicates);
+    let Some(obj) = c.as_object_mut() else {
+        return c;
+    };
+    if let Some(t) = obj.remove("type") {
+        obj.insert("condition".to_owned(), t);
+    }
+    // `match_block` is the old `block_state_property`.
+    if obj.get("condition").and_then(Value::as_str) == Some("minecraft:match_block") {
+        obj.insert(
+            "condition".to_owned(),
+            Value::String("minecraft:block_state_property".to_owned()),
+        );
+        if let Some(state) = obj.remove("state") {
+            obj.insert("properties".to_owned(), state);
+        }
+    }
+    // The terms of `any_of`, `all_of` and `inverted` are conditions too.
+    for key in ["terms", "term"] {
+        if let Some(t) = obj.remove(key) {
+            let t = match t {
+                Value::Array(l) => {
+                    Value::Array(l.into_iter().map(|x| condition_of(x, predicates)).collect())
+                }
+                one => condition_of(one, predicates),
+            };
+            obj.insert(key.to_owned(), t);
+        }
+    }
+    c
+}
+
+/// Entity predicate fields under their older names.
+fn entity_predicate(p: Value) -> Value {
+    let Value::Object(map) = p else {
+        return p;
+    };
+    let mut out = serde_json::Map::new();
+    for (key, v) in map {
+        match key.as_str() {
+            "minecraft:flags" => {
+                out.insert("flags".to_owned(), v);
+            }
+            "minecraft:components" => {
+                out.insert("components".to_owned(), v);
+            }
+            "minecraft:equipment" => {
+                out.insert("equipment".to_owned(), v);
+            }
+            k if k.starts_with("minecraft:type_specific/") => {
+                let mut v = v;
+                if let Some(obj) = v.as_object_mut() {
+                    let kind = format!("minecraft:{}", &k["minecraft:type_specific/".len()..]);
+                    obj.insert("type".to_owned(), Value::String(kind));
+                }
+                out.insert("type_specific".to_owned(), v);
+            }
+            _ => {
+                out.insert(key, v);
+            }
+        }
+    }
+    Value::Object(out)
 }
 
 fn array(value: &Value) -> &[Value] {

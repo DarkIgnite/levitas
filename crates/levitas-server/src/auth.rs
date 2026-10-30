@@ -67,6 +67,13 @@ impl Keys {
     }
 }
 
+/// A fresh ID for a player's session, sent with their login.
+pub fn session_id() -> u128 {
+    let mut bytes = [0; 16];
+    OsRng.fill_bytes(&mut bytes);
+    u128::from_be_bytes(bytes)
+}
+
 pub fn verify_token() -> [u8; 4] {
     let mut token = [0; 4];
     OsRng.fill_bytes(&mut token);

@@ -128,13 +128,11 @@ pub fn spawn_packets(id: i32, boat: &Boat) -> Vec<Writer> {
         .f64(boat.pos[0])
         .f64(boat.pos[1])
         .f64(boat.pos[2])
+        .lp_vec3([0.0, 0.0, 0.0])
         .u8(0)
         .u8(angle(boat.yaw))
         .u8(angle(boat.yaw))
-        .varint(0)
-        .i16(0)
-        .i16(0)
-        .i16(0)];
+        .varint(0)];
     if let Some(rider) = boat.rider {
         packets.push(passengers(id, Some(rider)));
     }
@@ -152,12 +150,10 @@ fn passengers(boat: i32, rider: Option<i32>) -> Writer {
 fn position_sync(id: i32, boat: &Boat) -> Writer {
     Writer::packet(clientbound::ENTITY_POSITION_SYNC)
         .varint(id)
+        .varint(0) // a linear path
         .f64(boat.pos[0])
         .f64(boat.pos[1])
         .f64(boat.pos[2])
-        .f64(0.0)
-        .f64(0.0)
-        .f64(0.0)
         .f32(boat.yaw)
         .f32(0.0)
         .bool(false)

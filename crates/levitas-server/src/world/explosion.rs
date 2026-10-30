@@ -153,12 +153,18 @@ impl World {
             let mut packet = Writer::packet(clientbound::EXPLODE)
                 .f64(centre[0])
                 .f64(centre[1])
-                .f64(centre[2]);
+                .f64(centre[2])
+                .f32(power)
+                .i32(destroyed.len() as i32);
             packet = match pushed.iter().find(|(p, _)| *p == id) {
                 Some((_, push)) => packet.bool(true).f64(push[0]).f64(push[1]).f64(push[2]),
                 None => packet.bool(false),
             };
-            self.send(id, packet.varint(particle).varint(sound));
+            // No block particles of its own; the sound plays.
+            self.send(
+                id,
+                packet.varint(particle).varint(sound).varint(0).bool(true),
+            );
         }
         destroyed.into_iter().collect()
     }

@@ -261,12 +261,7 @@ pub enum Event {
         id: i32,
         target: i32,
         hand: i32,
-        at: [f32; 3],
-    },
-    UseEntity {
-        id: i32,
-        target: i32,
-        hand: i32,
+        at: [f64; 3],
     },
     Sprint {
         id: i32,
@@ -821,14 +816,11 @@ impl World {
                 hand,
                 at,
             } => {
-                self.use_armor_stand(id, target, hand, f64::from(at[1]));
-            }
-            Event::UseEntity { id, target, hand } => {
-                // Armor stands take the click with its height on them instead.
-                if !self.board_boat(id, target)
+                // Armor stands go by where on them the click was.
+                if !self.use_armor_stand(id, target, hand, at[1])
+                    && !self.board_boat(id, target)
                     && !self.board_cart(id, target)
                     && !self.use_hanging(id, target, hand)
-                    && !self.armor_stands.contains_key(&target)
                 {
                     self.use_on_mob(id, target, hand);
                 }
@@ -925,7 +917,9 @@ impl World {
             .bool(crate::rules::bool("reducedDebugInfo"))
             .bool(!crate::rules::bool("doImmediateRespawn")) // respawn screen
             .bool(crate::rules::bool("doLimitedCrafting"));
-        login = spawn_info(login, mode, self.dimension).bool(false); // enforces secure chat
+        login = spawn_info(login, mode, self.dimension)
+            .bool(crate::config::get().online_mode)
+            .bool(false); // enforces secure chat
         self.send(id, login);
         self.send(id, admin::difficulty_packet());
         self.send(
@@ -1337,22 +1331,20 @@ impl World {
                 }
                 Writer::packet(clientbound::MOVE_ENTITY_POS_ROT)
                     .varint(id)
+                    .varint(i32::from(p.on_ground)) // on the ground; no steps
                     .i16(delta[0] as i16)
                     .i16(delta[1] as i16)
                     .i16(delta[2] as i16)
                     .u8(angle(p.yaw))
                     .u8(angle(p.pitch))
-                    .bool(p.on_ground)
             } else {
                 p.sent_pos = p.pos;
                 Writer::packet(clientbound::ENTITY_POSITION_SYNC)
                     .varint(id)
+                    .varint(0) // a linear path
                     .f64(p.pos[0])
                     .f64(p.pos[1])
                     .f64(p.pos[2])
-                    .f64(0.0)
-                    .f64(0.0)
-                    .f64(0.0) // velocity
                     .f32(p.yaw)
                     .f32(p.pitch)
                     .bool(p.on_ground)
@@ -1741,8 +1733,8 @@ fn spawn_info(packet: Writer, mode: u8, dimension: Dimension) -> Writer {
         .varint(dimension.type_id())
         .string(dimension.name())
         .i64(0) // hashed seed
-        .u8(mode)
-        .i8(-1) // previous game mode: none
+        .varint(i32::from(mode))
+        .varint(0) // previous game mode: none
         .bool(false) // debug world
         .bool(true) // flat world
         .bool(false) // no death location
@@ -1804,13 +1796,11 @@ fn spawn_player(id: i32, p: &Player) -> [Writer; 2] {
             .f64(p.pos[0])
             .f64(p.pos[1])
             .f64(p.pos[2])
+            .lp_vec3([0.0, 0.0, 0.0])
             .u8(angle(p.pitch))
             .u8(angle(p.yaw))
             .u8(angle(p.yaw)) // head yaw
-            .varint(0) // entity data
-            .i16(0)
-            .i16(0)
-            .i16(0), // velocity
+            .varint(0), // entity data
         Writer::packet(clientbound::ROTATE_HEAD)
             .varint(id)
             .u8(angle(p.yaw)),

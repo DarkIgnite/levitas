@@ -8,14 +8,17 @@ use std::path::{Path, PathBuf};
 
 use serde_json::Value;
 
-const VERSION: &str = "1.21.8";
+const VERSION: &str = "26.3";
 
 /// Data-driven registries the client expects during the configuration phase.
 const SYNCED_REGISTRIES: &[&str] = &[
     "banner_pattern",
+    "cat_sound_variant",
     "cat_variant",
     "chat_type",
+    "chicken_sound_variant",
     "chicken_variant",
+    "cow_sound_variant",
     "cow_variant",
     "damage_type",
     "dialog",
@@ -25,14 +28,19 @@ const SYNCED_REGISTRIES: &[&str] = &[
     "instrument",
     "jukebox_song",
     "painting_variant",
+    "pig_sound_variant",
     "pig_variant",
+    "sulfur_cube_archetype",
     "test_environment",
     "test_instance",
+    "timeline",
     "trim_material",
     "trim_pattern",
     "wolf_sound_variant",
     "wolf_variant",
+    "world_clock",
     "worldgen/biome",
+    "zombie_nautilus_variant",
 ];
 
 fn main() {
@@ -102,6 +110,14 @@ fn main() {
     embed_json_dir(
         &data,
         &out_dir,
+        "predicate",
+        "PREDICATES_JSON",
+        "Named loot predicates as JSON (`minecraft:tool/can_silk_touch`, ...).",
+        &mut out,
+    );
+    embed_json_dir(
+        &data,
+        &out_dir,
         "painting_variant",
         "PAINTING_VARIANTS_JSON",
         "Painting variants as JSON: their size and picture.",
@@ -150,6 +166,65 @@ const PLACED_UNDER_ANOTHER_NAME: &[(&str, &str)] = &[
     ("minecraft:redstone", "minecraft:redstone_wire"),
     ("minecraft:string", "minecraft:tripwire"),
 ];
+
+/// For a block minecraft-data has no row for yet (it trails the game: 26.1's tables serve
+/// 26.3), the older blocks to take its hardness, light and tool needs from, and its
+/// collision shapes from (one with the very same properties): `(material, shape)`.
+fn stand_in(name: &str) -> (String, String) {
+    let short = name.strip_prefix("minecraft:").unwrap_or(name);
+    // The poplar wood set is built like oak's.
+    if short.contains("poplar") {
+        let oak = if short.ends_with("_poplar_leaves") {
+            "oak_leaves".to_owned()
+        } else {
+            short.replace("poplar", "oak")
+        };
+        return (oak.clone(), oak);
+    }
+    for (suffix, shape) in [
+        ("_stairs", "oak_stairs"),
+        ("_slab", "oak_slab"),
+        ("_wall", "cobblestone_wall"),
+    ] {
+        if let Some(base) = short.strip_suffix(suffix) {
+            // Wool and concrete stairs and slabs are as soft or hard as their block;
+            // the sulfur and cinnabar families are stone-like.
+            let material = if base.ends_with("_wool") || base.ends_with("_concrete") {
+                base.to_owned()
+            } else {
+                "stone".to_owned()
+            };
+            return (material, shape.to_owned());
+        }
+    }
+    let same = |b: &str| (b.to_owned(), b.to_owned());
+    match short {
+        "sulfur_spike" => same("pointed_dripstone"),
+        "red_shrub" => same("dead_bush"),
+        "shelf_mushroom" => same("brown_mushroom"),
+        "straw_bed" => same("white_bed"),
+        _ => same("stone"),
+    }
+}
+
+/// Every item's default components, by item name. 26.x reports them one file per item
+/// under `reports/minecraft/components/item/`; older versions in one `items.json`.
+fn item_components(data: &Path) -> Value {
+    let one_file = data.join("reports/items.json");
+    if one_file.exists() {
+        return read_json(&one_file);
+    }
+    let dir = data.join("reports/minecraft/components/item");
+    let mut all = serde_json::Map::new();
+    for entry in fs::read_dir(&dir).unwrap_or_else(|e| panic!("{}: {e}", dir.display())) {
+        let path = entry.unwrap().path();
+        if path.extension().is_some_and(|e| e == "json") {
+            let name = path.file_stem().unwrap().to_string_lossy();
+            all.insert(format!("minecraft:{name}"), read_json(&path));
+        }
+    }
+    Value::Object(all)
+}
 
 fn read_json(path: &Path) -> Value {
     let text = fs::read_to_string(path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
@@ -258,7 +333,10 @@ fn blocks(data: &Path, out: &mut String) -> HashMap<String, u64> {
             .iter()
             .map(|(k, values)| format!("({k:?}, &{values:?})"))
             .collect();
-        let e = &extra[name];
+        let e = extra
+            .get(name)
+            .or_else(|| extra.get(&format!("minecraft:{}", stand_in(name).0)))
+            .unwrap_or_else(|| panic!("no hardness for {name}, and no stand-in"));
         rows[block_id as usize] = format!(
             "BlockInfo {{ name: {name:?}, first_state: {first}, default_state: {default}, \
              properties: &[{}], hardness: {:?}, resistance: {:?}, light_emission: {}, \
@@ -311,9 +389,20 @@ fn shapes(data: &Path, blocks: &Value, state_count: usize, out: &mut String) {
             .unwrap();
         for state in states {
             let id = state["id"].as_u64().unwrap();
-            state_shape[id as usize] = match &collision["blocks"][short] {
-                Value::Array(per_state) => per_state[(id - first) as usize].as_u64().unwrap(),
-                one => one.as_u64().unwrap(),
+            let source = if collision["blocks"].get(short).is_some() {
+                short.to_owned()
+            } else {
+                stand_in(name).1
+            };
+            state_shape[id as usize] = match &collision["blocks"][&source] {
+                Value::Array(per_state) => per_state
+                    .get((id - first) as usize)
+                    .or(per_state.first())
+                    .and_then(Value::as_u64)
+                    .unwrap_or_else(|| panic!("no shape for {name}")),
+                one => one
+                    .as_u64()
+                    .unwrap_or_else(|| panic!("no shape for {name} (stand-in {source})")),
             };
         }
     }
@@ -488,7 +577,7 @@ pub static NAMES: &[&str] = &[{}];",
         ids
     };
 
-    let components = read_json(&data.join("reports/items.json"));
+    let components = item_components(data);
     out.push_str(
         "/// Every item, indexed by item registry ID.\npub static ITEMS: &[ItemInfo] = &[\n",
     );

@@ -411,12 +411,10 @@ impl World {
         self.broadcast(
             Writer::packet(clientbound::ENTITY_POSITION_SYNC)
                 .varint(dragon.id)
+                .varint(0) // a linear path
                 .f64(dragon.pos[0])
                 .f64(dragon.pos[1])
                 .f64(dragon.pos[2])
-                .f64(dragon.vel[0])
-                .f64(dragon.vel[1])
-                .f64(dragon.vel[2])
                 .f32(dragon.yaw)
                 .f32(dragon.pitch)
                 .bool(false),
@@ -697,13 +695,11 @@ fn spawn(id: i32, kind: i32, pos: [f64; 3], yaw: f32, pitch: f32) -> Writer {
         .f64(pos[0])
         .f64(pos[1])
         .f64(pos[2])
+        .lp_vec3([0.0, 0.0, 0.0])
         .u8(angle(pitch))
         .u8(angle(yaw))
         .u8(angle(yaw))
         .varint(0)
-        .i16(0)
-        .i16(0)
-        .i16(0)
 }
 
 fn health_data(id: i32, health: f32) -> Writer {

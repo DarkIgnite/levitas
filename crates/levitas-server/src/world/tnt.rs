@@ -39,7 +39,6 @@ impl PrimedTnt {
 
 /// The packets that show a primed TNT to a player.
 pub fn spawn_packets(id: i32, tnt: &PrimedTnt) -> [Writer; 2] {
-    let vel = |v: f64| (v.clamp(-3.9, 3.9) * 8000.0) as i16;
     [
         Writer::packet(clientbound::ADD_ENTITY)
             .varint(id)
@@ -48,13 +47,11 @@ pub fn spawn_packets(id: i32, tnt: &PrimedTnt) -> [Writer; 2] {
             .f64(tnt.pos[0])
             .f64(tnt.pos[1])
             .f64(tnt.pos[2])
+            .lp_vec3([tnt.vel[0], tnt.vel[1], tnt.vel[2]])
             .u8(0)
             .u8(0)
             .u8(0)
-            .varint(0)
-            .i16(vel(tnt.vel[0]))
-            .i16(vel(tnt.vel[1]))
-            .i16(vel(tnt.vel[2])),
+            .varint(0),
         Writer::packet(clientbound::SET_ENTITY_DATA)
             .varint(id)
             .u8(DATA_FUSE)
@@ -147,12 +144,10 @@ impl World {
                 self.broadcast(
                     Writer::packet(clientbound::ENTITY_POSITION_SYNC)
                         .varint(id)
+                        .varint(0) // a linear path
                         .f64(tnt.pos[0])
                         .f64(tnt.pos[1])
                         .f64(tnt.pos[2])
-                        .f64(tnt.vel[0])
-                        .f64(tnt.vel[1])
-                        .f64(tnt.vel[2])
                         .f32(0.0)
                         .f32(0.0)
                         .bool(on_ground),

@@ -73,7 +73,6 @@ impl ItemEntity {
 
 pub fn spawn_packets(id: i32, item: &ItemEntity) -> [Writer; 2] {
     // Velocity is sent in 1/8000 blocks per tick.
-    let vel = |v: f64| (v.clamp(-3.9, 3.9) * 8000.0) as i16;
     [
         Writer::packet(clientbound::ADD_ENTITY)
             .varint(id)
@@ -82,13 +81,11 @@ pub fn spawn_packets(id: i32, item: &ItemEntity) -> [Writer; 2] {
             .f64(item.pos[0])
             .f64(item.pos[1])
             .f64(item.pos[2])
+            .lp_vec3([item.vel[0], item.vel[1], item.vel[2]])
             .u8(0)
             .u8(0)
             .u8(0) // pitch, yaw, head yaw
-            .varint(0) // entity data
-            .i16(vel(item.vel[0]))
-            .i16(vel(item.vel[1]))
-            .i16(vel(item.vel[2])),
+            .varint(0), // entity data
         item_data(id, item.stack),
     ]
 }

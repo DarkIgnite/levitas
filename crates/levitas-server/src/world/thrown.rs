@@ -82,7 +82,6 @@ enum Hit {
 }
 
 fn spawn_packet(id: i32, t: &Thrown) -> Writer {
-    let v = |x: f64| (x.clamp(-3.9, 3.9) * 8000.0) as i16;
     Writer::packet(clientbound::ADD_ENTITY)
         .varint(id)
         .uuid(id as u128)
@@ -90,13 +89,11 @@ fn spawn_packet(id: i32, t: &Thrown) -> Writer {
         .f64(t.pos[0])
         .f64(t.pos[1])
         .f64(t.pos[2])
+        .lp_vec3([t.vel[0], t.vel[1], t.vel[2]])
         .u8(0)
         .u8(0)
         .u8(0)
         .varint(t.thrower)
-        .i16(v(t.vel[0]))
-        .i16(v(t.vel[1]))
-        .i16(v(t.vel[2]))
 }
 
 /// The thrown item, which the client draws (data index 8, an item stack).

@@ -225,10 +225,11 @@ async fn login(conn: &mut Conn, protocol: i32) -> io::Result<Option<Profile>> {
         conn.compressed = true;
     }
 
+    // The game profile, then an ID for the session.
     let mut packet = Writer::packet(login_ids::clientbound::LOGIN_FINISHED)
         .uuid(uuid)
         .string(&name);
-    packet = write_properties(packet, &properties);
+    packet = write_properties(packet, &properties).uuid(auth::session_id());
     conn.send(packet).await?;
     let packet = conn.read().await?;
     expect_id(

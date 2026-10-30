@@ -43,7 +43,6 @@ enum Hit {
 }
 
 fn spawn_packet(id: i32, f: &Fireball) -> Writer {
-    let v = |x: f64| (x.clamp(-3.9, 3.9) * 8000.0) as i16;
     Writer::packet(clientbound::ADD_ENTITY)
         .varint(id)
         .uuid(id as u128)
@@ -55,13 +54,11 @@ fn spawn_packet(id: i32, f: &Fireball) -> Writer {
         .f64(f.pos[0])
         .f64(f.pos[1])
         .f64(f.pos[2])
+        .lp_vec3([f.vel[0], f.vel[1], f.vel[2]])
         .u8(0)
         .u8(0)
         .u8(0)
         .varint(f.shooter)
-        .i16(v(f.vel[0]))
-        .i16(v(f.vel[1]))
-        .i16(v(f.vel[2]))
 }
 
 fn normalized(v: [f64; 3]) -> [f64; 3] {
@@ -155,12 +152,10 @@ impl World {
                 self.broadcast(
                     Writer::packet(clientbound::ENTITY_POSITION_SYNC)
                         .varint(id)
+                        .varint(0) // a linear path
                         .f64(f.pos[0])
                         .f64(f.pos[1])
                         .f64(f.pos[2])
-                        .f64(f.vel[0])
-                        .f64(f.vel[1])
-                        .f64(f.vel[2])
                         .f32(0.0)
                         .f32(0.0)
                         .bool(false),

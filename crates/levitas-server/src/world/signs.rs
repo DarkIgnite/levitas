@@ -307,7 +307,7 @@ impl World {
 fn open_editor(pos: BlockPos, front: bool) -> Writer {
     Writer::packet(clientbound::OPEN_SIGN_EDITOR)
         .position(pos)
-        .bool(front)
+        .varint(if front { 0 } else { 1 }) // the text slot
 }
 
 #[cfg(test)]
@@ -449,9 +449,10 @@ mod tests {
 
     #[test]
     fn the_front_is_where_the_text_faces() {
-        let sign = BlockInfo::by_name("minecraft:oak_sign")
+        let base = BlockInfo::by_name("minecraft:oak_sign")
             .unwrap()
             .default_state;
+        let sign = blocks::with(base, "rotation", "0");
         // Rotation 0: the text faces south.
         let pos = BlockPos::new(0, 0, 0);
         assert!(front_faces(sign, pos, [0.5, 1.0, 3.0]));

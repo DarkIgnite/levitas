@@ -1,7 +1,9 @@
 //! Chunk columns: 24 sections of 16x16x16 blocks spanning y = -64..320.
 
 use levitas_protocol::varint;
-use levitas_registry::block;
+use std::sync::OnceLock;
+
+use levitas_registry::{block, BlockInfo, BLOCK_STATE_COUNT};
 
 use crate::light::ChunkLight;
 use crate::paletted::{Kind, PalettedContainer};
@@ -49,10 +51,37 @@ pub fn is_air(state: u16) -> bool {
     matches!(state, block::AIR | block::CAVE_AIR | block::VOID_AIR)
 }
 
+/// Whether a block state holds a fluid: water or lava themselves, anything
+/// waterlogged, and plants that only grow under water.
+pub fn holds_fluid(state: u16) -> bool {
+    static FLUID: OnceLock<Vec<bool>> = OnceLock::new();
+    let table = FLUID.get_or_init(|| {
+        (0..BLOCK_STATE_COUNT)
+            .map(|s| {
+                let s = s as u16;
+                let info = BlockInfo::of(s);
+                matches!(
+                    info.name,
+                    "minecraft:water"
+                        | "minecraft:lava"
+                        | "minecraft:bubble_column"
+                        | "minecraft:kelp"
+                        | "minecraft:kelp_plant"
+                        | "minecraft:seagrass"
+                        | "minecraft:tall_seagrass"
+                ) || info.property(s, "waterlogged") == Some("true")
+            })
+            .collect()
+    });
+    table.get(usize::from(state)).copied().unwrap_or(false)
+}
+
 #[derive(Debug, Clone)]
 pub struct Section {
     /// Non-air blocks, sent to the client so it can skip empty sections.
     block_count: i16,
+    /// Blocks holding a fluid, which the client is told too.
+    fluid_count: i16,
     blocks: PalettedContainer,
     biomes: PalettedContainer,
 }
@@ -61,6 +90,7 @@ impl Section {
     pub fn empty(biome: u16, biome_kind: Kind) -> Self {
         Self {
             block_count: 0,
+            fluid_count: 0,
             blocks: PalettedContainer::single(Kind::blocks(), block::AIR),
             biomes: PalettedContainer::single(biome_kind, biome),
         }
@@ -69,8 +99,10 @@ impl Section {
     /// A section from its block and biome containers.
     pub fn from_parts(blocks: PalettedContainer, biomes: PalettedContainer) -> Self {
         let block_count = blocks.values().iter().filter(|&&s| !is_air(s)).count() as i16;
+        let fluid_count = blocks.values().iter().filter(|&&s| holds_fluid(s)).count() as i16;
         Self {
             block_count,
+            fluid_count,
             blocks,
             biomes,
         }
@@ -100,11 +132,13 @@ impl Section {
     pub fn set(&mut self, x: usize, y: usize, z: usize, state: u16) -> u16 {
         let old = self.blocks.set(Self::index(x, y, z), state);
         self.block_count += i16::from(!is_air(state)) - i16::from(!is_air(old));
+        self.fluid_count += i16::from(holds_fluid(state)) - i16::from(holds_fluid(old));
         old
     }
 
     fn encode(&self, out: &mut Vec<u8>) {
         out.extend_from_slice(&self.block_count.to_be_bytes());
+        out.extend_from_slice(&self.fluid_count.to_be_bytes());
         self.blocks.encode(out);
         self.biomes.encode(out);
     }

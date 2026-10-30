@@ -230,17 +230,20 @@ impl World {
         ];
         self.broadcast(
             Writer::packet(clientbound::LEVEL_PARTICLES)
+                .varint(particle::SWEEP_ATTACK)
                 .bool(false) // override limiter
                 .bool(false) // always show
-                .f64(at[0])
+                .f64(at[0] + away[0] * 0.5)
                 .f64(at[1])
-                .f64(at[2])
-                .f32(away[0] as f32)
+                .f64(at[2] + away[1] * 0.5)
                 .f32(0.0)
-                .f32(away[1] as f32)
-                .f32(0.0) // speed
-                .i32(0) // count: the offset is the direction
-                .varint(particle::SWEEP_ATTACK),
+                .f32(0.0)
+                .f32(0.0) // no spread
+                .f32(0.0)
+                .f32(0.0)
+                .f32(0.0) // no speed
+                .varint(1)
+                .varint(0), // default randomization
             None,
         );
     }

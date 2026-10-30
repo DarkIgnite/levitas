@@ -21,7 +21,7 @@ const DATA_VARIANT: u8 = 9;
 const SERIALIZER_VARINT: i32 = 1;
 const SERIALIZER_ITEM: i32 = 7;
 const SERIALIZER_DIRECTION: i32 = 12;
-const SERIALIZER_PAINTING: i32 = 30;
+const SERIALIZER_PAINTING: i32 = 34;
 /// Ticks between checks that hanging things still have their wall.
 const SUPPORT_CHECK_TICKS: u64 = 20;
 
@@ -271,13 +271,11 @@ pub fn spawn_packets(id: i32, h: &Hanging) -> Vec<Writer> {
         .f64(f64::from(h.block.x))
         .f64(f64::from(h.block.y))
         .f64(f64::from(h.block.z))
+        .lp_vec3([0.0, 0.0, 0.0])
         .u8(0)
         .u8(0)
         .u8(0)
-        .varint(dir_id(h.facing))
-        .i16(0)
-        .i16(0)
-        .i16(0);
+        .varint(dir_id(h.facing));
     let data = Writer::packet(clientbound::SET_ENTITY_DATA)
         .varint(id)
         .u8(DATA_DIRECTION)

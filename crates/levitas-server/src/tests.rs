@@ -1418,7 +1418,11 @@ async fn day_time_until(client: &mut TcpStream, want: impl Fn(i64) -> bool) -> i
     loop {
         let body = read_until(client, play::clientbound::SET_TIME).await;
         let mut r = Reader::new(&body);
-        let (_game_time, day_time) = (r.i64().unwrap(), r.i64().unwrap());
+        // The world's age, then the clocks; the overworld's comes first.
+        let _game_time = r.i64().unwrap();
+        assert!(r.varint().unwrap() >= 1, "no clocks");
+        let _clock = r.varint().unwrap();
+        let day_time = r.varlong().unwrap();
         if want(day_time) {
             return day_time;
         }
@@ -1465,7 +1469,7 @@ async fn sleeping_through_the_night_and_respawning_at_the_bed() {
         let body = read_until(&mut alice, play::clientbound::SET_ENTITY_DATA).await;
         let mut r = Reader::new(&body);
         r.varint().unwrap();
-        if (r.u8().unwrap(), r.varint().unwrap(), r.varint().unwrap()) == (6, 21, 2) {
+        if (r.u8().unwrap(), r.varint().unwrap(), r.varint().unwrap()) == (6, 20, 2) {
             break;
         }
     }
@@ -1601,11 +1605,16 @@ async fn spawned(client: &mut TcpStream, kind: i32) -> i32 {
     }
 }
 
+/// A right-click (`kind` 0) or an attack (`kind` 1) on an entity.
 fn interact(target: i32, kind: i32) -> Writer {
-    let packet = Writer::packet(play::serverbound::INTERACT)
+    if kind == 1 {
+        return Writer::packet(play::serverbound::ATTACK).varint(target);
+    }
+    Writer::packet(play::serverbound::INTERACT)
         .varint(target)
-        .varint(kind);
-    if kind == 0 { packet.varint(0) } else { packet }.bool(false)
+        .varint(0) // main hand
+        .lp_vec3([0.0, 1.0, 0.0])
+        .bool(false)
 }
 
 /// Reads dropped item data until an item accepted by `want` shows up.

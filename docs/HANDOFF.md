@@ -33,8 +33,13 @@ together with [ROADMAP.md](ROADMAP.md), [ARCHITECTURE.md](ARCHITECTURE.md),
 
 ## Migrating to 26.3
 
-The next piece of work, before any feature. The checklist is in
-[ROADMAP.md](ROADMAP.md#migration-to-263). What to know going in:
+The current piece of work, before any feature. The checklist is in
+[ROADMAP.md](ROADMAP.md#migration-to-263). Done: data, protocol 777, entity data, chunk
+sections (fluid count), synced registries, loot and recipe formats, biome spawn lists
+(now the `minecraft:gameplay/natural_mob_spawns` attribute); all tests pass. Left: saved
+data, game rules, the new blocks' own behaviour, and a check in a real 26.3 client.
+26.3 wiki revisions used: packets `oldid=3868170`, entity metadata `oldid=3792654`, data
+types `oldid=3855787`, chunk format `oldid=3661930`. What to know going in:
 
 - **Data first.** Point `tools/datagen.py` at 26.3, regenerate `generated/26.3`, and point
   `levitas-registry`'s `build.rs` there. Packet IDs, block states, items, registries,

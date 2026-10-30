@@ -28,8 +28,9 @@ needs, with a plugin API for survival-economy servers on top.
 > the Nether and the End to fight the dragon. Raids, minecarts and plugins are still to
 > come. Overall progress: **about 66%** of the [roadmap](docs/ROADMAP.md).
 >
-> **Moving to 26.3.** The target is now Minecraft 26.3. Until the migration is done, the
-> server still speaks 1.21.8 and needs a 1.21.8 client.
+> **Moving to 26.3.** The server now speaks 26.3 (protocol 777). The rest of the
+> [migration](docs/ROADMAP.md#migration-to-263) (saved data, new blocks, a check in a real
+> client) is under way.
 
 ## Progress
 
@@ -85,9 +86,7 @@ full list.
    separate server folder (`../levitas-server`) with a `start.bat`.
 2. Start `levitas` (or `start.bat`). It listens on `127.0.0.1:25565`; pass another
    address as the first argument to change it.
-3. Join with a Minecraft client of the version the server speaks. The target is
-   **26.3**; until the [migration](docs/ROADMAP.md#migration-to-263) is done, builds still
-   speak **1.21.8**, so join with a 1.21.8 client for now. Set `online-mode=true` in
+3. Join with a Minecraft **26.3** client. Set `online-mode=true` in
    `server.properties` before opening the server to others.
 4. Stop the server with **Ctrl-C**: it saves the world before exiting (it also saves
    every five minutes).
@@ -109,7 +108,6 @@ and Java 21+ for the one-time data generation step.
 
 ```sh
 # Downloads the official server.jar and runs its data generator into generated/
-# (1.21.8 until the migration to 26.3 lands)
 python tools/datagen.py
 cargo build --release
 cargo run --release -p levitas-server

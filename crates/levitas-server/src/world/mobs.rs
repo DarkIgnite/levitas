@@ -34,8 +34,8 @@ const REACH: f64 = 6.0;
 /// Chance per chunk generation attempt of an animal group, unless the biome says.
 const DEFAULT_CREATURE_PROBABILITY: f64 = 0.1;
 
-const DATA_SHEEP_WOOL: u8 = 17;
-const DATA_SLIME_SIZE: u8 = 16;
+const DATA_SHEEP_WOOL: u8 = 18;
+const DATA_SLIME_SIZE: u8 = 18;
 const SERIALIZER_INT: i32 = 1;
 /// How long an enderman stays angry after being looked at or hit.
 pub const ENDERMAN_ANGER: u32 = 600;
@@ -484,13 +484,11 @@ impl Mob {
             .f64(self.pos[0])
             .f64(self.pos[1])
             .f64(self.pos[2])
+            .lp_vec3([0.0, 0.0, 0.0])
             .u8(0)
             .u8(angle(self.yaw))
             .u8(angle(self.head_yaw))
-            .varint(0)
-            .i16(0)
-            .i16(0)
-            .i16(0)];
+            .varint(0)];
         if self.kind == MobKind::Sheep {
             packets.push(self.wool_data(id));
         }
@@ -709,11 +707,20 @@ fn spawners(list: &Value) -> Vec<Spawner> {
         .into_iter()
         .flatten()
         .filter_map(|s| {
+            // A group size is a number or a uniform range.
+            let count = &s["count"];
+            let (min, max) = match count.as_u64() {
+                Some(n) => (n, n),
+                None => (
+                    count["min_inclusive"].as_u64()?,
+                    count["max_inclusive"].as_u64()?,
+                ),
+            };
             Some(Spawner {
                 kind: MobKind::from_name(s["type"].as_str()?)?,
                 weight: s["weight"].as_u64()? as u32,
-                min: s["minCount"].as_u64()? as u32,
-                max: s["maxCount"].as_u64()? as u32,
+                min: min as u32,
+                max: max as u32,
             })
         })
         .collect()
@@ -745,12 +752,16 @@ impl BiomeSpawns {
         let by_biome = biomes
             .into_iter()
             .map(|(name, biome)| {
+                let attributes = &biome["attributes"];
+                let spawns = &attributes["minecraft:gameplay/natural_mob_spawns"]["argument"]
+                    ["spawns_by_category"];
                 let list = SpawnList {
-                    creature_probability: biome["creature_spawn_probability"]
+                    creature_probability: attributes
+                        ["minecraft:gameplay/creature_world_gen_spawn_probability"]
                         .as_f64()
                         .unwrap_or(DEFAULT_CREATURE_PROBABILITY),
-                    creatures: spawners(&biome["spawners"]["creature"]),
-                    monsters: spawners(&biome["spawners"]["monster"]),
+                    creatures: spawners(&spawns["creature"]),
+                    monsters: spawners(&spawns["monster"]),
                 };
                 (name, list)
             })
@@ -1351,22 +1362,20 @@ impl World {
                     }
                     Writer::packet(clientbound::MOVE_ENTITY_POS_ROT)
                         .varint(id)
+                        .varint(i32::from(mob.on_ground)) // on the ground; no steps
                         .i16(delta[0] as i16)
                         .i16(delta[1] as i16)
                         .i16(delta[2] as i16)
                         .u8(angles.0)
                         .u8(0)
-                        .bool(mob.on_ground)
                 } else {
                     mob.sent_pos = mob.pos;
                     Writer::packet(clientbound::ENTITY_POSITION_SYNC)
                         .varint(id)
+                        .varint(0) // a linear path
                         .f64(mob.pos[0])
                         .f64(mob.pos[1])
                         .f64(mob.pos[2])
-                        .f64(0.0)
-                        .f64(0.0)
-                        .f64(0.0)
                         .f32(mob.yaw)
                         .f32(0.0)
                         .bool(mob.on_ground)
@@ -1377,9 +1386,9 @@ impl World {
                     &mob,
                     Writer::packet(clientbound::MOVE_ENTITY_ROT)
                         .varint(id)
+                        .bool(mob.on_ground)
                         .u8(angles.0)
-                        .u8(0)
-                        .bool(mob.on_ground),
+                        .u8(0),
                 );
             }
             if angles.1 != mob.sent_angles.1 {

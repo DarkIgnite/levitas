@@ -216,12 +216,10 @@ impl World {
                 self.broadcast(
                     Writer::packet(clientbound::ENTITY_POSITION_SYNC)
                         .varint(id)
+                        .varint(0) // a linear path
                         .f64(orb.pos[0])
                         .f64(orb.pos[1])
                         .f64(orb.pos[2])
-                        .f64(orb.vel[0])
-                        .f64(orb.vel[1])
-                        .f64(orb.vel[2])
                         .f32(0.0)
                         .f32(0.0)
                         .bool(false),
@@ -286,7 +284,6 @@ impl World {
 }
 
 fn orb_packets(id: i32, orb: &XpOrb) -> [Writer; 2] {
-    let v = |x: f64| (x.clamp(-3.9, 3.9) * 8000.0) as i16;
     [
         Writer::packet(clientbound::ADD_ENTITY)
             .varint(id)
@@ -295,13 +292,11 @@ fn orb_packets(id: i32, orb: &XpOrb) -> [Writer; 2] {
             .f64(orb.pos[0])
             .f64(orb.pos[1])
             .f64(orb.pos[2])
+            .lp_vec3([orb.vel[0], orb.vel[1], orb.vel[2]])
             .u8(0)
             .u8(0)
             .u8(0)
-            .varint(0)
-            .i16(v(orb.vel[0]))
-            .i16(v(orb.vel[1]))
-            .i16(v(orb.vel[2])),
+            .varint(0),
         Writer::packet(clientbound::SET_ENTITY_DATA)
             .varint(id)
             .u8(DATA_ORB_VALUE)

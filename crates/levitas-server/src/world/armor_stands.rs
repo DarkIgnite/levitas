@@ -132,13 +132,11 @@ pub fn spawn_packets(id: i32, stand: &ArmorStand) -> Vec<Writer> {
         .f64(stand.pos[0])
         .f64(stand.pos[1])
         .f64(stand.pos[2])
+        .lp_vec3([0.0, 0.0, 0.0])
         .u8(0)
         .u8(angle)
         .u8(angle)
-        .varint(0)
-        .i16(0)
-        .i16(0)
-        .i16(0)];
+        .varint(0)];
     packets.push(equipment_packet(id, stand));
     packets
 }
@@ -358,12 +356,10 @@ impl World {
                 stand.sent_pos = stand.pos;
                 let sync = Writer::packet(clientbound::ENTITY_POSITION_SYNC)
                     .varint(id)
+                    .varint(0) // a linear path
                     .f64(stand.pos[0])
                     .f64(stand.pos[1])
                     .f64(stand.pos[2])
-                    .f64(0.0)
-                    .f64(0.0)
-                    .f64(0.0)
                     .f32(stand.yaw)
                     .f32(0.0)
                     .bool(false);

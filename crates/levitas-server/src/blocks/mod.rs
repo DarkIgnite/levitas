@@ -584,7 +584,7 @@ pub fn chest_partner(state: u16, pos: BlockPos) -> Option<BlockPos> {
 /// Whether this block falls with gravity when unsupported from below.
 pub fn is_gravity_block(state: u16) -> bool {
     block_has_tag(state, "minecraft:sand")
-        || block_has_tag(state, "minecraft:concrete_powder")
+        || block_has_tag(state, "minecraft:concrete_powders")
         || block_has_tag(state, "minecraft:anvil")
         || matches!(
             name(state),
@@ -625,7 +625,7 @@ pub fn concrete_from_powder(state: u16) -> Option<u16> {
 /// Hardens concrete powder into concrete if it touches water on any horizontal side,
 /// from above, or inside itself.
 pub fn concrete_hardens(state: u16, pos: BlockPos, get: &mut impl FnMut(BlockPos) -> u16) -> u16 {
-    if !block_has_tag(state, "minecraft:concrete_powder") {
+    if !block_has_tag(state, "minecraft:concrete_powders") {
         return state;
     }
     if fluid::fluid_at(state).is_some_and(|f| f.fluid == fluid::Fluid::Water) {

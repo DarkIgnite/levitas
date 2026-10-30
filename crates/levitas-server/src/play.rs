@@ -22,9 +22,6 @@ const INPUT_SNEAK: u8 = 0x20;
 const PLAYER_COMMAND_LEAVE_BED: i32 = 0;
 /// Most components read from one creative-mode item.
 const MAX_COMPONENTS: i32 = 64;
-const INTERACT_USE: i32 = 0;
-const INTERACT_AT: i32 = 2;
-const INTERACT_ATTACK: i32 = 1;
 const PLAYER_COMMAND_START_SPRINTING: i32 = 1;
 const PLAYER_COMMAND_STOP_SPRINTING: i32 = 2;
 
@@ -268,11 +265,12 @@ fn decode(id: i32, packet: &[u8]) -> io::Result<Option<Event>> {
         },
         serverbound::SIGN_UPDATE => {
             let pos = r.position()?;
-            let front = r.bool()?;
             let mut lines: [String; 4] = Default::default();
             for line in &mut lines {
                 *line = r.string(384)?.to_owned();
             }
+            // The text slot: 0 is the front.
+            let front = r.varint()? == 0;
             Event::SignUpdate {
                 id,
                 pos,
@@ -303,25 +301,19 @@ fn decode(id: i32, packet: &[u8]) -> io::Result<Option<Event>> {
         },
         serverbound::INTERACT => {
             let target = r.varint()?;
-            match r.varint()? {
-                INTERACT_ATTACK => Event::Attack { id, target },
-                INTERACT_USE => Event::UseEntity {
-                    id,
-                    target,
-                    hand: r.varint()?,
-                },
-                INTERACT_AT => {
-                    let at = [r.f32()?, r.f32()?, r.f32()?];
-                    Event::UseEntityAt {
-                        id,
-                        target,
-                        at,
-                        hand: r.varint()?,
-                    }
-                }
-                _ => return Ok(None),
+            let hand = r.varint()?;
+            let at = r.lp_vec3()?;
+            Event::UseEntityAt {
+                id,
+                target,
+                hand,
+                at,
             }
         }
+        serverbound::ATTACK => Event::Attack {
+            id,
+            target: r.varint()?,
+        },
         serverbound::PLAYER_COMMAND => {
             let _entity = r.varint()?;
             match r.varint()? {
@@ -338,10 +330,8 @@ fn decode(id: i32, packet: &[u8]) -> io::Result<Option<Event>> {
             }
         }
         serverbound::SET_CARRIED_ITEM => Event::HeldSlot { id, slot: r.i16()? },
-        serverbound::SWING => Event::Swing {
-            id,
-            hand: r.varint()?,
-        },
+        // A punch swings the main hand.
+        serverbound::PUNCH => Event::Swing { id, hand: 0 },
         serverbound::CHAT => Event::Chat {
             id,
             message: r.string(256)?.to_owned(),

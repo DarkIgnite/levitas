@@ -26,7 +26,6 @@ pub struct FallingBlock {
 }
 
 pub fn spawn_packet(id: i32, falling: &FallingBlock) -> Writer {
-    let vel = |v: f64| (v.clamp(-3.9, 3.9) * 8000.0) as i16;
     Writer::packet(clientbound::ADD_ENTITY)
         .varint(id)
         .uuid(id as u128)
@@ -34,13 +33,11 @@ pub fn spawn_packet(id: i32, falling: &FallingBlock) -> Writer {
         .f64(falling.pos[0])
         .f64(falling.pos[1])
         .f64(falling.pos[2])
+        .lp_vec3([falling.vel[0], falling.vel[1], falling.vel[2]])
         .u8(0) // pitch
         .u8(0) // yaw
         .u8(0) // head yaw
         .varint(falling.state as i32) // entity data: block state ID
-        .i16(vel(falling.vel[0]))
-        .i16(vel(falling.vel[1]))
-        .i16(vel(falling.vel[2]))
 }
 
 fn next_anvil_state(state: u16) -> Option<u16> {
@@ -278,7 +275,7 @@ impl World {
                 let state = self.block(check_pos);
 
                 // Concrete powder solidifies as soon as it enters water.
-                if block_has_tag(falling.state, "minecraft:concrete_powder")
+                if block_has_tag(falling.state, "minecraft:concrete_powders")
                     && fluid::fluid_at(state).is_some_and(|f| f.fluid == Fluid::Water)
                 {
                     landed = Some((check_pos, true));

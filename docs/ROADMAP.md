@@ -11,27 +11,29 @@ The target version is **Minecraft: Java Edition 26.3** (protocol 777). It was 1.
 
 ## Migration to 26.3
 
-The current milestone: nothing else lands before it. Until it is done the server speaks
-1.21.8.
+The current milestone: nothing else lands before it. The server speaks 26.3 since the
+protocol items below landed; the rest is still open.
 
-- [ ] Data: `tools/datagen.py` downloads the 26.3 server.jar and generates
+- [x] Data: `tools/datagen.py` downloads the 26.3 server.jar and generates
       `generated/26.3`; `levitas-registry` builds from it; DataVersion taken from the
       jar's `version.json`
-- [ ] Protocol 777: handshake, status, login, configuration and play packets checked
+- [x] Protocol 777: handshake, status, login, configuration and play packets checked
       against the 26.3 protocol pages (packet IDs come from the data; field layouts by
       hand)
-- [ ] Entity data: every serializer ID and field index re-checked against the 26.3
+- [x] Entity data: every serializer ID and field index re-checked against the 26.3
       entity metadata page, with byte-level tests
-- [ ] Item components, chunk and light format, registries sent in configuration
+- [x] Item components, chunk and light format, registries sent in configuration
 - [ ] Saved data: `level.dat` (with `version_history`), chunks, entities and player data
       written as 26.3 writes them; 1.21.8 worlds (the owner's included) load and upgrade
-- [ ] Game rules, loot functions (`condition`), recipes and advancements as 26.3 has them
+- [x] Loot tables (`condition`, `modifier`, named predicates) and recipes as 26.3 has them
+- [ ] Game rules and advancements as 26.3 has them
 - [ ] Terrain: Pumpkin's 26.x blocks and biomes used as they are; drop the 1.21.8
       fallbacks (`older_name`) that are no longer needed
 - [ ] New 26.3 blocks behave (poplar wood set, red shrub, shelf mushroom, wool and
-      concrete stairs and slabs, straw beds, cushions)
-- [ ] Every end-to-end test passes against the new protocol; tried in a real 26.3
-      client
+      concrete stairs and slabs, straw beds, cushions); for now they borrow hardness and
+      shapes from a similar 1.21.8 block (`stand_in` in `levitas-registry/build.rs`)
+- [x] Every end-to-end test passes against the new protocol
+- [ ] Tried in a real 26.3 client
 
 ## Definition of done
 

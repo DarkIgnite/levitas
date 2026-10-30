@@ -180,13 +180,11 @@ pub fn spawn_packets(id: i32, cart: &Cart) -> Vec<Writer> {
         .f64(cart.pos[0])
         .f64(cart.pos[1])
         .f64(cart.pos[2])
+        .lp_vec3([0.0, 0.0, 0.0])
         .u8(0)
         .u8(0)
         .u8(0)
-        .varint(0)
-        .i16(0)
-        .i16(0)
-        .i16(0)];
+        .varint(0)];
     if let Some(rider) = cart.rider {
         packets.push(passengers(id, Some(rider)));
     }
@@ -204,12 +202,10 @@ fn passengers(cart: i32, rider: Option<i32>) -> Writer {
 fn position_sync(id: i32, cart: &Cart) -> Writer {
     Writer::packet(clientbound::ENTITY_POSITION_SYNC)
         .varint(id)
+        .varint(0) // a linear path
         .f64(cart.pos[0])
         .f64(cart.pos[1])
         .f64(cart.pos[2])
-        .f64(cart.vel[0])
-        .f64(cart.vel[1])
-        .f64(cart.vel[2])
         .f32(cart.yaw)
         .f32(0.0)
         .bool(true)

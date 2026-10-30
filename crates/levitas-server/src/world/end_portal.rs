@@ -37,13 +37,11 @@ fn eye_spawn(id: i32, eye: &EyeOfEnder) -> Writer {
         .f64(eye.pos[0])
         .f64(eye.pos[1])
         .f64(eye.pos[2])
+        .lp_vec3([0.0, 0.0, 0.0])
         .u8(0)
         .u8(0)
         .u8(0)
         .varint(0)
-        .i16(0)
-        .i16(0)
-        .i16(0)
 }
 
 impl World {
@@ -159,12 +157,10 @@ impl World {
             self.broadcast(
                 Writer::packet(clientbound::ENTITY_POSITION_SYNC)
                     .varint(id)
+                    .varint(0) // a linear path
                     .f64(eye.pos[0])
                     .f64(eye.pos[1])
                     .f64(eye.pos[2])
-                    .f64(step[0])
-                    .f64(rise)
-                    .f64(step[1])
                     .f32(0.0)
                     .f32(0.0)
                     .bool(false),
