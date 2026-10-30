@@ -1004,9 +1004,14 @@ async fn torches_light_up_their_surroundings() {
     let mut r = Reader::new(&body);
     r.varint().unwrap();
     r.varint().unwrap();
+    // A mask is its bytes, lowest bits first.
     let mut bitset = || {
-        let longs = r.varint().unwrap();
-        (0..longs).fold(0u64, |acc, _| acc | r.i64().unwrap() as u64)
+        let len = r.varint().unwrap() as usize;
+        let bytes = r.bytes(len).unwrap();
+        bytes
+            .iter()
+            .enumerate()
+            .fold(0u64, |acc, (i, &b)| acc | u64::from(b) << (8 * i))
     };
     let (_sky, block_lit) = (bitset(), bitset());
     let (_sky_dark, _block_dark) = (bitset(), bitset());

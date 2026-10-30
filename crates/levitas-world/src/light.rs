@@ -121,13 +121,12 @@ impl ChunkLight {
             }
             (lit, dark)
         };
+        // Since 26.x a mask is its bytes, lowest bits first, without the zero bytes
+        // at the high end, after their count.
         let bitset = |out: &mut Vec<u8>, bits: u64| {
-            if bits == 0 {
-                varint::write(out, 0);
-            } else {
-                varint::write(out, 1);
-                out.extend_from_slice(&bits.to_be_bytes());
-            }
+            let len = (64 - bits.leading_zeros()).div_ceil(8) as usize;
+            varint::write(out, len as i32);
+            out.extend_from_slice(&bits.to_le_bytes()[..len]);
         };
         let (sky_lit, sky_dark) = masks(&self.sky, sky);
         let (block_lit, block_dark) = masks(&self.block, block);
@@ -173,11 +172,34 @@ mod tests {
     fn full_sky_encoding_matches_the_old_constant() {
         let mut out = Vec::new();
         ChunkLight::full_sky().encode(&mut out, Span::OVERWORLD);
-        // Sky mask (1 long), empty block mask, empty sky-dark mask, block-dark mask (1 long),
-        // 26 sky arrays, no block arrays.
-        let header = 1 + 8 + 1 + 1 + 1 + 8;
+        // Sky mask (26 bits: 4 bytes), empty block mask, empty sky-dark mask, block-dark
+        // mask (4 bytes), 26 sky arrays, no block arrays.
+        assert_eq!(&out[..5], &[4, 0xFF, 0xFF, 0xFF, 0x03]);
+        assert_eq!(&out[5..12], &[0, 0, 4, 0xFF, 0xFF, 0xFF, 0x03]);
+        let header = 12;
         let arrays = 1 + LIGHT_SECTIONS * (2 + NIBBLE_BYTES) + 1;
         assert_eq!(out.len(), header + arrays);
         assert_eq!(out[header + 3], 0xFF);
+    }
+
+    #[test]
+    fn masks_are_written_as_26_3_writes_them() {
+        // A vanilla 26.3 server sent this header for a flat-world chunk: sky light in
+        // sections 0 to 2, block light nowhere, no sky-dark sections, block-dark 0 to 2.
+        let mut layers = ChunkLight::full_sky();
+        for (i, layer) in layers.sky.iter_mut().enumerate() {
+            if i >= 3 {
+                *layer = LightLayer::Uniform(0);
+            }
+        }
+        let mut out = Vec::new();
+        let range = Span::OVERWORLD.light();
+        layers.encode_sections(
+            &mut out,
+            0b111 << range.start,
+            0b111 << range.start,
+            Span::OVERWORLD,
+        );
+        assert_eq!(&out[..7], &[1, 0x07, 0, 0, 1, 0x07, 3]);
     }
 }

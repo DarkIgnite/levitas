@@ -39,7 +39,12 @@ sections (fluid count), synced registries, loot and recipe formats, biome spawn 
 (now the `minecraft:gameplay/natural_mob_spawns` attribute); all tests pass. Left: saved
 data, game rules, the new blocks' own behaviour, and a check in a real 26.3 client.
 26.3 wiki revisions used: packets `oldid=3868170`, entity metadata `oldid=3792654`, data
-types `oldid=3855787`, chunk format `oldid=3661930`. What to know going in:
+types `oldid=3855787`, chunk format `oldid=3661930`. Those pages lag behind 26.3 in two
+places a real client caught: light masks in chunk and light packets are now length-
+prefixed little-endian byte arrays (not longs), and the synced registries include
+`block_transformer`, `decorated_pot_pattern` and `worldgen/block_state_provider`. When
+the wiki and the client disagree, log in to a throwaway vanilla server (offline mode,
+whitelist off) and compare what it sends with what Levitas sends. What to know going in:
 
 - **Data first.** Point `tools/datagen.py` at 26.3, regenerate `generated/26.3`, and point
   `levitas-registry`'s `build.rs` there. Packet IDs, block states, items, registries,
