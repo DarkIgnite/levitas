@@ -30,6 +30,9 @@ pub struct Stack {
     pub potion: Option<u8>,
     /// A name given at an anvil (the `minecraft:custom_name` component).
     pub name: Option<&'static str>,
+    /// The colour of dyed leather armor, `0xRRGGBB` (the `minecraft:dyed_color`
+    /// component).
+    pub color: Option<i32>,
 }
 
 /// An armor trim: entries of the trim material and trim pattern registries.
@@ -77,18 +80,14 @@ impl Stack {
         trim: None,
         potion: None,
         name: None,
+        color: None,
     };
 
     pub fn new(item: i32, count: i32) -> Self {
         Self {
             item,
             count,
-            damage: 0,
-            enchants: Enchantments::NONE,
-            repair_cost: 0,
-            trim: None,
-            potion: None,
-            name: None,
+            ..Stack::EMPTY
         }
     }
 
@@ -110,6 +109,7 @@ impl Stack {
             && self.trim == other.trim
             && self.potion == other.potion
             && self.name == other.name
+            && self.color == other.color
     }
 
     pub fn is_empty(&self) -> bool {
@@ -153,6 +153,9 @@ impl Stack {
                 "minecraft:potion_contents",
                 Compound::new().with("potion", name),
             );
+        }
+        if let Some(color) = self.color {
+            components.insert("minecraft:dyed_color", color);
         }
         if let Some(trim) = self.trim {
             components.insert(
@@ -209,6 +212,9 @@ impl Stack {
             trim: components
                 .and_then(|c| c.compound("minecraft:trim"))
                 .and_then(|t| Trim::named(t.str("material")?, t.str("pattern")?)),
+            color: components
+                .and_then(|c| c.int("minecraft:dyed_color"))
+                .map(|c| c as i32 & 0xFF_FFFF),
         }
     }
 }
@@ -258,7 +264,9 @@ fn write_components(packet: Writer, stack: &Stack) -> Writer {
     let trimmed = stack.trim.is_some();
     let brewed = stack.potion.is_some();
     let named = stack.name.is_some();
+    let dyed = stack.color.is_some();
     let added = i32::from(damaged)
+        + i32::from(dyed)
         + i32::from(enchanted)
         + i32::from(worked)
         + i32::from(trimmed)
@@ -294,6 +302,9 @@ fn write_components(packet: Writer, stack: &Stack) -> Writer {
             .bool(false)
             .varint(0)
             .bool(false);
+    }
+    if let Some(color) = stack.color {
+        packet = packet.varint(component::DYED_COLOR).i32(color);
     }
     if let Some(trim) = stack.trim {
         // Registry holders: the entry's ID plus one (zero would be an inline value).

@@ -248,7 +248,7 @@ impl World {
         let replaceable =
             is_air(front_state) || block_has_tag(front_state, "minecraft:replaceable");
         let used: Option<Option<&str>> = match name {
-            "minecraft:arrow" => {
+            "minecraft:arrow" | "minecraft:tipped_arrow" => {
                 let from = [0, 1, 2].map(|i| {
                     f64::from([pos.x, pos.y, pos.z][i]) + 0.5 + 0.7 * f64::from(facing.step()[i])
                 });
@@ -265,6 +265,7 @@ impl World {
                         base_damage: 2.0,
                         pickup: false,
                         flaming: false,
+                        potion: stack.potion,
                     },
                 );
                 self.level_event(LEVEL_EVENT_SHOOT, pos, 0);

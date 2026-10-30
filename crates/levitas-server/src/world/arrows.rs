@@ -38,6 +38,8 @@ pub struct Shot {
     pub pickup: bool,
     /// Whether the arrow is aflame (flame), setting what it hits on fire.
     pub flaming: bool,
+    /// The potion of a tipped arrow.
+    pub potion: Option<u8>,
 }
 
 pub struct Arrow {
@@ -50,6 +52,7 @@ pub struct Arrow {
     base_damage: f64,
     pickup: bool,
     flaming: bool,
+    potion: Option<u8>,
     stuck: Option<u32>,
     age: u32,
 }
@@ -75,6 +78,7 @@ impl World {
             base_damage,
             pickup,
             flaming,
+            potion,
         } = shot;
         let length = (dir[0] * dir[0] + dir[1] * dir[1] + dir[2] * dir[2])
             .sqrt()
@@ -96,6 +100,7 @@ impl World {
             base_damage,
             pickup,
             flaming,
+            potion,
             stuck: None,
             age: 0,
         };
@@ -256,6 +261,16 @@ impl World {
                 }
                 self.damage_from(id, damage, Damage::Arrow(shooter_name), Some(arrow.shooter));
                 self.push_player(id, [away[0] * 0.3, 0.1, away[1] * 0.3]);
+                // A tipped arrow gives its potion's effects for an eighth of the time
+                // (instant ones in full).
+                for mut effect in arrow
+                    .potion
+                    .map(crate::potions::effects)
+                    .unwrap_or_default()
+                {
+                    effect.duration = (effect.duration / 8).max(1);
+                    self.add_effect(id, effect);
+                }
             }
             Hit::Mob(id) => {
                 let by = arrow.by_player.then_some(arrow.shooter);
@@ -274,7 +289,12 @@ impl World {
         if !arrow.by_player || !arrow.pickup {
             return false;
         }
-        let Some(item) = ItemInfo::id_of("minecraft:arrow") else {
+        let name = if arrow.potion.is_some() {
+            "minecraft:tipped_arrow"
+        } else {
+            "minecraft:arrow"
+        };
+        let Some(item) = ItemInfo::id_of(name) else {
             return false;
         };
         let taker = self.players.iter().find(|(_, p)| {
@@ -288,7 +308,9 @@ impl World {
         };
         let p = self.players.get_mut(&pid).expect("found");
         if p.survival() {
-            let (changed, left) = p.inventory.add(Stack::new(item, 1));
+            let mut stack = Stack::new(item, 1);
+            stack.potion = arrow.potion;
+            let (changed, left) = p.inventory.add(stack);
             if left > 0 {
                 return false;
             }
@@ -358,7 +380,12 @@ impl World {
         }
         let bow_slot = p.hand_slot(hand);
         let bow = p.inventory.slots[bow_slot].enchants;
-        let infinity = bow.level_of("minecraft:infinity") > 0;
+        let ammo = arrow_slot.map_or(Stack::EMPTY, |slot| p.inventory.slots[slot]);
+        let potion = ammo.potion.filter(|_| {
+            ItemInfo::get(ammo.item).is_some_and(|i| i.name == "minecraft:tipped_arrow")
+        });
+        // Infinity spares plain arrows only; tipped ones are used up.
+        let infinity = bow.level_of("minecraft:infinity") > 0 && potion.is_none();
         let power_level = bow.level_of("minecraft:power");
         let (eye, look, _) = p.eye_ray();
         if survival {
@@ -385,6 +412,7 @@ impl World {
                 },
             pickup: survival && !infinity,
             flaming: bow.level_of("minecraft:flame") > 0,
+            potion,
         };
         self.shoot_arrow(id, true, shot);
     }
@@ -393,11 +421,14 @@ impl World {
 /// The inventory slot of the arrows a bow uses: offhand first, then the hotbar and the
 /// rest of the inventory.
 fn find_arrows(p: &Player) -> Option<usize> {
-    let arrow = ItemInfo::id_of("minecraft:arrow")?;
+    let arrows = ["minecraft:arrow", "minecraft:tipped_arrow"].map(ItemInfo::id_of);
     std::iter::once(OFFHAND)
         .chain(HOTBAR..HOTBAR + 9)
         .chain(9..HOTBAR)
-        .find(|&slot| p.inventory.slots[slot].item == arrow && !p.inventory.slots[slot].is_empty())
+        .find(|&slot| {
+            let s = p.inventory.slots[slot];
+            !s.is_empty() && arrows.contains(&Some(s.item))
+        })
 }
 
 fn arrow_spawn(id: i32, arrow: &Arrow) -> Writer {
@@ -415,4 +446,60 @@ fn arrow_spawn(id: i32, arrow: &Arrow) -> Writer {
         .u8(angle(yaw))
         .u8(0)
         .varint(arrow.shooter + 1)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::connection::Profile;
+
+    fn world_with_player(at: [f64; 3]) -> (World, i32, mpsc::Receiver<Frame>) {
+        let dir = std::env::temp_dir().join(format!(
+            "levitas-arrows-{}-{}",
+            std::process::id(),
+            next_entity_id()
+        ));
+        let (mut world, _) = World::new(
+            dir,
+            NewWorld {
+                kind: WorldKind::Flat,
+                seed: Some(0),
+            },
+        );
+        world.chunk(0, 0);
+        let (out, frames) = mpsc::channel(100_000);
+        let id = next_entity_id();
+        let profile = Profile {
+            name: "Alice".to_owned(),
+            uuid: 1,
+            properties: Vec::new(),
+        };
+        world.players.insert(id, Player::new(profile, out, at));
+        (world, id, frames)
+    }
+
+    #[test]
+    fn tipped_arrows_give_an_eighth_of_their_potion() {
+        let (mut w, id, _frames) = world_with_player([0.5, -60.0, 0.5]);
+        let swiftness = crate::potions::id("minecraft:swiftness").unwrap();
+        let full = crate::potions::effects(swiftness)[0].duration;
+        let arrow = Arrow {
+            pos: [0.5, -59.0, 0.5],
+            vel: [0.0, 0.0, 1.0],
+            shooter: 0,
+            by_player: false,
+            critical: false,
+            base_damage: 2.0,
+            pickup: false,
+            flaming: false,
+            potion: Some(swiftness),
+            stuck: None,
+            age: 0,
+        };
+        w.arrow_hits(&arrow, Hit::Player(id));
+        let effect = w.players[&id]
+            .effect(levitas_registry::mob_effect::SPEED)
+            .expect("swiftness");
+        assert_eq!(effect.duration, full / 8);
+    }
 }

@@ -370,6 +370,7 @@ impl World {
                 base_damage: 2.0,
                 pickup: false,
                 flaming: false,
+                potion: None,
             },
         );
         mob.attack_cooldown = SKELETON_SHOT_TICKS;

@@ -14,6 +14,28 @@ use crate::inventory::{write_template, Stack, Trim};
 /// Item IDs an ingredient slot accepts, sorted.
 type Ingredient = Vec<i32>;
 
+/// A crafting recipe that turns one item into another, keeping its components: dyeing
+/// a shulker box or a bundle (`crafting_transmute`).
+struct Transmute {
+    input: Ingredient,
+    material: Ingredient,
+    result: i32,
+}
+
+/// Dyeing leather armor in the crafting grid (`crafting_dye`).
+struct Dyeing {
+    target: Ingredient,
+    dye: Ingredient,
+}
+
+/// A source item ringed by eight of a material, which take on its potion: tipped arrows
+/// from a lingering potion (`crafting_imbue`).
+struct Imbue {
+    source: Ingredient,
+    material: Ingredient,
+    result: Stack,
+}
+
 /// Picks one part of a smithing recipe.
 type Part = fn(&Smithing) -> &Ingredient;
 
@@ -71,6 +93,12 @@ pub struct Recipes {
     /// Stonecutter recipes, in the order clients list them: what goes in, what comes out.
     stonecutting: Vec<(Ingredient, Stack)>,
     smithing: Vec<Smithing>,
+    transmute: Vec<Transmute>,
+    dyeing: Vec<Dyeing>,
+    imbue: Vec<Imbue>,
+    /// Whether two worn items of a kind can be combined in the grid
+    /// (`crafting_special_repairitem`).
+    repair: bool,
 }
 
 impl Recipes {
@@ -83,6 +111,10 @@ impl Recipes {
             cooking: HashMap::new(),
             stonecutting: Vec::new(),
             smithing: Vec::new(),
+            transmute: Vec::new(),
+            dyeing: Vec::new(),
+            imbue: Vec::new(),
+            repair: false,
         };
         for recipe in all.values() {
             // Recipes naming unknown items or tags are skipped rather than half-loaded.
@@ -119,6 +151,21 @@ impl Recipes {
                     result: result(&recipe["result"])?,
                 });
             }
+            "minecraft:crafting_transmute" => self.transmute.push(Transmute {
+                input: ingredient(&recipe["input"])?,
+                material: ingredient(&recipe["material"])?,
+                result: ItemInfo::id_of(recipe["result"]["id"].as_str()?)?,
+            }),
+            "minecraft:crafting_dye" => self.dyeing.push(Dyeing {
+                target: ingredient(&recipe["target"])?,
+                dye: ingredient(&recipe["dye"])?,
+            }),
+            "minecraft:crafting_imbue" => self.imbue.push(Imbue {
+                source: ingredient(&recipe["source"])?,
+                material: ingredient(&recipe["material"])?,
+                result: result(&recipe["result"])?,
+            }),
+            "minecraft:crafting_special_repairitem" => self.repair = true,
             "minecraft:crafting_shapeless" => {
                 let ingredients = recipe["ingredients"]
                     .as_array()?
@@ -204,6 +251,70 @@ impl Recipes {
                 )
             {
                 return recipe.result;
+            }
+        }
+        self.craft_special(grid, size)
+    }
+
+    /// Recipes whose result depends on the stacks themselves, not just their items.
+    fn craft_special(&self, grid: &[Stack], size: usize) -> Stack {
+        let stacks: Vec<Stack> = grid.iter().copied().filter(|s| !s.is_empty()).collect();
+        let has = |ingredient: &Ingredient, item: i32| ingredient.binary_search(&item).is_ok();
+        if let [a, b] = stacks[..] {
+            // Transmuting: the input becomes the result, components and all.
+            for t in &self.transmute {
+                for (input, material) in [(a, b), (b, a)] {
+                    if has(&t.input, input.item)
+                        && has(&t.material, material.item)
+                        && input.item != t.result
+                    {
+                        return Stack {
+                            item: t.result,
+                            count: 1,
+                            ..input
+                        };
+                    }
+                }
+            }
+            if self.repair {
+                let repaired = repair(a, b);
+                if !repaired.is_empty() {
+                    return repaired;
+                }
+            }
+        }
+        // Dyeing: one piece of armor and one or more dyes.
+        for d in &self.dyeing {
+            let (targets, rest): (Vec<Stack>, Vec<Stack>) =
+                stacks.iter().partition(|s| has(&d.target, s.item));
+            if let [target] = targets[..] {
+                let colors: Option<Vec<i32>> = rest
+                    .iter()
+                    .map(|s| has(&d.dye, s.item).then(|| dye_color(s.item)).flatten())
+                    .collect();
+                if let Some(colors) = colors.filter(|c| !c.is_empty()) {
+                    return Stack {
+                        count: 1,
+                        color: Some(mix_colors(target.color, &colors)),
+                        ..target
+                    };
+                }
+            }
+        }
+        // Imbuing: the source in the middle of a full 3x3 grid of the material.
+        if size == 3 && stacks.len() == 9 {
+            for i in &self.imbue {
+                let centre = grid[4];
+                let ringed = grid
+                    .iter()
+                    .enumerate()
+                    .all(|(slot, s)| slot == 4 || has(&i.material, s.item));
+                if ringed && has(&i.source, centre.item) {
+                    return Stack {
+                        potion: centre.potion,
+                        ..i.result
+                    };
+                }
             }
         }
         Stack::EMPTY
@@ -429,6 +540,76 @@ fn ingredient(value: &Value) -> Option<Ingredient> {
     Some(items)
 }
 
+/// Two worn items of the same kind made into one: their uses left added up, plus 5% of
+/// the item's durability, up to new. Only curses stay on it. Empty if they do not combine.
+fn repair(a: Stack, b: Stack) -> Stack {
+    let Some(info) = ItemInfo::get(a.item) else {
+        return Stack::EMPTY;
+    };
+    let max = info.max_damage;
+    if a.item != b.item || max <= 0 || a.count != 1 || b.count != 1 {
+        return Stack::EMPTY;
+    }
+    let uses = (max - a.damage) + (max - b.damage) + max / 20;
+    let mut repaired = Stack::new(a.item, 1);
+    repaired.damage = (max - uses).max(0);
+    for (id, level) in a.enchants.iter().chain(b.enchants.iter()) {
+        if crate::enchanting::definition(id).is_some_and(|d| d.curse) {
+            repaired
+                .enchants
+                .set(id, level.max(repaired.enchants.level(id)));
+        }
+    }
+    repaired
+}
+
+/// The colour a dye gives leather armor, `0xRRGGBB` (from the Minecraft Wiki's table).
+fn dye_color(item: i32) -> Option<i32> {
+    let name = ItemInfo::get(item)?.name.strip_prefix("minecraft:")?;
+    Some(match name.strip_suffix("_dye")? {
+        "white" => 0xF9FFFE,
+        "orange" => 0xF9801D,
+        "magenta" => 0xC74EBD,
+        "light_blue" => 0x3AB3DA,
+        "yellow" => 0xFED83D,
+        "lime" => 0x80C71F,
+        "pink" => 0xF38BAA,
+        "gray" => 0x474F52,
+        "light_gray" => 0x9D9D97,
+        "cyan" => 0x169C9C,
+        "purple" => 0x8932B8,
+        "blue" => 0x3C44AA,
+        "brown" => 0x835432,
+        "green" => 0x5E7C16,
+        "red" => 0xB02E26,
+        "black" => 0x1D1D21,
+        _ => return None,
+    })
+}
+
+/// Mixes the armor's colour (if it has one) with the dyes, as the wiki describes: the
+/// average colour, brightened so that its brightest component is the average of each
+/// colour's brightest component.
+fn mix_colors(existing: Option<i32>, dyes: &[i32]) -> i32 {
+    let rgb = |c: i32| [(c >> 16) & 0xFF, (c >> 8) & 0xFF, c & 0xFF];
+    let mut sum = [0; 3];
+    let mut brightest = 0;
+    let mut n = 0;
+    for color in existing.iter().chain(dyes) {
+        let c = rgb(*color);
+        for i in 0..3 {
+            sum[i] += c[i];
+        }
+        brightest += c.into_iter().max().unwrap_or(0);
+        n += 1;
+    }
+    let average = sum.map(|s| s / n);
+    let average_brightest = brightest / n;
+    let top = average.into_iter().max().unwrap_or(0).max(1);
+    let [r, g, b] = average.map(|c| (c as f32 * average_brightest as f32 / top as f32) as i32);
+    (r << 16) | (g << 8) | b
+}
+
 fn result(value: &Value) -> Option<Stack> {
     let item = ItemInfo::id_of(value["id"].as_str()?)?;
     let count = value["count"].as_i64().unwrap_or(1) as i32;
@@ -586,6 +767,97 @@ mod tests {
         assert!(r
             .cooking(Cooker::BlastFurnace, item("minecraft:beef"))
             .is_none());
+    }
+
+    #[test]
+    fn worn_tools_combine_in_the_grid_keeping_only_curses() {
+        let r = Recipes::load();
+        let pickaxe = item("minecraft:iron_pickaxe");
+        let mut a = Stack::new(pickaxe, 1);
+        a.damage = 200;
+        let unbreaking = crate::enchanting::Enchantments::from_nbt(
+            &levitas_nbt::Compound::new()
+                .with("minecraft:unbreaking", 3)
+                .with("minecraft:vanishing_curse", 1),
+        );
+        a.enchants = unbreaking;
+        let mut b = Stack::new(pickaxe, 1);
+        b.damage = 150;
+        let mut g = vec![Stack::EMPTY; 4];
+        g[0] = a;
+        g[3] = b;
+        // 50 + 100 uses left, plus 5% of 250.
+        let repaired = r.craft(&g, 2);
+        assert_eq!((repaired.item, repaired.damage), (pickaxe, 250 - 162));
+        assert_eq!(repaired.enchants.level_of("minecraft:vanishing_curse"), 1);
+        assert_eq!(repaired.enchants.level_of("minecraft:unbreaking"), 0);
+        // Different tools do not combine.
+        g[3] = Stack::new(item("minecraft:stone_pickaxe"), 1);
+        assert!(r.craft(&g, 2).is_empty());
+    }
+
+    #[test]
+    fn leather_armor_takes_the_mix_of_its_dyes() {
+        let r = Recipes::load();
+        let boots = item("minecraft:leather_boots");
+        let one = r.craft(
+            &grid(
+                2,
+                &[(0, "minecraft:leather_boots"), (1, "minecraft:yellow_dye")],
+            ),
+            2,
+        );
+        assert_eq!((one.item, one.color), (boots, Some(0xFED83D)));
+        // Red and yellow: their average, which already has the average brightness.
+        let two = r.craft(
+            &grid(
+                3,
+                &[
+                    (0, "minecraft:leather_boots"),
+                    (4, "minecraft:red_dye"),
+                    (8, "minecraft:yellow_dye"),
+                ],
+            ),
+            3,
+        );
+        assert_eq!(two.color, Some(0xD78331));
+        // Dyed again, the old colour counts as one more dye.
+        assert_eq!(mix_colors(Some(0xFED83D), &[0xFED83D]), 0xFED83D);
+        // Something that is not a dye spoils it.
+        assert!(r
+            .craft(
+                &grid(2, &[(0, "minecraft:leather_boots"), (1, "minecraft:stick")]),
+                2
+            )
+            .is_empty());
+        // The colour is kept when saved.
+        assert_eq!(Stack::from_nbt(&two.to_nbt()), two);
+    }
+
+    #[test]
+    fn shulker_boxes_change_colour_with_their_name_and_arrows_take_a_potion() {
+        let r = Recipes::load();
+        let mut boxed = Stack::new(item("minecraft:shulker_box"), 1);
+        boxed.name = crate::names::intern("Ores");
+        let mut g = vec![Stack::EMPTY; 4];
+        g[0] = boxed;
+        g[1] = Stack::new(item("minecraft:red_dye"), 1);
+        let red = r.craft(&g, 2);
+        assert_eq!(red.item, item("minecraft:red_shulker_box"));
+        assert_eq!(red.name, boxed.name);
+
+        let swiftness = crate::potions::id("minecraft:swiftness").unwrap();
+        let mut g = vec![Stack::new(item("minecraft:arrow"), 1); 9];
+        g[4] = Stack::new(item("minecraft:lingering_potion"), 1);
+        g[4].potion = Some(swiftness);
+        let tipped = r.craft(&g, 3);
+        assert_eq!(
+            (tipped.item, tipped.count, tipped.potion),
+            (item("minecraft:tipped_arrow"), 8, Some(swiftness))
+        );
+        // Not with one arrow missing.
+        g[0] = Stack::EMPTY;
+        assert!(r.craft(&g, 3).is_empty());
     }
 
     #[test]

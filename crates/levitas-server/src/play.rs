@@ -203,6 +203,8 @@ fn decode(id: i32, packet: &[u8]) -> io::Result<Option<Event>> {
                                 pattern: (pattern - 1) as u16,
                             });
                         }
+                    } else if kind == levitas_registry::component::DYED_COLOR {
+                        stack.color = Some(Reader::new(data).i32()? & 0xFF_FFFF);
                     } else if kind == levitas_registry::component::REPAIR_COST {
                         stack.repair_cost = Reader::new(data).varint()?.max(0);
                     } else if kind == levitas_registry::component::ENCHANTMENTS

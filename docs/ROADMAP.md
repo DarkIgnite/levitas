@@ -133,7 +133,14 @@ Known gaps are listed under each phase instead of being hidden.
       from the addition (`minecraft:trim` on the stack, saved and sent to clients).
       Template, base and addition are each used up once.
 - [ ] Special crafting recipes: dyeing, fireworks, map and book cloning, banners,
-      shields, repairing, decorated pots, transmute recipes
+      shields, repairing, decorated pots, transmute recipes. Done (`recipes.rs`):
+      repairing two worn items of a kind (uses left added up plus 5%, only curses
+      kept); dyeing leather armor with any number of dyes, mixed by the wiki's formula
+      and kept as `minecraft:dyed_color`; transmute recipes (shulker boxes and bundles
+      change colour, keeping their components); tipped arrows from eight arrows and a
+      lingering potion. Missing: fireworks, map and book cloning, banner copying,
+      shield decoration and decorated pots with sherds, which wait for those items'
+      components
 - [ ] Signs (editing text), item frames, armor stands, flower pots, jukebox, note blocks.
       Signs and hanging signs work (`world/signs.rs`): placing one opens its editor,
       either side can be edited again by right-clicking it, dyes colour a side's text,
@@ -363,8 +370,10 @@ Known gaps are listed under each phase instead of being hidden.
       brews and brew in 20 seconds: base potions, effects, redstone and glowstone,
       fermented spider eyes, gunpowder (splash) and dragon's breath (lingering), fed
       by hoppers as in vanilla. Splash potions give players within 4 blocks their
-      effects, weaker with distance. Missing: lingering clouds (they splash for now),
-      effects on mobs, tipped arrows, splash colours.
+      effects, weaker with distance. Tipped arrows, shot from bows and dispensers,
+      give players their potion for an eighth of its time and are picked up as tipped
+      arrows; Infinity does not spare them. Missing: lingering clouds (they splash for
+      now), effects on mobs (from potions and tipped arrows), splash colours.
 - [ ] Beacons, conduits
 - [ ] Maps, compasses, recovery compasses, clocks, spyglass
 

@@ -207,34 +207,16 @@ Phase 0–1 and most of Phase 2, plus parts of 3 and 12 (details in ROADMAP.md):
 - **Day/night and weather**: time sync every second, rain/thunder cycle with fading,
   `/time`, `/weather`, sleeping skips the night, beds are respawn points.
 
-## 7. What to do next (in this order)
+## 7. What to do next
 
-The owner's last request was: keep going until the world is playable like vanilla. The
-agreed next steps were **falling blocks (done), day/night (done), then mobs**.
-
-1. **Mobs, continued** (Phase 4–5). `world/mobs.rs` has the base: `Mob` with
-   physics/collisions, per-player tracking, saving to `entities/`, chunk-generation
-   spawning from biome spawn lists, player attacks with charge/crits/knockback, loot.
-   `world/monsters.rs` adds zombies, spiders and creepers: dark spawning by the
-   vanilla light rules, despawning, chasing, melee with armor, sun burning, creeper
-   explosions (`world/explosion.rs`), skeletons with bows (`world/arrows.rs`), A*
-   pathfinding (`world/pathfinding.rs`) and experience (`world/experience.rs`).
-   Damage to mobs goes through `hit_mob`. Next: breeding/babies/temptation, more mobs
-   (husk/stray/drowned/enderman/witch...), TNT (reuses `explode`), enchanting (uses
-   the experience levels), and smelting experience. Add new kinds to `MobKind` (entity type, size, health,
-   speed, sound family) and to `/summon` in `command_tree()`.
-2. **Structure loot** (Phase 12): `ProtoChunk::pending_block_entities` from Pumpkin
-   holds chest NBT with `LootTable` keys and spawners; convert them into Levitas block
-   entities in `levitas-pumpkin` (return them alongside each chunk) and fill chests from
-   loot tables on first open (`loot.rs` already evaluates block loot tables).
-3. **Random ticks** (Phase 6): crops, saplings (can reuse Pumpkin tree features?),
-   grass spread, leaf decay, ice/snow.
-4. Remaining Phase 2: blast furnace, smoker, campfire, stonecutter, smithing table,
-   special recipes, signs (editing), flower pots, jukebox, note blocks, placement
-   sounds for other players.
-5. Then Phases 7–11 (redstone, enchanting/anvil/brewing, Nether/End with Pumpkin's
-   generator for those dimensions, villagers, commands/config/online mode) and Phase 13
-   (plugin API and economy, the owner's original goal for their server).
+The owner's standing request is to keep going until the world plays like vanilla. The
+open items, with what each still lacks, are in [ROADMAP.md](ROADMAP.md); the progress
+table in the README shows where the most is missing. Recently done: the move to 26.3,
+the blocks new in 26.3, and the special crafting recipes the existing items support
+(repairing, leather dyeing, transmute, tipped arrows). Good next candidates for a
+playable world: effects on mobs (potions, tipped arrows), maps and compasses (Phase 8),
+advancements (Phase 11), raids (Phase 10), and the Phase 13 plugin API and economy the
+owner wants for their server.
 
 ## 8. Known gaps and pitfalls
 
