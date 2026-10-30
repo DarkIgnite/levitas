@@ -162,6 +162,32 @@ impl World {
         true
     }
 
+    /// Throws a splash potion from an entity (like a witch).
+    pub(super) fn throw_splash_potion(
+        &mut self,
+        thrower: i32,
+        pos: [f64; 3],
+        vel: [f64; 3],
+        potion: u8,
+    ) {
+        let splash_item = ItemInfo::id_of("minecraft:splash_potion").unwrap_or(0);
+        let mut stack = Stack::new(splash_item, 1);
+        stack.potion = Some(potion);
+        let thrown = Thrown {
+            kind: ThrownKind::SplashPotion,
+            pos,
+            vel,
+            thrower,
+            age: 0,
+            stack,
+        };
+        let t_id = next_entity_id();
+        self.broadcast(spawn_packet(t_id, &thrown), None);
+        self.broadcast(item_data(t_id, &thrown), None);
+        self.thrown.insert(t_id, thrown);
+        self.play_sound_at("minecraft:entity.splash_potion.throw", pos, 0.5, 1.0, None);
+    }
+
     /// Thrown things in flight, for a player who just arrived.
     pub(super) fn thrown_packets(&self) -> Vec<Writer> {
         self.thrown

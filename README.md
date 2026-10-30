@@ -74,15 +74,17 @@ what is missing in each one.
   and lava, buckets, obsidian and cobblestone generators.
 - **Farming and nature:** crops, saplings that grow into trees, leaf decay, grass
   spreading, bone meal, hoes, sugar cane and cacti.
-- **Mobs:** cows, pigs, sheep and chickens (breeding and babies, shearing, milking,
+- **Mobs and raids:** cows, pigs, sheep and chickens (breeding and babies, shearing, milking,
   eggs, following food); zombies, spiders,
   creepers and skeletons that spawn in the dark, find their way to you, burn in
-  daylight, explode or shoot arrows; armor; bows.
+  daylight, explode or shoot arrows; armor; bows; villagers with trading and professions;
+  village raids with ominous bottles, Bad Omen, Raid Omen, raider waves (pillagers, vindicators,
+  ravagers, witches, evokers with fangs), boss bar, and Hero of the Village trading discounts.
 - **Saving:** everything is stored the way vanilla 26.3 stores it (Anvil regions under
   `dimensions/minecraft/`, `players/data/`, `data/minecraft/`, `level.dat`), so vanilla
   can open Levitas worlds; worlds saved by 1.21.8 builds are upgraded when opened.
 
-Not there yet: raids, storage and TNT minecarts, advancements, and plugins. See the [roadmap](docs/ROADMAP.md) for the
+Not there yet: storage and TNT minecarts, advancements, and plugins. See the [roadmap](docs/ROADMAP.md) for the
 full list.
 
 ## Playing

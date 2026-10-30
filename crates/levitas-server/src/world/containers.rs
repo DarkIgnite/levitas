@@ -716,12 +716,18 @@ impl World {
         };
         let layout = view.layout();
         let trades = match view {
-            View::Merchant(target) => self
-                .mobs
-                .get(&target)
-                .and_then(|m| m.villager.as_ref())
-                .map(|v| v.trades())
-                .unwrap_or_default(),
+            View::Merchant(target) => {
+                let hero_amp = self
+                    .players
+                    .get(&id)
+                    .and_then(|p| p.effect(levitas_registry::mob_effect::HERO_OF_THE_VILLAGE))
+                    .map(|e| e.amplifier);
+                self.mobs
+                    .get(&target)
+                    .and_then(|m| m.villager.as_ref())
+                    .map(|v| v.trades_for_player(hero_amp))
+                    .unwrap_or_default()
+            }
             _ => Vec::new(),
         };
         let before = self.window_slots(id, view);

@@ -40,6 +40,7 @@ mod nature;
 mod pathfinding;
 mod piston;
 mod portal;
+mod raids;
 mod redstone;
 mod shields;
 mod signs;
@@ -583,6 +584,9 @@ struct World {
     /// Ender pearls, snowballs and eggs in flight.
     thrown: HashMap<i32, thrown::Thrown>,
     pub area_effect_clouds: HashMap<i32, clouds::AreaEffectCloud>,
+    pub raids: HashMap<u32, raids::Raid>,
+    pub evoker_fangs: HashMap<i32, raids::EvokerFang>,
+    pub next_raid_id: u32,
     boats: HashMap<i32, boats::Boat>,
     carts: HashMap<i32, minecarts::Cart>,
     /// Item frames and paintings.
@@ -697,6 +701,9 @@ impl World {
             fireballs: HashMap::new(),
             thrown: HashMap::new(),
             area_effect_clouds: HashMap::new(),
+            raids: HashMap::new(),
+            evoker_fangs: HashMap::new(),
+            next_raid_id: 1,
             boats: HashMap::new(),
             carts: HashMap::new(),
             hanging: HashMap::new(),
@@ -1000,6 +1007,7 @@ impl World {
         self.get_off(id);
         self.wake_up(id);
         self.close_container(id);
+        self.leave_raids(id);
         self.save_player(id);
         let Some(player) = self.players.remove(&id) else {
             return;
@@ -1044,6 +1052,7 @@ impl World {
         packets.extend(self.fireball_packets());
         packets.extend(self.thrown_packets());
         packets.extend(self.area_effect_cloud_packets());
+        packets.extend(self.evoker_fangs_packets());
         packets.extend(self.boat_packets());
         packets.extend(self.cart_packets());
         packets.extend(self.hanging_packets());
@@ -1437,6 +1446,8 @@ impl World {
         self.tick_portals();
         self.tick_end_portals();
         self.tick_dragon_fight();
+        self.tick_raids();
+        self.tick_evoker_fangs();
         self.tick_effects();
         self.tick_items();
         self.tick_furnaces();

@@ -83,6 +83,11 @@ pub enum MobKind {
     Enderman,
     Villager,
     IronGolem,
+    Pillager,
+    Vindicator,
+    Ravager,
+    Witch,
+    Evoker,
 }
 
 impl MobKind {
@@ -103,6 +108,11 @@ impl MobKind {
             "minecraft:enderman" => Some(MobKind::Enderman),
             "minecraft:villager" => Some(MobKind::Villager),
             "minecraft:iron_golem" => Some(MobKind::IronGolem),
+            "minecraft:pillager" => Some(MobKind::Pillager),
+            "minecraft:vindicator" => Some(MobKind::Vindicator),
+            "minecraft:ravager" => Some(MobKind::Ravager),
+            "minecraft:witch" => Some(MobKind::Witch),
+            "minecraft:evoker" => Some(MobKind::Evoker),
             _ => None,
         }
     }
@@ -124,6 +134,11 @@ impl MobKind {
             MobKind::Enderman => "minecraft:enderman",
             MobKind::Villager => "minecraft:villager",
             MobKind::IronGolem => "minecraft:iron_golem",
+            MobKind::Pillager => "minecraft:pillager",
+            MobKind::Vindicator => "minecraft:vindicator",
+            MobKind::Ravager => "minecraft:ravager",
+            MobKind::Witch => "minecraft:witch",
+            MobKind::Evoker => "minecraft:evoker",
         }
     }
 
@@ -145,6 +160,11 @@ impl MobKind {
             MobKind::Enderman => "Enderman",
             MobKind::Villager => "Villager",
             MobKind::IronGolem => "Iron Golem",
+            MobKind::Pillager => "Pillager",
+            MobKind::Vindicator => "Vindicator",
+            MobKind::Ravager => "Ravager",
+            MobKind::Witch => "Witch",
+            MobKind::Evoker => "Evoker",
         }
     }
 
@@ -160,6 +180,23 @@ impl MobKind {
                 | MobKind::Ghast
                 | MobKind::Blaze
                 | MobKind::Enderman
+                | MobKind::Pillager
+                | MobKind::Vindicator
+                | MobKind::Ravager
+                | MobKind::Witch
+                | MobKind::Evoker
+        )
+    }
+
+    /// Whether it takes part in raids against villages.
+    pub fn is_raider(self) -> bool {
+        matches!(
+            self,
+            MobKind::Pillager
+                | MobKind::Vindicator
+                | MobKind::Ravager
+                | MobKind::Witch
+                | MobKind::Evoker
         )
     }
 
@@ -194,6 +231,9 @@ impl MobKind {
             MobKind::ZombifiedPiglin => 8.0,
             MobKind::Blaze => 6.0,
             MobKind::Enderman => 7.0,
+            MobKind::Vindicator => 9.0,
+            MobKind::Ravager => 12.0,
+            MobKind::Evoker => 6.0,
             _ => 0.0,
         }
     }
@@ -204,6 +244,11 @@ impl MobKind {
             MobKind::Zombie | MobKind::ZombifiedPiglin => 35.0,
             MobKind::Ghast | MobKind::Enderman => 64.0,
             MobKind::Blaze => 48.0,
+            MobKind::Pillager
+            | MobKind::Vindicator
+            | MobKind::Ravager
+            | MobKind::Witch
+            | MobKind::Evoker => 32.0,
             _ => 16.0,
         }
     }
@@ -229,6 +274,11 @@ impl MobKind {
             MobKind::Enderman => entity_type::ENDERMAN,
             MobKind::Villager => entity_type::VILLAGER,
             MobKind::IronGolem => entity_type::IRON_GOLEM,
+            MobKind::Pillager => entity_type::PILLAGER,
+            MobKind::Vindicator => entity_type::VINDICATOR,
+            MobKind::Ravager => entity_type::RAVAGER,
+            MobKind::Witch => entity_type::WITCH,
+            MobKind::Evoker => entity_type::EVOKER,
         }
     }
 
@@ -247,6 +297,9 @@ impl MobKind {
             MobKind::Enderman => 40.0,
             MobKind::Villager => 20.0,
             MobKind::IronGolem => 100.0,
+            MobKind::Pillager | MobKind::Vindicator | MobKind::Evoker => 24.0,
+            MobKind::Witch => 26.0,
+            MobKind::Ravager => 100.0,
         }
     }
 
@@ -268,6 +321,10 @@ impl MobKind {
             MobKind::Enderman => (0.6, 2.9),
             MobKind::Villager => (0.6, 1.95),
             MobKind::IronGolem => (1.4, 2.7),
+            MobKind::Pillager | MobKind::Vindicator | MobKind::Witch | MobKind::Evoker => {
+                (0.6, 1.95)
+            }
+            MobKind::Ravager => (1.95, 2.2),
         }
     }
 
@@ -284,6 +341,11 @@ impl MobKind {
             MobKind::Ghast => 0.08,
             MobKind::Blaze => 0.06,
             MobKind::Enderman => 0.15,
+            MobKind::Pillager => 0.14,
+            MobKind::Vindicator => 0.17,
+            MobKind::Ravager => 0.12,
+            MobKind::Witch => 0.11,
+            MobKind::Evoker => 0.13,
             _ => 0.1,
         }
     }
@@ -306,6 +368,11 @@ impl MobKind {
             MobKind::Enderman => "enderman",
             MobKind::Villager => "villager",
             MobKind::IronGolem => "iron_golem",
+            MobKind::Pillager => "pillager",
+            MobKind::Vindicator => "vindicator",
+            MobKind::Ravager => "ravager",
+            MobKind::Witch => "witch",
+            MobKind::Evoker => "evoker",
         }
     }
 }
@@ -377,6 +444,12 @@ pub struct Mob {
     pub name: Option<&'static str>,
     /// Status effects on the mob.
     pub effects: Vec<super::effects::ActiveEffect>,
+    /// Raid this mob belongs to, if any.
+    pub raid_id: Option<u32>,
+    /// Whether this raider is the raid or patrol leader (wears ominous banner, drops ominous bottle).
+    pub is_patrol_leader: bool,
+    /// Whether this raider is celebrating a raid victory.
+    pub celebrating: bool,
 }
 
 impl Mob {
@@ -441,6 +514,9 @@ impl Mob {
             player_created: false,
             name: None,
             effects: Vec::new(),
+            raid_id: None,
+            is_patrol_leader: false,
+            celebrating: false,
         }
     }
 
@@ -551,6 +627,38 @@ impl Mob {
                 packets.push(crate::inventory::write_stack(packet, Stack::new(bow, 1)));
             }
         }
+        if self.kind == MobKind::Pillager {
+            if let Some(crossbow) = ItemInfo::id_of("minecraft:crossbow") {
+                if self.is_patrol_leader {
+                    if let Some(banner) = ItemInfo::id_of("minecraft:white_banner") {
+                        let packet = Writer::packet(clientbound::SET_EQUIPMENT)
+                            .varint(id)
+                            .u8(0x80);
+                        let packet = crate::inventory::write_stack(packet, Stack::new(crossbow, 1));
+                        let packet = packet.u8(5); // Head slot, last entry
+                        packets.push(crate::inventory::write_stack(packet, Stack::new(banner, 1)));
+                    } else {
+                        let packet = Writer::packet(clientbound::SET_EQUIPMENT).varint(id).u8(0);
+                        packets.push(crate::inventory::write_stack(
+                            packet,
+                            Stack::new(crossbow, 1),
+                        ));
+                    }
+                } else {
+                    let packet = Writer::packet(clientbound::SET_EQUIPMENT).varint(id).u8(0);
+                    packets.push(crate::inventory::write_stack(
+                        packet,
+                        Stack::new(crossbow, 1),
+                    ));
+                }
+            }
+        }
+        if self.kind == MobKind::Vindicator {
+            if let Some(axe) = ItemInfo::id_of("minecraft:iron_axe") {
+                let packet = Writer::packet(clientbound::SET_EQUIPMENT).varint(id).u8(0);
+                packets.push(crate::inventory::write_stack(packet, Stack::new(axe, 1)));
+            }
+        }
         for effect in &self.effects {
             packets.push(super::effects::update_packet(id, effect));
         }
@@ -620,6 +728,12 @@ impl Mob {
         if let Some(name) = self.name {
             nbt.insert("CustomName", name);
         }
+        if self.is_patrol_leader {
+            nbt.insert("PatrolLeader", true);
+        }
+        if let Some(raid_id) = self.raid_id {
+            nbt.insert("RaidId", raid_id as i32);
+        }
         if !self.effects.is_empty() {
             nbt.insert(
                 "active_effects",
@@ -672,6 +786,8 @@ impl Mob {
             mob.villager = Some(Box::new(super::villagers::Villager::read_nbt(nbt)));
         }
         mob.player_created = nbt.int("PlayerCreated").unwrap_or(0) != 0;
+        mob.is_patrol_leader = nbt.int("PatrolLeader").unwrap_or(0) != 0;
+        mob.raid_id = nbt.int("RaidId").map(|r| r as u32);
         mob.name = nbt
             .get("CustomName")
             .map(crate::names::plain_text)
@@ -1693,6 +1809,11 @@ impl World {
         if mob.age < 0 {
             return; // babies drop nothing
         }
+        if mob.is_patrol_leader {
+            if let Some(bottle) = ItemInfo::id_of("minecraft:ominous_bottle") {
+                self.scatter_item(mob.pos, Stack::new(bottle, 1));
+            }
+        }
         let drops = self.loot.entity_drops(
             mob.kind.name(),
             &mut LootContext {
@@ -1708,6 +1829,9 @@ impl World {
         }
         if mob.killed_by_player && crate::rules::bool("mob_drops") {
             self.mob_xp(mob.pos, mob.kind.is_monster());
+        }
+        if let Some(raid_id) = mob.raid_id {
+            self.raider_killed(raid_id, id);
         }
     }
 

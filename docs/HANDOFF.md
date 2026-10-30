@@ -267,6 +267,13 @@ economy the owner wants for their server.
     playing `item.bottle.fill_dragonbreath` and shrinking the cloud by 0.5 blocks.
   - Splash potions emit particle colors matching the potion effects (`potions::color`).
   - Phase 8 is now 100% complete.
+- Raids, Bad Omen & Raider Mobs (2026-10-30):
+  - Raids (`world/raids.rs`): Drinking `minecraft:ominous_bottle` gives `minecraft:bad_omen` (120,000 ticks). Entering a village converts Bad Omen to `minecraft:raid_omen` (600 ticks). Expiry starts the raid, plays the war horn sound (`event.raid.horn`), and sends a red notched boss bar (`clientbound::BOSS_EVENT`).
+  - Waves: Spawns perimeter waves of Pillagers, Vindicators, Ravagers, Witches, and Evokers. Patrol leaders wear ominous banners and drop ominous bottles.
+  - Raiders target players, villagers, and iron golems (`monsters.rs`). Iron golems retaliate against raiders.
+  - Evokers summon lines of snapping Evoker Fangs (`world/raids.rs` `tick_evoker_fangs`) dealing 6.0 magic damage ignoring armor, and drop Totems of Undying.
+  - Victory grants `minecraft:hero_of_the_village` with substantial trading discounts (`special_price` in `containers.rs` and `villagers.rs`). Defeat triggers raider celebration jumping and victory sound.
+
 
 ## 9. Testing pattern
 

@@ -64,6 +64,7 @@ impl World {
             self.wake_up(id);
             self.close_container(id);
             self.leave_fight(id);
+            self.leave_raids(id);
         }
         let Some(mut player) = self.players.remove(&id) else {
             return false;

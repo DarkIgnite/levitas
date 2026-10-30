@@ -347,6 +347,9 @@ impl World {
                 }
             }
             for effect in ended {
+                if effect == mob_effect::RAID_OMEN {
+                    self.raid_omen_expired(id);
+                }
                 self.remove_effect(id, effect);
             }
         }

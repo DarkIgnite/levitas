@@ -462,7 +462,23 @@ Known gaps are listed under each phase instead of being hidden.
       are mended by iron ingots, take no fall damage or knockback and drop iron and
       poppies. Missing: golems spawning when villagers gather, monsters attacking
       golems and villagers, wandering traders, zombie villagers.
-- [ ] Raids and bad omen
+- [x] Raids and bad omen (`world/raids.rs`). Drinking an ominous bottle
+      (`minecraft:ominous_bottle`, `world/survival.rs`) gives Bad Omen for 100 minutes
+      (`mob_effect::BAD_OMEN`). Approaching within 64 blocks of a villager converts Bad Omen
+      into Raid Omen (`mob_effect::RAID_OMEN`, 30 seconds) with trial spawner activation sounds
+      (`minecraft:block.trial_spawner.ominous_activate`, `minecraft:event.mob_effect.raid_omen`).
+      When Raid Omen expires, the raid begins at the village center, sounding the raid war horn
+      (`minecraft:event.raid.horn`, volume 64.0) and displaying the raid boss bar (`clientbound::BOSS_EVENT`).
+      Waves bring raider mobs (`world/mobs.rs`): pillagers (shooting crossbows, wave 1 leader wearing an
+      ominous banner and dropping ominous bottles), vindicators (iron axes dealing 9.0 melee damage),
+      ravagers (100 health, dealing 12.0 damage with 1.5 knockback, dropping saddles), witches (throwing
+      splash potions of slowness, poison, weakness, harming, or drinking healing/fire resistance), and
+      evokers (conjuring snapping Evoker Fangs in a line dealing 6.0 magic damage, dropping totems of
+      undying). Raiders target players, villagers, and iron golems; iron golems actively fight raiders.
+      Clearing all waves achieves Victory, turning the boss bar green, playing `minecraft:ui.toast.challenge_complete`,
+      celebrating villagers, and awarding Hero of the Village (`mob_effect::HERO_OF_THE_VILLAGE`, 40 minutes),
+      which grants substantial trade discounts (`special_price` in `MERCHANT_OFFERS`, `world/villagers.rs`).
+      If all villagers die, Defeat is declared and raiders celebrate.
 
 ## Phase 11: Everything else
 

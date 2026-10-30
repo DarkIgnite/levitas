@@ -340,17 +340,33 @@ impl Villager {
         }
     }
 
-    /// The trades as the trading screen's click handling sees them.
-    pub fn trades(&self) -> Vec<Trade> {
+    /// The trades as the trading screen's click handling sees them, with discounts if the
+    /// player has the Hero of the Village effect.
+    pub fn trades_for_player(&self, hero_amp: Option<u8>) -> Vec<Trade> {
         self.offers
             .iter()
-            .map(|o| Trade {
-                buy: o.buy,
-                buy_b: o.buy_b,
-                sell: o.sell,
-                left: o.max_uses - o.uses,
+            .map(|o| {
+                let discount = hero_amp.map_or(0, |amp| {
+                    let d = (((o.buy.count as f32) * (0.05 + 0.0625 * (amp as f32 + 1.0))).round()
+                        as i32)
+                        .max(1);
+                    d.min(o.buy.count - 1)
+                });
+                let buy = o.buy.with_count((o.buy.count - discount).max(1));
+                Trade {
+                    buy,
+                    buy_b: o.buy_b,
+                    sell: o.sell,
+                    left: o.max_uses - o.uses,
+                }
             })
             .collect()
+    }
+
+    /// The trades as the trading screen's click handling sees them.
+    #[allow(dead_code)]
+    pub fn trades(&self) -> Vec<Trade> {
+        self.trades_for_player(None)
     }
 }
 
@@ -887,10 +903,22 @@ impl World {
             // An item cost: the item, how many, and no required components.
             packet.varint(s.item).varint(s.count).varint(0)
         };
+        let hero_amp = self
+            .players
+            .get(&id)
+            .and_then(|p| p.effect(levitas_registry::mob_effect::HERO_OF_THE_VILLAGE))
+            .map(|e| e.amplifier);
         let mut packet = Writer::packet(clientbound::MERCHANT_OFFERS)
             .varint(window)
             .varint(v.offers.len() as i32);
         for o in &v.offers {
+            let discount = hero_amp.map_or(0, |amp| {
+                let d = (((o.buy.count as f32) * (0.05 + 0.0625 * (amp as f32 + 1.0))).round()
+                    as i32)
+                    .max(1);
+                d.min(o.buy.count - 1)
+            });
+            let special_price = -discount;
             packet = cost(packet, o.buy);
             packet = crate::inventory::write_stack(packet, o.sell);
             packet = if o.buy_b.is_empty() {
@@ -903,7 +931,7 @@ impl World {
                 .i32(o.uses)
                 .i32(o.max_uses)
                 .i32(o.xp)
-                .i32(0) // special price
+                .i32(special_price)
                 .f32(o.price_multiplier)
                 .i32(0); // demand
         }
@@ -948,8 +976,18 @@ impl World {
                 open.grid[0] = stack.with_count(over);
             }
         }
+        let hero_amp = p
+            .effect(levitas_registry::mob_effect::HERO_OF_THE_VILLAGE)
+            .map(|e| e.amplifier);
+        let discount = hero_amp.map_or(0, |amp| {
+            let d = (((offer.buy.count as f32) * (0.05 + 0.0625 * (amp as f32 + 1.0))).round()
+                as i32)
+                .max(1);
+            d.min(offer.buy.count - 1)
+        });
+        let effective_buy = offer.buy.with_count((offer.buy.count - discount).max(1));
         // Pull the payment out of the inventory, up to a full stack of each.
-        for (slot, cost) in [(0, offer.buy), (1, offer.buy_b)] {
+        for (slot, cost) in [(0, effective_buy), (1, offer.buy_b)] {
             if cost.is_empty() {
                 continue;
             }
@@ -979,7 +1017,7 @@ impl World {
         // The result shows as soon as the payment covers it.
         let open = p.open.as_mut().expect("checked above");
         let trade = Trade {
-            buy: offer.buy,
+            buy: effective_buy,
             buy_b: offer.buy_b,
             sell: offer.sell,
             left: offer.max_uses - offer.uses,
@@ -1228,5 +1266,27 @@ mod tests {
         assert_eq!(back.offers, v.offers);
         assert_eq!(back.job_site, v.job_site);
         assert_eq!(back.xp, 12);
+    }
+
+    #[test]
+    fn hero_of_the_village_discounts_trades() {
+        let mut v = Villager::new("minecraft:plains");
+        let paper = ItemInfo::id_of("minecraft:paper").unwrap();
+        let emerald = ItemInfo::id_of("minecraft:emerald").unwrap();
+        v.offers = vec![Offer {
+            buy: Stack::new(paper, 24),
+            buy_b: Stack::EMPTY,
+            sell: Stack::new(emerald, 1),
+            uses: 0,
+            max_uses: 16,
+            xp: 2,
+            price_multiplier: 0.05,
+        }];
+
+        let base_trades = v.trades();
+        assert_eq!(base_trades[0].buy.count, 24);
+
+        let discounted_trades = v.trades_for_player(Some(0));
+        assert!(discounted_trades[0].buy.count < 24);
     }
 }

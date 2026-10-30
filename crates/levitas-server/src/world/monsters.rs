@@ -130,15 +130,48 @@ impl World {
                 .min_by(|a, b| a.1.total_cmp(&b.1))
                 .map(|(pid, _)| pid);
         }
-        let Some(pid) = mob.hunting else {
+        let mut target_is_mob = false;
+        let (target, distance, dy) = if let Some(pid) = mob.hunting {
+            let target = self.players[&pid].pos;
+            let distance = horizontal_distance(target, mob.pos);
+            let dy = target[1] - mob.pos[1];
+            (target, distance, dy)
+        } else if mob.kind.is_raider() {
+            let prey_valid = mob
+                .prey
+                .and_then(|mid| self.mobs.get(&mid))
+                .is_some_and(|m| {
+                    m.alive()
+                        && matches!(m.kind, MobKind::Villager | MobKind::IronGolem)
+                        && horizontal_distance(m.pos, mob.pos) <= range
+                });
+            if !prey_valid {
+                mob.prey = self
+                    .mobs
+                    .iter()
+                    .filter(|(_, m)| {
+                        m.alive() && matches!(m.kind, MobKind::Villager | MobKind::IronGolem)
+                    })
+                    .map(|(&mid, m)| (mid, horizontal_distance(m.pos, mob.pos)))
+                    .filter(|&(_, d)| d <= range)
+                    .min_by(|a, b| a.1.total_cmp(&b.1))
+                    .map(|(mid, _)| mid);
+            }
+            if let Some(mid) = mob.prey {
+                target_is_mob = true;
+                let target = self.mobs[&mid].pos;
+                let distance = horizontal_distance(target, mob.pos);
+                let dy = target[1] - mob.pos[1];
+                (target, distance, dy)
+            } else {
+                return false;
+            }
+        } else {
             if mob.fuse.take().is_some() {
                 self.send_to_viewers(mob, creeper_swell(id, false));
             }
             return false;
         };
-        let target = self.players[&pid].pos;
-        let distance = horizontal_distance(target, mob.pos);
-        let dy = target[1] - mob.pos[1];
         mob.head_yaw = yaw_towards(mob.pos, target);
         if mob.kind == MobKind::Spider {
             // Spiders climb over whatever is in the way.
@@ -179,6 +212,32 @@ impl World {
             self.shoot_at(id, mob, target, distance);
             return false;
         }
+        if mob.kind == MobKind::Pillager {
+            if mob.attack_cooldown == 0 && distance <= 16.0 {
+                self.shoot_at(id, mob, target, distance);
+                self.play_sound_at("minecraft:item.crossbow.shoot", mob.pos, 1.0, 1.0, None);
+                mob.attack_cooldown = 40;
+            }
+            return false;
+        }
+        if mob.kind == MobKind::Evoker {
+            if mob.attack_cooldown == 0 && distance <= 24.0 {
+                mob.attack_cooldown = 60;
+                self.cast_evoker_fangs(id, mob.pos, target);
+                self.play_sound_at(
+                    "minecraft:entity.evoker.cast_spell",
+                    mob.pos,
+                    1.0,
+                    1.0,
+                    None,
+                );
+            }
+            return false;
+        }
+        if mob.kind == MobKind::Witch {
+            self.witch_attack(id, mob, target, distance);
+            return false;
+        }
         if mob.kind == MobKind::Ghast {
             self.ghast_attack(id, mob, target);
             return false;
@@ -197,19 +256,70 @@ impl World {
         if distance <= reach && dy.abs() < 1.5 && mob.attack_cooldown == 0 {
             mob.attack_cooldown = ATTACK_TICKS;
             self.send_to_viewers(mob, Writer::packet(clientbound::ANIMATE).varint(id).u8(0));
-            let hurt = self.damage_from(
-                pid,
-                mob.attack_damage(),
-                Damage::Mob(mob.kind.display()),
-                Some(id),
-            );
-            // A blocked blow pushes nobody.
-            if hurt {
-                let yaw = f64::from(yaw_towards(mob.pos, target)).to_radians();
-                self.push_player(pid, [-yaw.sin() * KNOCKBACK, 0.36, yaw.cos() * KNOCKBACK]);
+            if mob.kind == MobKind::Ravager {
+                self.play_sound_at("minecraft:entity.ravager.attack", mob.pos, 1.0, 1.0, None);
+            }
+            let knock = if mob.kind == MobKind::Ravager {
+                1.5
+            } else {
+                KNOCKBACK
+            };
+            let damage = mob.attack_damage();
+            if target_is_mob {
+                if let Some(mid) = mob.prey {
+                    if let Some(mut target_mob) = self.mobs.remove(&mid) {
+                        self.hurt_mob(mid, &mut target_mob, damage, "mob");
+                        if target_mob.alive() {
+                            self.mobs.insert(mid, target_mob);
+                        }
+                    }
+                }
+            } else if let Some(pid) = mob.hunting {
+                let hurt = self.damage_from(pid, damage, Damage::Mob(mob.kind.display()), Some(id));
+                // A blocked blow pushes nobody.
+                if hurt {
+                    let yaw = f64::from(yaw_towards(mob.pos, target)).to_radians();
+                    self.push_player(pid, [-yaw.sin() * knock, 0.36, yaw.cos() * knock]);
+                }
             }
         }
         false
+    }
+
+    fn witch_attack(&mut self, id: i32, mob: &mut Mob, target: [f64; 3], distance: f64) {
+        if mob.attack_cooldown > 0 {
+            return;
+        }
+        if mob.health < 15.0 && self.rng.below(4) == 0 {
+            mob.health = (mob.health + 4.0).min(mob.kind.max_health());
+            self.play_sound_at("minecraft:entity.witch.drink", mob.pos, 1.0, 1.0, None);
+            mob.attack_cooldown = 30;
+            return;
+        }
+        mob.attack_cooldown = 45;
+        let potion = if distance > 8.0 {
+            crate::potions::id("slowness").unwrap_or(0)
+        } else if distance <= 3.0 {
+            crate::potions::id("weakness").unwrap_or(0)
+        } else {
+            crate::potions::id("harming").unwrap_or(0)
+        };
+
+        let dx = target[0] - mob.pos[0];
+        let dy = target[1] - (mob.pos[1] + 1.6);
+        let dz = target[2] - mob.pos[2];
+        let horiz = dx.hypot(dz).max(0.1);
+        let speed = 0.75;
+        let vx = (dx / horiz) * speed;
+        let vy = (dy / horiz) * speed + 0.2;
+        let vz = (dz / horiz) * speed;
+
+        self.throw_splash_potion(
+            id,
+            [mob.pos[0], mob.pos[1] + 1.6, mob.pos[2]],
+            [vx, vy, vz],
+            potion,
+        );
     }
 
     /// An enderman turns on a player who looks it in the eyes (unless they wear a carved
@@ -686,12 +796,12 @@ impl World {
     }
 }
 
-fn horizontal_distance(a: [f64; 3], b: [f64; 3]) -> f64 {
+pub(super) fn horizontal_distance(a: [f64; 3], b: [f64; 3]) -> f64 {
     (a[0] - b[0]).hypot(a[2] - b[2])
 }
 
 /// The yaw (degrees, Minecraft's convention) that faces from `from` towards `to`.
-fn yaw_towards(from: [f64; 3], to: [f64; 3]) -> f32 {
+pub(super) fn yaw_towards(from: [f64; 3], to: [f64; 3]) -> f32 {
     let (dx, dz) = (to[0] - from[0], to[2] - from[2]);
     (-dx.atan2(dz)).to_degrees() as f32
 }

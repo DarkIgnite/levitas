@@ -705,6 +705,18 @@ impl World {
                 OnConsume::TeleportRandomly => {}
             }
         }
+        if info.name == "minecraft:ominous_bottle" {
+            let pos = self.players.get(&id).map(|p| p.pos).unwrap_or_default();
+            self.play_sound_at("minecraft:item.ominous_bottle.dispose", pos, 1.0, 1.0, None);
+            self.add_effect(
+                id,
+                levitas_registry::Effect {
+                    id: levitas_registry::mob_effect::BAD_OMEN,
+                    duration: 120_000,
+                    amplifier: 0,
+                },
+            );
+        }
     }
 
     /// Hunger, natural regeneration, starvation, void damage and eating, once per tick.
