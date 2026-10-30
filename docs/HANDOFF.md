@@ -273,6 +273,13 @@ economy the owner wants for their server.
   - Raiders target players, villagers, and iron golems (`monsters.rs`). Iron golems retaliate against raiders.
   - Evokers summon lines of snapping Evoker Fangs (`world/raids.rs` `tick_evoker_fangs`) dealing 6.0 magic damage ignoring armor, and drop Totems of Undying.
   - Victory grants `minecraft:hero_of_the_village` with substantial trading discounts (`special_price` in `containers.rs` and `villagers.rs`). Defeat triggers raider celebration jumping and victory sound.
+- Wandering Traders, Trader Llamas, Zombie Villagers, Curing & Golem Spawning (2026-10-30):
+  - Wandering Traders (`world/villagers.rs`, `world/mobs.rs`): Protocol entity ID 145. Spawns naturally every 24,000 ticks near players in Overworld with 48,000-tick despawn countdown. Drinks Invisibility potions at night (`entity.wandering_trader.drink_potion`, `entity.wandering_trader.disappeared`) and milk at sunrise (`entity.wandering_trader.drink_milk`, `entity.wandering_trader.reappeared`). Offers 5 regular trades + 1 special trade for emeralds.
+  - Trader Llamas: Protocol entity ID 138. Spawn in pairs/singles accompanying the wandering trader, follow their leader, and spit projectile spit (`minecraft:llama_spit`, ID 80) dealing 1.0 damage at monsters attacking the trader or llama.
+  - Zombie Villagers: Protocol entity ID 157. Hostile undead mob burning in daylight and hunting villagers/golems. Spawns naturally (5% chance of zombie spawns) and generated when zombies kill villagers (retaining the victim's profession and trades).
+  - Zombie Villager Curing: Feeding a golden apple to a Weakened zombie villager triggers conversion (3600 ticks, Strength I effect, conversion sound `entity.zombie_villager.cure`, shakes metadata index 19). Completes into a cured villager (`entity.zombie_villager.converted`) with a permanent 20-emerald discount (`cured_discount`).
+  - Village Iron Golem Spawning: When 3 or more villagers panic (monster within 16 blocks) within a 32-block radius and no golem is present, an Iron Golem automatically spawns to defend the village. Iron golems and monsters actively battle.
+  - Phase 10 is now complete.
 
 
 ## 9. Testing pattern

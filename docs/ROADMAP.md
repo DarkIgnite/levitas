@@ -455,13 +455,21 @@ Known gaps are listed under each phase instead of being hidden.
       from the inventory. Saved in vanilla's format. Missing: gossip and prices that
       change with demand or reputation, breeding, sleeping in beds, schedules and
       walking to work, explorer maps, iron golems and cats.
-- [ ] Wandering traders, iron golems, zombie villagers and curing. Iron golems
+- [x] Wandering traders, iron golems, zombie villagers and curing. Iron golems
       (`world/golems.rs`) come with villages and are built from four iron blocks
       and a carved pumpkin; they go after monsters (not creepers) within 16 blocks
       and fling them up, turn on players who hit them unless a player built them,
       are mended by iron ingots, take no fall damage or knockback and drop iron and
-      poppies. Missing: golems spawning when villagers gather, monsters attacking
-      golems and villagers, wandering traders, zombie villagers.
+      poppies. Wild iron golems spawn when 3+ panicking villagers gather within 32
+      blocks. Monsters (zombies, raiders) actively hunt villagers and iron golems.
+      When a zombie kills a villager, it converts into a zombie villager retaining
+      its profession and trades. Zombie villagers also spawn naturally (5% chance).
+      Weakened zombie villagers fed a golden apple begin conversion (3600 ticks,
+      Strength I effect, conversion shakes), completing into a cured villager with
+      permanent trade discounts. Wandering traders spawn periodically near players
+      with 1-2 trader llamas (which follow the trader and spit at hostiles), offering
+      5 regular trades and 1 special trade, drinking invisibility potions at night
+      and milk at dawn, and despawning after 48,000 ticks.
 - [x] Raids and bad omen (`world/raids.rs`). Drinking an ominous bottle
       (`minecraft:ominous_bottle`, `world/survival.rs`) gives Bad Omen for 100 minutes
       (`mob_effect::BAD_OMEN`). Approaching within 64 blocks of a villager converts Bad Omen

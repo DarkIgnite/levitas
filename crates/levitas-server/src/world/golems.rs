@@ -182,6 +182,47 @@ impl World {
             return;
         }
     }
+
+    /// Checks for clusters of panicking villagers and spawns an Iron Golem to protect them.
+    pub(super) fn tick_village_golem_spawning(&mut self) {
+        if !self.tick.is_multiple_of(100) {
+            return;
+        }
+        let panicking_villagers: Vec<[f64; 3]> = self
+            .mobs
+            .values()
+            .filter(|m| m.alive() && m.kind == MobKind::Villager && m.panic_ticks > 0)
+            .map(|m| m.pos)
+            .collect();
+        for &pos in &panicking_villagers {
+            let count = panicking_villagers
+                .iter()
+                .filter(|&&other| (other[0] - pos[0]).hypot(other[2] - pos[2]) <= 32.0)
+                .count();
+            if count >= 3 {
+                let has_golem = self.mobs.values().any(|m| {
+                    m.alive()
+                        && m.kind == MobKind::IronGolem
+                        && (m.pos[0] - pos[0]).hypot(m.pos[2] - pos[2]) <= 32.0
+                });
+                if !has_golem {
+                    let gid = next_entity_id();
+                    let spawn_pos = [pos[0] + 1.0, pos[1], pos[2] + 1.0];
+                    let mut golem = Mob::new(MobKind::IronGolem, spawn_pos, &mut self.rng);
+                    golem.player_created = false;
+                    self.mobs.insert(gid, golem);
+                    self.play_sound_at(
+                        "minecraft:entity.iron_golem.repair",
+                        spawn_pos,
+                        1.0,
+                        1.0,
+                        None,
+                    );
+                    break;
+                }
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -244,5 +285,20 @@ mod tests {
         assert_eq!(g.prey, Some(zombie));
         assert!(w.mobs[&zombie].health < MobKind::Zombie.max_health());
         assert_eq!(w.mobs[&creeper].health, MobKind::Creeper.max_health());
+    }
+
+    #[test]
+    fn panicking_villagers_spawn_iron_golem() {
+        let mut w = world();
+        for i in 0..3 {
+            let vid = next_entity_id();
+            let mut villager = Mob::new(MobKind::Villager, [f64::from(i), -60.0, 0.0], &mut w.rng);
+            villager.panic_ticks = 100;
+            w.mobs.insert(vid, villager);
+        }
+        w.tick = 100;
+        w.tick_village_golem_spawning();
+        let golem = w.mobs.values().find(|m| m.kind == MobKind::IronGolem);
+        assert!(golem.is_some_and(|g| !g.player_created));
     }
 }

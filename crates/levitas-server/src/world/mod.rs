@@ -1448,6 +1448,8 @@ impl World {
         self.tick_dragon_fight();
         self.tick_raids();
         self.tick_evoker_fangs();
+        self.tick_village_golem_spawning();
+        self.tick_wandering_trader_spawning();
         self.tick_effects();
         self.tick_items();
         self.tick_furnaces();

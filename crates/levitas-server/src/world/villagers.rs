@@ -217,6 +217,8 @@ pub struct Villager {
     /// The player trading with it, who alone may.
     pub customer: Option<i32>,
     next_site_check: u64,
+    /// Permanent trade discount granted when cured from a zombie villager.
+    pub cured_discount: bool,
 }
 
 impl Villager {
@@ -230,7 +232,95 @@ impl Villager {
             job_site: None,
             customer: None,
             next_site_check: 0,
+            cured_discount: false,
         }
+    }
+
+    /// A wandering trader offering 5 regular trades and 1 special trade for emeralds.
+    pub fn new_wandering_trader(rng: &mut Rng) -> Self {
+        let mut v = Villager::new("minecraft:plains");
+        let emerald = ItemInfo::id_of("minecraft:emerald").unwrap_or(0);
+        let regular_trades: &[(i32, &str, i32, i32)] = &[
+            (1, "minecraft:fern", 1, 12),
+            (1, "minecraft:dandelion", 1, 12),
+            (1, "minecraft:poppy", 1, 12),
+            (1, "minecraft:blue_orchid", 1, 12),
+            (1, "minecraft:allium", 1, 12),
+            (1, "minecraft:azure_bluet", 1, 12),
+            (1, "minecraft:red_tulip", 1, 12),
+            (1, "minecraft:orange_tulip", 1, 12),
+            (1, "minecraft:white_tulip", 1, 12),
+            (1, "minecraft:pink_tulip", 1, 12),
+            (1, "minecraft:oxeye_daisy", 1, 12),
+            (1, "minecraft:cornflower", 1, 12),
+            (1, "minecraft:lily_of_the_valley", 1, 12),
+            (1, "minecraft:wheat_seeds", 1, 12),
+            (1, "minecraft:pumpkin_seeds", 1, 12),
+            (1, "minecraft:melon_seeds", 1, 12),
+            (1, "minecraft:beetroot_seeds", 1, 12),
+            (1, "minecraft:moss_block", 2, 12),
+            (1, "minecraft:pointed_dripstone", 2, 8),
+            (1, "minecraft:lily_pad", 2, 12),
+            (1, "minecraft:glowstone", 1, 8),
+            (1, "minecraft:sea_pickle", 1, 12),
+            (1, "minecraft:kelp", 3, 12),
+            (1, "minecraft:cactus", 1, 12),
+            (1, "minecraft:sugar_cane", 1, 12),
+            (4, "minecraft:slime_ball", 1, 5),
+            (1, "minecraft:vine", 3, 12),
+            (1, "minecraft:sand", 4, 12),
+            (1, "minecraft:red_sand", 4, 12),
+            (1, "minecraft:brown_mushroom", 1, 12),
+            (1, "minecraft:red_mushroom", 1, 12),
+            (1, "minecraft:gunpowder", 1, 8),
+        ];
+        let special_trades: &[(i32, &str, i32, i32)] = &[
+            (5, "minecraft:nautilus_shell", 1, 5),
+            (6, "minecraft:blue_ice", 1, 6),
+            (3, "minecraft:packed_ice", 1, 6),
+            (3, "minecraft:podzol", 3, 8),
+            (5, "minecraft:oak_sapling", 1, 8),
+            (5, "minecraft:spruce_sapling", 1, 8),
+            (5, "minecraft:birch_sapling", 1, 8),
+            (5, "minecraft:jungle_sapling", 1, 8),
+            (5, "minecraft:acacia_sapling", 1, 8),
+            (5, "minecraft:dark_oak_sapling", 1, 8),
+            (5, "minecraft:cherry_sapling", 1, 8),
+            (5, "minecraft:pale_oak_sapling", 1, 8),
+        ];
+        let mut pool: Vec<&(i32, &str, i32, i32)> = regular_trades.iter().collect();
+        for _ in 0..5 {
+            if pool.is_empty() {
+                break;
+            }
+            let idx = rng.below(pool.len() as u32) as usize;
+            let &(cost, item_name, count, max_uses) = pool.swap_remove(idx);
+            if let Some(item_id) = ItemInfo::id_of(item_name) {
+                v.offers.push(Offer {
+                    buy: Stack::new(emerald, cost),
+                    buy_b: Stack::EMPTY,
+                    sell: Stack::new(item_id, count),
+                    uses: 0,
+                    max_uses,
+                    xp: 0,
+                    price_multiplier: 0.05,
+                });
+            }
+        }
+        let special_idx = rng.below(special_trades.len() as u32) as usize;
+        let &(cost, item_name, count, max_uses) = &special_trades[special_idx];
+        if let Some(item_id) = ItemInfo::id_of(item_name) {
+            v.offers.push(Offer {
+                buy: Stack::new(emerald, cost),
+                buy_b: Stack::EMPTY,
+                sell: Stack::new(item_id, count),
+                uses: 0,
+                max_uses,
+                xp: 0,
+                price_multiplier: 0.05,
+            });
+        }
+        v
     }
 
     pub fn write_nbt(&self, nbt: &mut Compound) {
@@ -252,6 +342,9 @@ impl Villager {
                     .collect::<Vec<_>>(),
             ),
         );
+        if self.cured_discount {
+            nbt.insert("CuredDiscount", true);
+        }
         if let Some(site) = self.job_site {
             nbt.insert(
                 "Brain",
@@ -282,6 +375,7 @@ impl Villager {
         v.profession = Profession::from_name(data.and_then(|d| d.str("profession")).unwrap_or(""));
         v.level = data.and_then(|d| d.int("level")).unwrap_or(1).clamp(1, 5) as i32;
         v.xp = nbt.int("Xp").unwrap_or(0) as i32;
+        v.cured_discount = nbt.int("CuredDiscount").unwrap_or(0) != 0;
         v.offers = nbt
             .compound("Offers")
             .and_then(|o| o.list("Recipes"))
@@ -317,6 +411,31 @@ impl Villager {
             .u8(0xFF)
     }
 
+    /// The trades as the trading screen's click handling sees them, with discounts if the
+    /// player has the Hero of the Village effect or if the villager was cured.
+    pub fn trades_for_player(&self, hero_amp: Option<u8>) -> Vec<Trade> {
+        let cured_bonus = if self.cured_discount { 20 } else { 0 };
+        self.offers
+            .iter()
+            .map(|o| {
+                let hero_discount = hero_amp.map_or(0, |amp| {
+                    let d = (((o.buy.count as f32) * (0.05 + 0.0625 * (amp as f32 + 1.0))).round()
+                        as i32)
+                        .max(1);
+                    d.min(o.buy.count - 1)
+                });
+                let discount = (hero_discount + cured_bonus).min(o.buy.count - 1);
+                let buy = o.buy.with_count((o.buy.count - discount).max(1));
+                Trade {
+                    buy,
+                    buy_b: o.buy_b,
+                    sell: o.sell,
+                    left: o.max_uses - o.uses,
+                }
+            })
+            .collect()
+    }
+
     /// Adds two trades of the villager's current level.
     fn add_trades(&mut self, rng: &mut Rng) {
         let mut pool: Vec<&Spec> = table(self.profession)
@@ -340,34 +459,40 @@ impl Villager {
         }
     }
 
-    /// The trades as the trading screen's click handling sees them, with discounts if the
-    /// player has the Hero of the Village effect.
-    pub fn trades_for_player(&self, hero_amp: Option<u8>) -> Vec<Trade> {
-        self.offers
-            .iter()
-            .map(|o| {
-                let discount = hero_amp.map_or(0, |amp| {
-                    let d = (((o.buy.count as f32) * (0.05 + 0.0625 * (amp as f32 + 1.0))).round()
-                        as i32)
-                        .max(1);
-                    d.min(o.buy.count - 1)
-                });
-                let buy = o.buy.with_count((o.buy.count - discount).max(1));
-                Trade {
-                    buy,
-                    buy_b: o.buy_b,
-                    sell: o.sell,
-                    left: o.max_uses - o.uses,
-                }
-            })
-            .collect()
-    }
-
     /// The trades as the trading screen's click handling sees them.
     #[allow(dead_code)]
     pub fn trades(&self) -> Vec<Trade> {
         self.trades_for_player(None)
     }
+}
+
+const DATA_ZOMBIE_VILLAGER_CONVERTING: u8 = 19;
+const DATA_ZOMBIE_VILLAGER_DATA: u8 = 20;
+const SERIALIZER_BOOLEAN: i32 = 8;
+
+pub fn zombie_villager_data(id: i32, converting: bool, v: &Villager) -> Writer {
+    let index =
+        |names: &[&str], name: &str| names.iter().position(|&n| n == name).unwrap_or(0) as i32;
+    Writer::packet(clientbound::SET_ENTITY_DATA)
+        .varint(id)
+        .u8(DATA_ZOMBIE_VILLAGER_CONVERTING)
+        .varint(SERIALIZER_BOOLEAN)
+        .bool(converting)
+        .u8(DATA_ZOMBIE_VILLAGER_DATA)
+        .varint(SERIALIZER_VILLAGER_DATA)
+        .varint(index(villager_type::NAMES, v.kind))
+        .varint(index(villager_profession::NAMES, v.profession.name()))
+        .varint(v.level)
+        .u8(0xFF)
+}
+
+pub fn zombie_villager_converting_packet(id: i32, converting: bool) -> Writer {
+    Writer::packet(clientbound::SET_ENTITY_DATA)
+        .varint(id)
+        .u8(DATA_ZOMBIE_VILLAGER_CONVERTING)
+        .varint(SERIALIZER_BOOLEAN)
+        .bool(converting)
+        .u8(0xFF)
 }
 
 /// Fixed prices and amounts, or an enchanted item or book priced by its enchantments.
@@ -771,6 +896,14 @@ impl World {
         let Some(v) = mob.villager.as_mut() else {
             return;
         };
+        let monster_near = self.mobs.values().any(|m| {
+            m.alive() && m.kind.is_monster() && (m.pos[0] - pos[0]).hypot(m.pos[2] - pos[2]) <= 16.0
+        });
+        if monster_near {
+            mob.panic_ticks = 100;
+        } else {
+            mob.panic_ticks = mob.panic_ticks.saturating_sub(1);
+        }
         if RESTOCK_TIMES.contains(&time) && v.job_site.is_some() {
             v.restock();
         }
@@ -845,22 +978,37 @@ impl World {
         }
     }
 
-    /// A player right-clicks a villager: the trading screen opens if it has trades.
+    /// A player right-clicks a villager or wandering trader: the trading screen opens if it has trades.
     pub(super) fn open_trading(&mut self, id: i32, target: i32) -> bool {
         let Some(mob) = self.mobs.get_mut(&target) else {
             return false;
         };
+        let is_trader = mob.kind == MobKind::WanderingTrader;
         let (adult, pos) = (mob.age >= 0, mob.pos);
         let Some(v) = mob.villager.as_mut() else {
             return false;
         };
         let busy = v.customer.is_some_and(|c| c != id);
-        if !adult || !v.profession.trades() || v.offers.is_empty() || busy {
-            self.play_sound_at("minecraft:entity.villager.no", pos, 1.0, 1.0, None);
+        let can_trade = if is_trader {
+            !v.offers.is_empty()
+        } else {
+            v.profession.trades() && !v.offers.is_empty()
+        };
+        if !adult || !can_trade || busy {
+            let sound = if is_trader {
+                "minecraft:entity.wandering_trader.no"
+            } else {
+                "minecraft:entity.villager.no"
+            };
+            self.play_sound_at(sound, pos, 1.0, 1.0, None);
             return true;
         }
         v.customer = Some(id);
-        let title = v.profession.title();
+        let title = if is_trader {
+            r#"{"text":"Wandering Trader"}"#
+        } else {
+            v.profession.title()
+        };
         self.close_container(id);
         let p = self.players.get_mut(&id).expect("player exists");
         p.next_window = p.next_window % MAX_WINDOW_ID + 1;
@@ -896,9 +1044,13 @@ impl World {
         else {
             return;
         };
-        let Some(v) = self.mobs.get(&target).and_then(|m| m.villager.as_ref()) else {
+        let Some(mob) = self.mobs.get(&target) else {
             return;
         };
+        let Some(v) = mob.villager.as_ref() else {
+            return;
+        };
+        let is_regular = mob.kind != MobKind::WanderingTrader;
         let cost = |packet: Writer, s: Stack| {
             // An item cost: the item, how many, and no required components.
             packet.varint(s.item).varint(s.count).varint(0)
@@ -908,16 +1060,18 @@ impl World {
             .get(&id)
             .and_then(|p| p.effect(levitas_registry::mob_effect::HERO_OF_THE_VILLAGE))
             .map(|e| e.amplifier);
+        let cured_bonus = if v.cured_discount { 20 } else { 0 };
         let mut packet = Writer::packet(clientbound::MERCHANT_OFFERS)
             .varint(window)
             .varint(v.offers.len() as i32);
         for o in &v.offers {
-            let discount = hero_amp.map_or(0, |amp| {
+            let hero_discount = hero_amp.map_or(0, |amp| {
                 let d = (((o.buy.count as f32) * (0.05 + 0.0625 * (amp as f32 + 1.0))).round()
                     as i32)
                     .max(1);
                 d.min(o.buy.count - 1)
             });
+            let discount = (hero_discount + cured_bonus).min(o.buy.count - 1);
             let special_price = -discount;
             packet = cost(packet, o.buy);
             packet = crate::inventory::write_stack(packet, o.sell);
@@ -936,10 +1090,10 @@ impl World {
                 .i32(0); // demand
         }
         packet = packet
-            .varint(v.level)
-            .varint(v.xp)
-            .bool(true) // a regular villager, with levels
-            .bool(true); // which restocks
+            .varint(if is_regular { v.level } else { 1 })
+            .varint(if is_regular { v.xp } else { 0 })
+            .bool(is_regular) // a regular villager, with levels
+            .bool(is_regular); // which restocks
         self.send(id, packet);
     }
 
@@ -976,15 +1130,21 @@ impl World {
                 open.grid[0] = stack.with_count(over);
             }
         }
+        let cured_bonus = self
+            .mobs
+            .get(&target)
+            .and_then(|m| m.villager.as_ref())
+            .map_or(0, |v| if v.cured_discount { 20 } else { 0 });
         let hero_amp = p
             .effect(levitas_registry::mob_effect::HERO_OF_THE_VILLAGE)
             .map(|e| e.amplifier);
-        let discount = hero_amp.map_or(0, |amp| {
+        let hero_discount = hero_amp.map_or(0, |amp| {
             let d = (((offer.buy.count as f32) * (0.05 + 0.0625 * (amp as f32 + 1.0))).round()
                 as i32)
                 .max(1);
             d.min(offer.buy.count - 1)
         });
+        let discount = (hero_discount + cured_bonus).min(offer.buy.count - 1);
         let effective_buy = offer.buy.with_count((offer.buy.count - discount).max(1));
         // Pull the payment out of the inventory, up to a full stack of each.
         for (slot, cost) in [(0, effective_buy), (1, offer.buy_b)] {
@@ -1038,6 +1198,10 @@ impl World {
     pub(super) fn traded(&mut self, id: i32, target: i32, index: usize, times: i32) {
         let mut player_xp = 0;
         let mut levelled = false;
+        let is_trader = self
+            .mobs
+            .get(&target)
+            .is_some_and(|m| m.kind == MobKind::WanderingTrader);
         let pos = {
             let Some(mob) = self.mobs.get_mut(&target) else {
                 return;
@@ -1053,15 +1217,22 @@ impl World {
             for _ in 0..times {
                 player_xp += 3 + self.rng.below(4) as i32;
             }
-            while v.level < 5 && v.xp >= LEVEL_XP[v.level as usize] {
-                v.level += 1;
-                v.add_trades(&mut self.rng);
-                player_xp += 5;
-                levelled = true;
+            if !is_trader {
+                while v.level < 5 && v.xp >= LEVEL_XP[v.level as usize] {
+                    v.level += 1;
+                    v.add_trades(&mut self.rng);
+                    player_xp += 5;
+                    levelled = true;
+                }
             }
             mob.pos
         };
-        self.play_sound_at("minecraft:entity.villager.yes", pos, 1.0, 1.0, None);
+        let sound = if is_trader {
+            "minecraft:entity.wandering_trader.yes"
+        } else {
+            "minecraft:entity.villager.yes"
+        };
+        self.play_sound_at(sound, pos, 1.0, 1.0, None);
         if levelled {
             if let Some(mob) = self.mobs.remove(&target) {
                 if let Some(v) = mob.villager.as_ref() {
@@ -1095,6 +1266,65 @@ impl World {
                 self.mobs.insert(next_entity_id(), mob);
             }
         }
+    }
+
+    /// Periodic spawn check for wandering traders in the overworld.
+    pub(super) fn tick_wandering_trader_spawning(&mut self) {
+        if !self.tick.is_multiple_of(24000) || !self.dimension.has_sky() {
+            return;
+        }
+        let exists = self
+            .mobs
+            .values()
+            .any(|m| m.alive() && m.kind == MobKind::WanderingTrader);
+        if exists {
+            return;
+        }
+        let Some(player_pos) = self
+            .players
+            .values()
+            .find(|p| p.alive && p.survival())
+            .map(|p| p.pos)
+        else {
+            return;
+        };
+        let angle = self.rng.f64() * std::f64::consts::TAU;
+        let dist = 24.0 + self.rng.f64() * 24.0;
+        let x = (player_pos[0] + angle.cos() * dist).floor() as i32;
+        let z = (player_pos[2] + angle.sin() * dist).floor() as i32;
+        let Some(top_y) = self.top_block(x, z) else {
+            return;
+        };
+        let spawn_pos = [f64::from(x) + 0.5, f64::from(top_y + 1), f64::from(z) + 0.5];
+        self.spawn_wandering_trader(spawn_pos);
+    }
+
+    /// Spawns a wandering trader and 1-2 trader llamas at the given position.
+    pub(super) fn spawn_wandering_trader(&mut self, pos: [f64; 3]) -> (i32, Vec<i32>) {
+        let tid = next_entity_id();
+        let mut trader = Mob::new(MobKind::WanderingTrader, pos, &mut self.rng);
+        trader.despawn_timer = Some(48000);
+        trader.villager = Some(Box::new(Villager::new_wandering_trader(&mut self.rng)));
+        self.mobs.insert(tid, trader);
+        let mut llamas = Vec::new();
+        let llama_count = 1 + self.rng.below(2);
+        for i in 0..llama_count {
+            let lid = next_entity_id();
+            let lx = pos[0] + (i as f64 + 1.0) * 1.5;
+            let lz = pos[2] + (i as f64 + 1.0) * 1.5;
+            let mut llama = Mob::new(MobKind::TraderLlama, [lx, pos[1], lz], &mut self.rng);
+            llama.leader = Some(tid);
+            self.mobs.insert(lid, llama);
+            llamas.push(lid);
+        }
+        self.play_sound_at(
+            "minecraft:entity.wandering_trader.reappeared",
+            pos,
+            1.0,
+            1.0,
+            None,
+        );
+        (tid, llamas)
     }
 }
 
@@ -1288,5 +1518,36 @@ mod tests {
 
         let discounted_trades = v.trades_for_player(Some(0));
         assert!(discounted_trades[0].buy.count < 24);
+    }
+
+    #[test]
+    fn cured_villager_has_discounted_trades() {
+        let mut v = Villager::new("minecraft:plains");
+        let emerald = ItemInfo::id_of("minecraft:emerald").unwrap();
+        let diamond = ItemInfo::id_of("minecraft:diamond").unwrap();
+        v.offers = vec![Offer {
+            buy: Stack::new(emerald, 24),
+            buy_b: Stack::EMPTY,
+            sell: Stack::new(diamond, 1),
+            uses: 0,
+            max_uses: 16,
+            xp: 2,
+            price_multiplier: 0.05,
+        }];
+        v.cured_discount = true;
+        let discounted = v.trades_for_player(None);
+        assert_eq!(discounted[0].buy.count, 4); // 24 - 20 = 4 emeralds
+    }
+
+    #[test]
+    fn wandering_trader_trades_and_offers() {
+        let mut rng = Rng::new(12345);
+        let wt = Villager::new_wandering_trader(&mut rng);
+        assert_eq!(wt.offers.len(), 6);
+        for offer in &wt.offers {
+            assert!(offer.buy.item != 0);
+            assert!(offer.sell.item != 0);
+            assert!(offer.max_uses > 0);
+        }
     }
 }

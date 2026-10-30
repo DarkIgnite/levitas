@@ -88,6 +88,9 @@ pub enum MobKind {
     Ravager,
     Witch,
     Evoker,
+    WanderingTrader,
+    TraderLlama,
+    ZombieVillager,
 }
 
 impl MobKind {
@@ -113,6 +116,9 @@ impl MobKind {
             "minecraft:ravager" => Some(MobKind::Ravager),
             "minecraft:witch" => Some(MobKind::Witch),
             "minecraft:evoker" => Some(MobKind::Evoker),
+            "minecraft:wandering_trader" => Some(MobKind::WanderingTrader),
+            "minecraft:trader_llama" => Some(MobKind::TraderLlama),
+            "minecraft:zombie_villager" => Some(MobKind::ZombieVillager),
             _ => None,
         }
     }
@@ -139,6 +145,9 @@ impl MobKind {
             MobKind::Ravager => "minecraft:ravager",
             MobKind::Witch => "minecraft:witch",
             MobKind::Evoker => "minecraft:evoker",
+            MobKind::WanderingTrader => "minecraft:wandering_trader",
+            MobKind::TraderLlama => "minecraft:trader_llama",
+            MobKind::ZombieVillager => "minecraft:zombie_villager",
         }
     }
 
@@ -165,6 +174,9 @@ impl MobKind {
             MobKind::Ravager => "Ravager",
             MobKind::Witch => "Witch",
             MobKind::Evoker => "Evoker",
+            MobKind::WanderingTrader => "Wandering Trader",
+            MobKind::TraderLlama => "Trader Llama",
+            MobKind::ZombieVillager => "Zombie Villager",
         }
     }
 
@@ -185,6 +197,7 @@ impl MobKind {
                 | MobKind::Ravager
                 | MobKind::Witch
                 | MobKind::Evoker
+                | MobKind::ZombieVillager
         )
     }
 
@@ -205,7 +218,10 @@ impl MobKind {
     pub fn is_undead(self) -> bool {
         matches!(
             self,
-            MobKind::Zombie | MobKind::Skeleton | MobKind::ZombifiedPiglin
+            MobKind::Zombie
+                | MobKind::Skeleton
+                | MobKind::ZombifiedPiglin
+                | MobKind::ZombieVillager
         )
     }
 
@@ -225,7 +241,7 @@ impl MobKind {
     /// Melee damage on Normal difficulty.
     pub fn attack_damage(self) -> f32 {
         match self {
-            MobKind::Zombie => 3.0,
+            MobKind::Zombie | MobKind::ZombieVillager => 3.0,
             MobKind::Spider => 2.0,
             // With its golden sword.
             MobKind::ZombifiedPiglin => 8.0,
@@ -241,7 +257,7 @@ impl MobKind {
     /// How far away a monster notices players.
     pub fn follow_range(self) -> f64 {
         match self {
-            MobKind::Zombie | MobKind::ZombifiedPiglin => 35.0,
+            MobKind::Zombie | MobKind::ZombifiedPiglin | MobKind::ZombieVillager => 35.0,
             MobKind::Ghast | MobKind::Enderman => 64.0,
             MobKind::Blaze => 48.0,
             MobKind::Pillager
@@ -254,7 +270,10 @@ impl MobKind {
     }
 
     pub fn burns_in_daylight(self) -> bool {
-        matches!(self, MobKind::Zombie | MobKind::Skeleton)
+        matches!(
+            self,
+            MobKind::Zombie | MobKind::Skeleton | MobKind::ZombieVillager
+        )
     }
 
     fn entity_type(self) -> i32 {
@@ -279,6 +298,9 @@ impl MobKind {
             MobKind::Ravager => entity_type::RAVAGER,
             MobKind::Witch => entity_type::WITCH,
             MobKind::Evoker => entity_type::EVOKER,
+            MobKind::WanderingTrader => entity_type::WANDERING_TRADER,
+            MobKind::TraderLlama => entity_type::TRADER_LLAMA,
+            MobKind::ZombieVillager => entity_type::ZOMBIE_VILLAGER,
         }
     }
 
@@ -295,7 +317,10 @@ impl MobKind {
             MobKind::Ghast => 10.0,
             MobKind::Blaze => 20.0,
             MobKind::Enderman => 40.0,
-            MobKind::Villager => 20.0,
+            MobKind::Villager
+            | MobKind::WanderingTrader
+            | MobKind::TraderLlama
+            | MobKind::ZombieVillager => 20.0,
             MobKind::IronGolem => 100.0,
             MobKind::Pillager | MobKind::Vindicator | MobKind::Evoker => 24.0,
             MobKind::Witch => 26.0,
@@ -325,6 +350,8 @@ impl MobKind {
                 (0.6, 1.95)
             }
             MobKind::Ravager => (1.95, 2.2),
+            MobKind::WanderingTrader | MobKind::ZombieVillager => (0.6, 1.95),
+            MobKind::TraderLlama => (0.9, 1.87),
         }
     }
 
@@ -335,7 +362,7 @@ impl MobKind {
             MobKind::Zombie => 0.12,
             MobKind::Spider => 0.15,
             MobKind::Creeper => 0.11,
-            MobKind::Skeleton | MobKind::ZombifiedPiglin => 0.12,
+            MobKind::Skeleton | MobKind::ZombifiedPiglin | MobKind::ZombieVillager => 0.12,
             // Magma cubes only move by hopping.
             MobKind::MagmaCube => 0.0,
             MobKind::Ghast => 0.08,
@@ -373,6 +400,9 @@ impl MobKind {
             MobKind::Ravager => "ravager",
             MobKind::Witch => "witch",
             MobKind::Evoker => "evoker",
+            MobKind::WanderingTrader => "wandering_trader",
+            MobKind::TraderLlama => "llama",
+            MobKind::ZombieVillager => "zombie_villager",
         }
     }
 }
@@ -450,6 +480,14 @@ pub struct Mob {
     pub is_patrol_leader: bool,
     /// Whether this raider is celebrating a raid victory.
     pub celebrating: bool,
+    /// Zombie villager curing countdown timer in ticks.
+    pub converting: Option<u32>,
+    /// Wandering trader despawn countdown in ticks.
+    pub despawn_timer: Option<u32>,
+    /// Entity ID of the leader mob (e.g. wandering trader for trader llamas).
+    pub leader: Option<i32>,
+    /// Ticks remaining of panic state (e.g. villagers fleeing monsters).
+    pub panic_ticks: u32,
 }
 
 impl Mob {
@@ -508,8 +546,15 @@ impl Mob {
             sent_pos: pos,
             sent_angles: (0, 0),
             viewers: HashSet::new(),
-            villager: (kind == MobKind::Villager)
-                .then(|| Box::new(super::villagers::Villager::new("minecraft:plains"))),
+            villager: match kind {
+                MobKind::Villager | MobKind::ZombieVillager => Some(Box::new(
+                    super::villagers::Villager::new("minecraft:plains"),
+                )),
+                MobKind::WanderingTrader => Some(Box::new(
+                    super::villagers::Villager::new_wandering_trader(rng),
+                )),
+                _ => None,
+            },
             prey: None,
             player_created: false,
             name: None,
@@ -517,6 +562,10 @@ impl Mob {
             raid_id: None,
             is_patrol_leader: false,
             celebrating: false,
+            converting: None,
+            despawn_timer: None,
+            leader: None,
+            panic_ticks: 0,
         }
     }
 
@@ -576,7 +625,7 @@ impl Mob {
         )
     }
 
-    fn spawn_packets(&self, id: i32) -> Vec<Writer> {
+    pub(super) fn spawn_packets(&self, id: i32) -> Vec<Writer> {
         let mut packets = vec![Writer::packet(clientbound::ADD_ENTITY)
             .varint(id)
             .uuid(self.uuid)
@@ -593,7 +642,15 @@ impl Mob {
             packets.push(self.wool_data(id));
         }
         if let Some(v) = &self.villager {
-            packets.push(v.data_packet(id));
+            if self.kind == MobKind::ZombieVillager {
+                packets.push(super::villagers::zombie_villager_data(
+                    id,
+                    self.converting.is_some(),
+                    v,
+                ));
+            } else if self.kind == MobKind::Villager {
+                packets.push(v.data_packet(id));
+            }
         }
         if self.kind == MobKind::IronGolem {
             packets.push(super::golems::golem_data(id, self.player_created));
@@ -734,6 +791,12 @@ impl Mob {
         if let Some(raid_id) = self.raid_id {
             nbt.insert("RaidId", raid_id as i32);
         }
+        if let Some(converting) = self.converting {
+            nbt.insert("ConversionTime", converting as i32);
+        }
+        if let Some(timer) = self.despawn_timer {
+            nbt.insert("DespawnDelay", timer as i32);
+        }
         if !self.effects.is_empty() {
             nbt.insert(
                 "active_effects",
@@ -782,7 +845,16 @@ impl Mob {
         if let Some(t) = nbt.int("EggLayTime") {
             mob.egg_ticks = t.max(0) as u32;
         }
-        if kind == MobKind::Villager {
+        if let Some(t) = nbt.int("ConversionTime") {
+            mob.converting = Some(t.max(0) as u32);
+        }
+        if let Some(d) = nbt.int("DespawnDelay") {
+            mob.despawn_timer = Some(d.max(0) as u32);
+        }
+        if kind == MobKind::Villager
+            || kind == MobKind::ZombieVillager
+            || kind == MobKind::WanderingTrader
+        {
             mob.villager = Some(Box::new(super::villagers::Villager::read_nbt(nbt)));
         }
         mob.player_created = nbt.int("PlayerCreated").unwrap_or(0) != 0;
@@ -837,7 +909,7 @@ struct SpawnList {
 }
 
 /// Mobs `/summon` knows.
-pub const SUMMONABLE: [&str; 15] = [
+pub const SUMMONABLE: [&str; 23] = [
     "cow",
     "pig",
     "sheep",
@@ -853,6 +925,14 @@ pub const SUMMONABLE: [&str; 15] = [
     "enderman",
     "villager",
     "iron_golem",
+    "pillager",
+    "vindicator",
+    "ravager",
+    "witch",
+    "evoker",
+    "wandering_trader",
+    "trader_llama",
+    "zombie_villager",
 ];
 
 fn spawners(list: &Value) -> Vec<Spawner> {
@@ -1043,6 +1123,50 @@ impl World {
                     mob.target = None;
                     mob.path.clear();
                 }
+            }
+            if mob.kind == MobKind::ZombieVillager {
+                if let Some(ref mut timer) = mob.converting {
+                    if *timer > 0 {
+                        *timer -= 1;
+                    }
+                    if *timer == 0 {
+                        mob.kind = MobKind::Villager;
+                        mob.converting = None;
+                        mob.health = MobKind::Villager.max_health();
+                        mob.effects.retain(|e| {
+                            e.id != levitas_registry::mob_effect::WEAKNESS
+                                && e.id != levitas_registry::mob_effect::STRENGTH
+                        });
+                        if let Some(v) = mob.villager.as_mut() {
+                            v.cured_discount = true;
+                        }
+                        self.send_to_viewers(&mob, items::remove_entity(id));
+                        for p in mob.spawn_packets(id) {
+                            self.send_to_viewers(&mob, p);
+                        }
+                        self.play_sound_at(
+                            "minecraft:entity.zombie_villager.converted",
+                            mob.pos,
+                            1.0,
+                            1.0,
+                            None,
+                        );
+                    }
+                }
+            }
+            if mob.kind == MobKind::WanderingTrader {
+                self.tick_wandering_trader(id, &mut mob);
+                if mob.villager.as_ref().is_some_and(|v| v.customer.is_some()) {
+                    mob.target = None;
+                    mob.path.clear();
+                }
+                if mob.despawn_timer.is_some_and(|t| t == 0) {
+                    self.send_to_viewers(&mob, items::remove_entity(id));
+                    continue;
+                }
+            }
+            if mob.kind == MobKind::TraderLlama {
+                self.tick_trader_llama(id, &mut mob);
             }
             if mob.kind == MobKind::IronGolem {
                 self.tick_golem(id, &mut mob);
@@ -1852,8 +1976,14 @@ impl World {
             self.name_mob(id, target, slot);
             return;
         }
-        if mob.kind == MobKind::Villager {
+        if mob.kind == MobKind::Villager || mob.kind == MobKind::WanderingTrader {
             self.open_trading(id, target);
+            return;
+        }
+        if mob.kind == MobKind::ZombieVillager {
+            if held == "minecraft:golden_apple" {
+                self.cure_zombie_villager(id, target, slot);
+            }
             return;
         }
         if mob.kind == MobKind::IronGolem {
@@ -1888,6 +2018,141 @@ impl World {
                 self.exchange_held(id, slot, "minecraft:milk_bucket");
             }
             _ => {}
+        }
+    }
+
+    /// Feeds a golden apple to a weakened zombie villager to begin curing it back to a villager.
+    pub(super) fn cure_zombie_villager(&mut self, id: i32, target: i32, slot: usize) -> bool {
+        let (pos, viewers) = {
+            let Some(mob) = self.mobs.get_mut(&target) else {
+                return false;
+            };
+            if mob.kind != MobKind::ZombieVillager
+                || mob.converting.is_some()
+                || mob.effect_level(levitas_registry::mob_effect::WEAKNESS) == 0
+            {
+                return false;
+            }
+            mob.converting = Some(3600);
+            (mob.pos, mob.viewers.clone())
+        };
+        let p = self.players.get_mut(&id).expect("checked");
+        if p.survival() {
+            p.inventory.take(slot, 1);
+            let update = p.inventory.set_slot_packet(slot);
+            self.send(id, update);
+        }
+        let frame = frame(super::villagers::zombie_villager_converting_packet(
+            target, true,
+        ));
+        for vid in viewers {
+            if let Some(p) = self.players.get_mut(&vid) {
+                p.deliver(&frame);
+            }
+        }
+        self.play_sound_at("minecraft:entity.zombie_villager.cure", pos, 1.0, 1.0, None);
+        self.add_mob_effect(
+            target,
+            levitas_registry::Effect {
+                id: levitas_registry::mob_effect::STRENGTH,
+                amplifier: 0,
+                duration: 3600,
+            },
+        );
+        true
+    }
+
+    /// Handles wandering trader day/night potion drinking and despawn timers.
+    pub(super) fn tick_wandering_trader(&mut self, id: i32, mob: &mut Mob) {
+        if let Some(ref mut timer) = mob.despawn_timer {
+            *timer = timer.saturating_sub(1);
+        }
+        let time = self.day_time.rem_euclid(24_000);
+        let night = (12000..24000).contains(&time);
+        let is_invis = mob.effect_level(levitas_registry::mob_effect::INVISIBILITY) > 0;
+        if night && !is_invis {
+            self.play_sound_at(
+                "minecraft:entity.wandering_trader.drink_potion",
+                mob.pos,
+                1.0,
+                1.0,
+                None,
+            );
+            let effect = super::effects::ActiveEffect {
+                id: levitas_registry::mob_effect::INVISIBILITY,
+                amplifier: 0,
+                duration: 12000,
+            };
+            mob.effects.push(effect);
+            self.send_to_viewers(mob, super::effects::update_packet(id, &effect));
+            self.play_sound_at(
+                "minecraft:entity.wandering_trader.disappeared",
+                mob.pos,
+                1.0,
+                1.0,
+                None,
+            );
+        } else if !night && is_invis {
+            self.play_sound_at(
+                "minecraft:entity.wandering_trader.drink_milk",
+                mob.pos,
+                1.0,
+                1.0,
+                None,
+            );
+            mob.effects
+                .retain(|e| e.id != levitas_registry::mob_effect::INVISIBILITY);
+            self.send_to_viewers(
+                mob,
+                super::effects::remove_packet(id, levitas_registry::mob_effect::INVISIBILITY),
+            );
+            self.play_sound_at(
+                "minecraft:entity.wandering_trader.reappeared",
+                mob.pos,
+                1.0,
+                1.0,
+                None,
+            );
+        }
+    }
+
+    /// Handles trader llama behavior: follows wandering trader and defends from hostiles.
+    pub(super) fn tick_trader_llama(&mut self, _id: i32, mob: &mut Mob) {
+        mob.attack_cooldown = mob.attack_cooldown.saturating_sub(1);
+        if let Some(leader_id) = mob.leader {
+            if let Some(leader_pos) = self.mobs.get(&leader_id).map(|m| m.pos) {
+                let d = (leader_pos[0] - mob.pos[0]).hypot(leader_pos[2] - mob.pos[2]);
+                if (4.0..32.0).contains(&d) {
+                    let goal = BlockPos::new(
+                        leader_pos[0].floor() as i32,
+                        leader_pos[1].floor() as i32,
+                        leader_pos[2].floor() as i32,
+                    );
+                    self.follow_path(mob, goal);
+                }
+            }
+        }
+        if mob.attack_cooldown == 0 {
+            let threat = self
+                .mobs
+                .iter()
+                .find(|(_, m)| {
+                    m.alive()
+                        && m.kind.is_monster()
+                        && (m.pos[0] - mob.pos[0]).hypot(m.pos[2] - mob.pos[2]) <= 8.0
+                })
+                .map(|(&mid, m)| (mid, m.pos));
+            if let Some((mid, target_pos)) = threat {
+                mob.attack_cooldown = 40;
+                mob.head_yaw = super::monsters::yaw_towards(mob.pos, target_pos);
+                self.play_sound_at("minecraft:entity.llama.spit", mob.pos, 1.0, 1.0, None);
+                if let Some(mut target_mob) = self.mobs.remove(&mid) {
+                    self.hurt_mob(mid, &mut target_mob, 1.0, "mob");
+                    if target_mob.alive() {
+                        self.mobs.insert(mid, target_mob);
+                    }
+                }
+            }
         }
     }
 
@@ -2571,5 +2836,109 @@ mod path_tests {
         assert_eq!(loaded.effects[0].id, mob_effect::SPEED);
         assert_eq!(loaded.effects[0].amplifier, 1);
         assert_eq!(loaded.effects[0].duration, 600);
+    }
+
+    #[test]
+    fn zombie_villager_curing_flow() {
+        use levitas_registry::mob_effect;
+        let mut world = flat_world();
+        let pid = next_entity_id();
+        let profile = crate::connection::Profile {
+            name: "Steve".to_owned(),
+            uuid: 42,
+            properties: Vec::new(),
+        };
+        let (out, _frames) = mpsc::channel(1000);
+        let mut player = Player::new(profile, out, [0.0, -60.0, 0.0]);
+        let gapple = ItemInfo::id_of("minecraft:golden_apple").unwrap();
+        player.inventory.slots[36] = Stack::new(gapple, 1);
+        world.players.insert(pid, player);
+
+        let zid = next_entity_id();
+        let zv = Mob::new(MobKind::ZombieVillager, [1.0, -60.0, 0.0], &mut world.rng);
+        world.mobs.insert(zid, zv);
+
+        // Without weakness, curing fails
+        assert!(!world.cure_zombie_villager(pid, zid, 36));
+
+        // Add weakness effect
+        world
+            .mobs
+            .get_mut(&zid)
+            .unwrap()
+            .effects
+            .push(super::super::effects::ActiveEffect {
+                id: mob_effect::WEAKNESS,
+                amplifier: 0,
+                duration: 1000,
+            });
+
+        // Now curing succeeds
+        assert!(world.cure_zombie_villager(pid, zid, 36));
+        let zv_mob = world.mobs.get(&zid).unwrap();
+        assert_eq!(zv_mob.converting, Some(3600));
+        assert!(zv_mob.effects.iter().any(|e| e.id == mob_effect::STRENGTH));
+
+        // Accelerate conversion: set timer to 1 and tick_mobs
+        world.mobs.get_mut(&zid).unwrap().converting = Some(1);
+        world.tick_mobs();
+
+        // Check converted mob
+        let cured = world.mobs.get(&zid).unwrap();
+        assert_eq!(cured.kind, MobKind::Villager);
+        assert_eq!(cured.converting, None);
+        assert!(cured.villager.as_ref().unwrap().cured_discount);
+    }
+
+    #[test]
+    fn zombie_converts_villager_on_kill() {
+        let mut world = flat_world();
+        let zid = next_entity_id();
+        let mut zombie = Mob::new(MobKind::Zombie, [0.0, -60.0, 0.0], &mut world.rng);
+        zombie.health = 20.0;
+        zombie.attack_cooldown = 0;
+
+        let vid = next_entity_id();
+        let mut villager = Mob::new(MobKind::Villager, [1.0, -60.0, 0.0], &mut world.rng);
+        villager.health = 1.0; // One hit will kill it
+        world.mobs.insert(vid, villager);
+
+        // Tick zombie hunt
+        world.hunt(zid, &mut zombie);
+
+        // Villager should now be a ZombieVillager with the same entity id
+        let victim = world.mobs.get(&vid).unwrap();
+        assert_eq!(victim.kind, MobKind::ZombieVillager);
+        assert!(victim.villager.is_some());
+    }
+
+    #[test]
+    fn wandering_trader_and_llama_mechanics() {
+        let mut world = flat_world();
+        let (tid, llamas) = world.spawn_wandering_trader([10.0, -60.0, 10.0]);
+        assert_eq!(world.mobs[&tid].kind, MobKind::WanderingTrader);
+        assert!(!llamas.is_empty());
+        for &lid in &llamas {
+            assert_eq!(world.mobs[&lid].kind, MobKind::TraderLlama);
+            assert_eq!(world.mobs[&lid].leader, Some(tid));
+        }
+
+        // Night time: trader drinks invisibility potion
+        world.day_time = 13000;
+        let mut trader = world.mobs.remove(&tid).unwrap();
+        world.tick_wandering_trader(tid, &mut trader);
+        assert!(trader
+            .effects
+            .iter()
+            .any(|e| e.id == levitas_registry::mob_effect::INVISIBILITY));
+
+        // Day time: trader drinks milk
+        world.day_time = 1000;
+        world.tick_wandering_trader(tid, &mut trader);
+        assert!(!trader
+            .effects
+            .iter()
+            .any(|e| e.id == levitas_registry::mob_effect::INVISIBILITY));
+        world.mobs.insert(tid, trader);
     }
 }

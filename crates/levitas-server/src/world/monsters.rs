@@ -136,7 +136,10 @@ impl World {
             let distance = horizontal_distance(target, mob.pos);
             let dy = target[1] - mob.pos[1];
             (target, distance, dy)
-        } else if mob.kind.is_raider() {
+        } else if mob.kind.is_raider()
+            || mob.kind == MobKind::Zombie
+            || mob.kind == MobKind::ZombieVillager
+        {
             let prey_valid = mob
                 .prey
                 .and_then(|mid| self.mobs.get(&mid))
@@ -268,9 +271,32 @@ impl World {
             if target_is_mob {
                 if let Some(mid) = mob.prey {
                     if let Some(mut target_mob) = self.mobs.remove(&mid) {
-                        self.hurt_mob(mid, &mut target_mob, damage, "mob");
-                        if target_mob.alive() {
-                            self.mobs.insert(mid, target_mob);
+                        let will_kill = target_mob.health - damage <= 0.0;
+                        if will_kill
+                            && target_mob.kind == MobKind::Villager
+                            && (mob.kind == MobKind::Zombie || mob.kind == MobKind::ZombieVillager)
+                        {
+                            let pos = target_mob.pos;
+                            let villager = target_mob.villager.take();
+                            let mut zv = Mob::new(MobKind::ZombieVillager, pos, &mut self.rng);
+                            zv.villager = villager;
+                            self.send_to_viewers(&zv, items::remove_entity(mid));
+                            for p in zv.spawn_packets(mid) {
+                                self.send_to_viewers(&zv, p);
+                            }
+                            self.play_sound_at(
+                                "minecraft:entity.zombie_villager.converted",
+                                pos,
+                                1.0,
+                                1.0,
+                                None,
+                            );
+                            self.mobs.insert(mid, zv);
+                        } else {
+                            self.hurt_mob(mid, &mut target_mob, damage, "mob");
+                            if target_mob.alive() {
+                                self.mobs.insert(mid, target_mob);
+                            }
                         }
                     }
                 }
@@ -729,14 +755,19 @@ impl World {
             let at = [f64::from(gx) + 0.5, f64::from(y), f64::from(gz) + 0.5];
             // A spider needs more room than the two blocks a zombie needs.
             if self.monster_can_spawn(pos) && self.mob_fits(kind, at) {
-                let mob = Mob::new(kind, at, &mut self.rng);
+                let actual_kind = if kind == MobKind::Zombie && self.rng.below(20) == 0 {
+                    MobKind::ZombieVillager
+                } else {
+                    kind
+                };
+                let mob = Mob::new(actual_kind, at, &mut self.rng);
                 self.mobs.insert(next_entity_id(), mob);
             }
         }
     }
 
     /// The y of the highest block in a loaded column that is not air.
-    fn top_block(&self, x: i32, z: i32) -> Option<i32> {
+    pub(super) fn top_block(&self, x: i32, z: i32) -> Option<i32> {
         let chunk = self.chunks.get(&(x.div_euclid(16), z.div_euclid(16)))?;
         let (lx, lz) = ((x & 15) as usize, (z & 15) as usize);
         (MIN_Y..=MAX_Y)
