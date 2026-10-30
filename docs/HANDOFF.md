@@ -212,11 +212,11 @@ Phase 0–1 and most of Phase 2, plus parts of 3 and 12 (details in ROADMAP.md):
 The owner's standing request is to keep going until the world plays like vanilla. The
 open items, with what each still lacks, are in [ROADMAP.md](ROADMAP.md); the progress
 table in the README shows where the most is missing. Recently done: the move to 26.3,
-the blocks new in 26.3, and the special crafting recipes the existing items support
-(repairing, leather dyeing, transmute, tipped arrows). Good next candidates for a
-playable world: effects on mobs (potions, tipped arrows), maps and compasses (Phase 8),
-advancements (Phase 11), raids (Phase 10), and the Phase 13 plugin API and economy the
-owner wants for their server.
+the blocks new in 26.3, special crafting recipes (repairing, leather dyeing, transmute,
+tipped arrows), and status effects on mobs (potions, splash potions, tipped arrows). Good
+next candidates for a playable world: maps and compasses (Phase 8), lingering potion
+clouds, advancements (Phase 11), raids (Phase 10), and the Phase 13 plugin API and
+economy the owner wants for their server.
 
 ## 8. Known gaps and pitfalls
 

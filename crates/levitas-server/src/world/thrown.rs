@@ -255,8 +255,12 @@ impl World {
         }
         match t.kind {
             ThrownKind::SplashPotion | ThrownKind::LingeringPotion => {
-                let direct = match hit {
+                let direct_player = match hit {
                     Hit::Player(id) => Some(id),
+                    _ => None,
+                };
+                let direct_mob = match hit {
+                    Hit::Mob(id) => Some(id),
                     _ => None,
                 };
                 self.play_sound_at(
@@ -266,7 +270,7 @@ impl World {
                     1.0,
                     None,
                 );
-                self.splash(t.pos, t.stack.potion, direct);
+                self.splash(t.pos, t.stack.potion, direct_player, direct_mob);
             }
             ThrownKind::EnderPearl => {
                 let Some(id) = thrower.filter(|id| self.players[id].alive) else {

@@ -54,7 +54,7 @@ pub fn effect_id(name: &str) -> Option<i32> {
 
 /// Whether an effect's periodic action happens this tick: regeneration heals every 50
 /// ticks, poison every 25 and wither every 40, twice as often per level.
-fn pulses(duration: i32, interval: i32, amplifier: u8) -> bool {
+pub(super) fn pulses(duration: i32, interval: i32, amplifier: u8) -> bool {
     let every = interval >> amplifier.min(31);
     every <= 0 || duration % every == 0
 }
@@ -87,18 +87,18 @@ impl Player {
     }
 }
 
-fn update_packet(player: i32, e: &ActiveEffect) -> Writer {
+pub(super) fn update_packet(entity: i32, e: &ActiveEffect) -> Writer {
     Writer::packet(clientbound::UPDATE_MOB_EFFECT)
-        .varint(player)
+        .varint(entity)
         .varint(e.id)
         .varint(i32::from(e.amplifier))
         .varint(e.duration)
         .u8(FLAG_SHOW_ICON | FLAG_SHOW_PARTICLES)
 }
 
-fn remove_packet(player: i32, effect: i32) -> Writer {
+pub(super) fn remove_packet(entity: i32, effect: i32) -> Writer {
     Writer::packet(clientbound::REMOVE_MOB_EFFECT)
-        .varint(player)
+        .varint(entity)
         .varint(effect)
 }
 
@@ -190,6 +190,105 @@ impl World {
         if p.alive && p.health < MAX_HEALTH {
             p.health = (p.health + amount).min(MAX_HEALTH);
             p.health_dirty = true;
+        }
+    }
+
+    /// Gives a mob an effect. A stronger or longer one replaces what it has.
+    pub(super) fn add_mob_effect(&mut self, id: i32, effect: Effect) {
+        let (is_undead, is_spider) = match self.mobs.get(&id) {
+            Some(m) if m.alive() => (m.kind.is_undead(), m.kind == super::mobs::MobKind::Spider),
+            _ => return,
+        };
+        match effect.id {
+            mob_effect::INSTANT_HEALTH => {
+                if is_undead {
+                    let amount = f32::from(6u8 << effect.amplifier.min(5));
+                    self.hit_mob(id, amount, None, [0.0, 0.0], "minecraft:magic");
+                } else {
+                    self.heal_mob(id, f32::from(4u8 << effect.amplifier.min(5)));
+                }
+                return;
+            }
+            mob_effect::INSTANT_DAMAGE => {
+                if is_undead {
+                    self.heal_mob(id, f32::from(4u8 << effect.amplifier.min(5)));
+                } else {
+                    let amount = f32::from(6u8 << effect.amplifier.min(5));
+                    self.hit_mob(id, amount, None, [0.0, 0.0], "minecraft:magic");
+                }
+                return;
+            }
+            mob_effect::REGENERATION if is_undead => return,
+            mob_effect::POISON if is_undead || is_spider => return,
+            _ => {}
+        }
+        let new = ActiveEffect {
+            id: effect.id,
+            amplifier: effect.amplifier,
+            duration: effect.duration,
+        };
+        let lasts_longer = |old: &ActiveEffect| {
+            old.duration != INFINITE && (new.duration == INFINITE || new.duration > old.duration)
+        };
+        let Some(mob) = self.mobs.get_mut(&id) else {
+            return;
+        };
+        match mob.effects.iter_mut().find(|e| e.id == new.id) {
+            Some(old) if new.amplifier > old.amplifier => *old = new,
+            Some(old) if new.amplifier == old.amplifier && lasts_longer(old) => *old = new,
+            Some(_) => return,
+            None => mob.effects.push(new),
+        }
+        let viewers: Vec<i32> = mob.viewers.iter().copied().collect();
+        let f = frame(update_packet(id, &new));
+        for pid in viewers {
+            if let Some(p) = self.players.get_mut(&pid) {
+                p.deliver(&f);
+            }
+        }
+    }
+
+    /// Takes an effect away from a mob.
+    #[allow(dead_code)]
+    pub(super) fn remove_mob_effect(&mut self, id: i32, effect: i32) -> bool {
+        let Some(mob) = self.mobs.get_mut(&id) else {
+            return false;
+        };
+        let before = mob.effects.len();
+        mob.effects.retain(|e| e.id != effect);
+        if mob.effects.len() == before {
+            return false;
+        }
+        let viewers: Vec<i32> = mob.viewers.iter().copied().collect();
+        let f = frame(remove_packet(id, effect));
+        for pid in viewers {
+            if let Some(p) = self.players.get_mut(&pid) {
+                p.deliver(&f);
+            }
+        }
+        true
+    }
+
+    /// Clears every effect on a mob.
+    #[allow(dead_code)]
+    pub(super) fn clear_mob_effects(&mut self, id: i32) -> usize {
+        let ids: Vec<i32> = self
+            .mobs
+            .get(&id)
+            .map(|m| m.effects.iter().map(|e| e.id).collect())
+            .unwrap_or_default();
+        for &effect in &ids {
+            self.remove_mob_effect(id, effect);
+        }
+        ids.len()
+    }
+
+    pub(super) fn heal_mob(&mut self, id: i32, amount: f32) {
+        let Some(mob) = self.mobs.get_mut(&id) else {
+            return;
+        };
+        if mob.alive() && mob.health < mob.kind.max_health() {
+            mob.health = (mob.health + amount).min(mob.kind.max_health());
         }
     }
 
@@ -389,5 +488,39 @@ mod tests {
             duration: 400,
         }];
         assert_eq!(effects_from_nbt(Some(&effects_to_nbt(&effects))), effects);
+    }
+
+    #[test]
+    fn mob_effects_can_be_removed_and_cleared() {
+        let dir = std::env::temp_dir().join(format!("levitas-effects-{}", std::process::id()));
+        let (mut w, _) = World::new(
+            dir,
+            NewWorld {
+                kind: WorldKind::Flat,
+                seed: Some(0),
+            },
+        );
+        let id = next_entity_id();
+        let mut cow = super::super::mobs::Mob::new(
+            super::super::mobs::MobKind::Cow,
+            [0.0, 0.0, 0.0],
+            &mut w.rng,
+        );
+        cow.effects.push(ActiveEffect {
+            id: mob_effect::SPEED,
+            amplifier: 0,
+            duration: 100,
+        });
+        cow.effects.push(ActiveEffect {
+            id: mob_effect::STRENGTH,
+            amplifier: 0,
+            duration: 100,
+        });
+        w.mobs.insert(id, cow);
+
+        assert!(w.remove_mob_effect(id, mob_effect::SPEED));
+        assert_eq!(w.mobs[&id].effects.len(), 1);
+        assert_eq!(w.clear_mob_effects(id), 1);
+        assert!(w.mobs[&id].effects.is_empty());
     }
 }

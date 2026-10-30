@@ -278,6 +278,14 @@ impl World {
                     self.ignite_mob(id, 100);
                 }
                 self.hit_mob(id, damage, by, away, "minecraft:arrow");
+                for mut effect in arrow
+                    .potion
+                    .map(crate::potions::effects)
+                    .unwrap_or_default()
+                {
+                    effect.duration = (effect.duration / 8).max(1);
+                    self.add_mob_effect(id, effect);
+                }
             }
             Hit::Block | Hit::Gone => {}
         }
@@ -500,6 +508,35 @@ mod tests {
         let effect = w.players[&id]
             .effect(levitas_registry::mob_effect::SPEED)
             .expect("swiftness");
+        assert_eq!(effect.duration, full / 8);
+    }
+
+    #[test]
+    fn tipped_arrows_give_mobs_their_effects() {
+        let (mut w, _player, _frames) = world_with_player([0.5, -60.0, 0.5]);
+        let mob_id = next_entity_id();
+        let cow = super::mobs::Mob::new(super::mobs::MobKind::Cow, [0.5, -60.0, 0.5], &mut w.rng);
+        w.mobs.insert(mob_id, cow);
+
+        let slowness = crate::potions::id("minecraft:slowness").unwrap();
+        let full = crate::potions::effects(slowness)[0].duration;
+        let arrow = Arrow {
+            pos: [0.5, -59.0, 0.5],
+            vel: [0.0, 0.0, 1.0],
+            shooter: 0,
+            by_player: false,
+            critical: false,
+            base_damage: 1.0,
+            pickup: false,
+            flaming: false,
+            potion: Some(slowness),
+            stuck: None,
+            age: 0,
+        };
+        w.arrow_hits(&arrow, Hit::Mob(mob_id));
+        let effect = w.mobs[&mob_id]
+            .effect(levitas_registry::mob_effect::SLOWNESS)
+            .expect("slowness");
         assert_eq!(effect.duration, full / 8);
     }
 }

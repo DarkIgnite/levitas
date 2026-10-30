@@ -198,14 +198,17 @@ Known gaps are listed under each phase instead of being hidden.
       thrown (`world/thrown.rs`): pearls teleport their thrower for 5 damage with a
       one-second cooldown, snowballs hurt blazes, eggs hatch chicks. Missing:
       crossbows, tridents.
-- [x] Status effects on players (`world/effects.rs`): given by food (golden apples,
-      rotten flesh, pufferfish, ...) and `/effect`, cleared by milk and death, removed
-      by honey, shown to the client and saved. Regeneration, poison, wither, hunger,
-      saturation, instant health and damage, absorption, resistance, fire resistance,
-      water breathing, strength, weakness, haste, mining fatigue, jump boost and slow
-      falling act on the server; the rest are carried out by the client. Food leaves
-      its bowl, bucket or bottle behind. Missing: effects on mobs, health boost,
-      chorus fruit teleporting.
+- [x] Status effects on players and mobs (`world/effects.rs`): given by food (golden apples,
+      rotten flesh, pufferfish, ...), splash potions, tipped arrows and `/effect`, cleared
+      by milk and death, removed by honey, shown to the client and saved. Regeneration,
+      poison, wither, hunger, saturation, instant health and damage, absorption, resistance,
+      fire resistance, water breathing, strength, weakness, haste, mining fatigue, jump boost
+      and slow falling act on the server; the rest are carried out by the client. Food leaves
+      its bowl, bucket or bottle behind. Mobs take potion effects: instant health damages
+      undead and heals the living; instant damage heals undead and damages the living; spiders
+      and undead ignore poison; undead ignore regeneration; strength/weakness adjust attack
+      damage; speed/slowness scale walk speed; resistance and fire resistance protect mobs.
+      Missing: health boost, chorus fruit teleporting.
 - [ ] Entity framework: tracking, physics, collisions, saving entities to disk.
       Mobs (`world/mobs.rs`) are shown to players who have their chunk loaded, move
       with gravity and block collisions, and are saved in vanilla `entities/` region
@@ -369,11 +372,12 @@ Known gaps are listed under each phase instead of being hidden.
       gives the effects. Brewing stands (`world/brewing.rs`) take blaze powder for 20
       brews and brew in 20 seconds: base potions, effects, redstone and glowstone,
       fermented spider eyes, gunpowder (splash) and dragon's breath (lingering), fed
-      by hoppers as in vanilla. Splash potions give players within 4 blocks their
+      by hoppers as in vanilla. Splash potions give players and mobs within 4 blocks their
       effects, weaker with distance. Tipped arrows, shot from bows and dispensers,
-      give players their potion for an eighth of its time and are picked up as tipped
-      arrows; Infinity does not spare them. Missing: lingering clouds (they splash for
-      now), effects on mobs (from potions and tipped arrows), splash colours.
+      give players and mobs their potion for an eighth of its time and are picked up as tipped
+      arrows; Infinity does not spare them. Undead mobs invert healing and harming; undead
+      and spiders ignore poison; resistance and fire resistance protect mobs. Missing:
+      lingering clouds (they splash for now), splash colours.
 - [ ] Beacons, conduits
 - [ ] Maps, compasses, recovery compasses, clocks, spyglass
 

@@ -441,7 +441,10 @@ impl World {
             .map(|c| c.get((feet.x & 15) as usize, feet.y, (feet.z & 15) as usize))
             .and_then(fluid_at)
             .is_some_and(|f| f.fluid == Fluid::Lava);
-        if in_lava && mob.kind.fire_immune() {
+        if in_lava
+            && (mob.kind.fire_immune()
+                || mob.effect_level(levitas_registry::mob_effect::FIRE_RESISTANCE) > 0)
+        {
             mob.fire_ticks = 0;
         } else if in_lava {
             // Lava burns everything for 15 seconds, and hurts twice a second.
@@ -451,7 +454,10 @@ impl World {
             }
         } else if in_water {
             mob.fire_ticks = 0;
-        } else if mob.kind.burns_in_daylight() && !self.weather.is_raining() {
+        } else if mob.kind.burns_in_daylight()
+            && mob.effect_level(levitas_registry::mob_effect::FIRE_RESISTANCE) == 0
+            && !self.weather.is_raining()
+        {
             let head = BlockPos::new(
                 feet.x,
                 (mob.pos[1] + mob.size().1 * 0.85).floor() as i32,
@@ -486,6 +492,22 @@ impl World {
 
     /// Damage from the world (fire, explosions) rather than a player.
     pub(super) fn hurt_mob(&mut self, id: i32, mob: &mut Mob, amount: f32, damage_type: &str) {
+        let mut amount = amount;
+        let resistance = mob.effect_level(levitas_registry::mob_effect::RESISTANCE);
+        if resistance > 0 {
+            amount *= (1.0 - 0.2 * resistance as f32).max(0.0);
+        }
+        if mob.effect_level(levitas_registry::mob_effect::FIRE_RESISTANCE) > 0
+            && matches!(
+                damage_type,
+                "minecraft:in_fire" | "minecraft:on_fire" | "minecraft:lava"
+            )
+        {
+            return;
+        }
+        if amount <= 0.0 {
+            return;
+        }
         mob.health -= amount;
         let kind = SyncedRegistry::get("minecraft:damage_type")
             .and_then(|r| r.id_of(damage_type))
@@ -499,7 +521,9 @@ impl World {
                 .varint(0)
                 .bool(false),
         );
-        if mob.health > 0.0 {
+        if mob.health <= 0.0 {
+            self.kill_mob(id, mob);
+        } else {
             let sound = format!("minecraft:entity.{}.hurt", mob.kind.sound());
             self.play_sound_at(&sound, mob.pos, 1.0, 1.0, None);
         }

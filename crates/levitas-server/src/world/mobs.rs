@@ -163,6 +163,15 @@ impl MobKind {
         )
     }
 
+    /// Whether it belongs to the undead (hurt by healing, healed by harming, immune to
+    /// poison and regeneration).
+    pub fn is_undead(self) -> bool {
+        matches!(
+            self,
+            MobKind::Zombie | MobKind::Skeleton | MobKind::ZombifiedPiglin
+        )
+    }
+
     /// Whether fire and lava leave it unhurt.
     pub fn fire_immune(self) -> bool {
         matches!(
@@ -358,7 +367,7 @@ pub struct Mob {
     sent_pos: [f64; 3],
     sent_angles: (u8, u8),
     /// Players who can see this mob.
-    viewers: HashSet<i32>,
+    pub viewers: HashSet<i32>,
     /// A villager's profession, trades and workstation.
     pub villager: Option<Box<super::villagers::Villager>>,
     /// Iron golems: the monster being fought, and whether a player built it.
@@ -366,6 +375,8 @@ pub struct Mob {
     pub player_created: bool,
     /// A name given by a name tag.
     pub name: Option<&'static str>,
+    /// Status effects on the mob.
+    pub effects: Vec<super::effects::ActiveEffect>,
 }
 
 impl Mob {
@@ -429,7 +440,17 @@ impl Mob {
             prey: None,
             player_created: false,
             name: None,
+            effects: Vec::new(),
         }
+    }
+
+    pub fn effect(&self, id: i32) -> Option<&super::effects::ActiveEffect> {
+        self.effects.iter().find(|e| e.id == id)
+    }
+
+    /// The level of an effect, counting from 1, or 0 when the mob does not have it.
+    pub fn effect_level(&self, id: i32) -> u32 {
+        self.effect(id).map_or(0, |e| u32::from(e.amplifier) + 1)
     }
 
     /// Hitbox width and height: babies are half size, magma cubes grow with theirs.
@@ -446,14 +467,17 @@ impl Mob {
         }
     }
 
-    /// Melee damage: a magma cube's grows with its size.
+    /// Melee damage: a magma cube's grows with its size, modified by strength and weakness.
     pub fn attack_damage(&self) -> f32 {
-        match (self.kind, self.slime_size) {
+        let base = match (self.kind, self.slime_size) {
             (MobKind::MagmaCube, 1) => 3.0,
             (MobKind::MagmaCube, 2) => 4.0,
             (MobKind::MagmaCube, _) => 6.0,
             (kind, _) => kind.attack_damage(),
-        }
+        };
+        let strength = self.effect_level(levitas_registry::mob_effect::STRENGTH) as f32;
+        let weakness = self.effect_level(levitas_registry::mob_effect::WEAKNESS) as f32;
+        (base + 3.0 * strength - 4.0 * weakness).max(0.0)
     }
 
     pub fn alive(&self) -> bool {
@@ -527,6 +551,9 @@ impl Mob {
                 packets.push(crate::inventory::write_stack(packet, Stack::new(bow, 1)));
             }
         }
+        for effect in &self.effects {
+            packets.push(super::effects::update_packet(id, effect));
+        }
         packets
     }
 
@@ -593,6 +620,12 @@ impl Mob {
         if let Some(name) = self.name {
             nbt.insert("CustomName", name);
         }
+        if !self.effects.is_empty() {
+            nbt.insert(
+                "active_effects",
+                super::effects::effects_to_nbt(&self.effects),
+            );
+        }
         nbt
     }
 
@@ -644,6 +677,10 @@ impl Mob {
             .map(crate::names::plain_text)
             .filter(|n| !n.is_empty())
             .and_then(|n| crate::names::intern(&n));
+        mob.effects = super::effects::effects_from_nbt(
+            nbt.get("active_effects")
+                .or_else(|| nbt.get("ActiveEffects")),
+        );
         mob.sent_pos = mob.pos;
         Some(mob)
     }
@@ -878,6 +915,11 @@ impl World {
                 self.send_to_viewers(&mob, items::remove_entity(id));
                 continue;
             }
+            self.tick_mob_effects(id, &mut mob);
+            if !mob.alive() {
+                self.mobs.insert(id, mob);
+                continue;
+            }
             self.think(&mut mob);
             if mob.kind == MobKind::Villager {
                 self.tick_villager(id, &mut mob);
@@ -907,6 +949,65 @@ impl World {
             self.mobs.insert(id, mob);
         }
         self.track_mobs();
+    }
+
+    fn tick_mob_effects(&mut self, id: i32, mob: &mut Mob) {
+        if mob.effects.is_empty() {
+            return;
+        }
+        let is_undead = mob.kind.is_undead();
+        let mut expired = Vec::new();
+        let mut heal = 0.0f32;
+        let mut poison_damage = 0.0f32;
+        let mut wither_damage = 0.0f32;
+
+        for effect in &mut mob.effects {
+            if effect.duration != super::effects::INFINITE {
+                effect.duration -= 1;
+                if effect.duration <= 0 {
+                    expired.push(effect.id);
+                    continue;
+                }
+            }
+            match effect.id {
+                levitas_registry::mob_effect::REGENERATION if !is_undead => {
+                    if super::effects::pulses(effect.duration, 50, effect.amplifier) {
+                        heal += 1.0;
+                    }
+                }
+                levitas_registry::mob_effect::POISON
+                    if !is_undead
+                        && mob.kind != MobKind::Spider
+                        && super::effects::pulses(effect.duration, 25, effect.amplifier) =>
+                {
+                    poison_damage += 1.0;
+                }
+                levitas_registry::mob_effect::WITHER
+                    if super::effects::pulses(effect.duration, 40, effect.amplifier) =>
+                {
+                    wither_damage += 1.0;
+                }
+                _ => {}
+            }
+        }
+
+        for exp in expired {
+            mob.effects.retain(|e| e.id != exp);
+            self.send_to_viewers(mob, super::effects::remove_packet(id, exp));
+        }
+
+        if heal > 0.0 {
+            mob.health = (mob.health + heal).min(mob.kind.max_health());
+        }
+
+        if poison_damage > 0.0 && mob.health > 1.0 {
+            let actual = poison_damage.min(mob.health - 1.0);
+            self.hurt_mob(id, mob, actual, "minecraft:magic");
+        }
+
+        if wither_damage > 0.0 {
+            self.hurt_mob(id, mob, wither_damage, "minecraft:wither");
+        }
     }
 
     /// Picks where to walk and how to face.
@@ -1024,10 +1125,15 @@ impl World {
     /// they keep near it (a blaze a little above, a ghast at a distance).
     fn fly_mob(&mut self, mob: &mut Mob) {
         mob.target = None;
-        let (wander, speed) = match mob.kind {
+        let (wander, mut speed) = match mob.kind {
             MobKind::Ghast => (16.0, mob.kind.speed()),
             _ => (6.0, mob.kind.speed()),
         };
+        let speed_boost = mob.effect_level(levitas_registry::mob_effect::SPEED);
+        let slowness = mob.effect_level(levitas_registry::mob_effect::SLOWNESS);
+        if speed_boost > 0 || slowness > 0 {
+            speed *= (1.0 + 0.2 * speed_boost as f64) * (1.0 - 0.15 * slowness as f64).max(0.0);
+        }
         let prey = mob
             .hunting
             .and_then(|pid| self.players.get(&pid))
@@ -1089,6 +1195,11 @@ impl World {
             let (dx, dz) = (target[0] - mob.pos[0], target[1] - mob.pos[2]);
             let distance = dx.hypot(dz).max(1e-6);
             let mut speed = mob.kind.speed() * if mob.panic > 0 { 2.0 } else { 1.0 };
+            let speed_boost = mob.effect_level(levitas_registry::mob_effect::SPEED);
+            let slowness = mob.effect_level(levitas_registry::mob_effect::SLOWNESS);
+            if speed_boost > 0 || slowness > 0 {
+                speed *= (1.0 + 0.2 * speed_boost as f64) * (1.0 - 0.15 * slowness as f64).max(0.0);
+            }
             // A mob knocked into the air has little say in where it goes.
             if !mob.on_ground && mob.knockback.iter().any(|k| k.abs() > 0.05) {
                 speed *= 0.2;
@@ -1444,7 +1555,22 @@ impl World {
             self.mobs.insert(target, mob);
             return false;
         }
-        let dealt = if mob.hurt_ticks > 0 {
+        let mut damage = damage;
+        let resistance = mob.effect_level(levitas_registry::mob_effect::RESISTANCE);
+        if resistance > 0 {
+            damage *= (1.0 - 0.2 * resistance as f32).max(0.0);
+        }
+        if mob.effect_level(levitas_registry::mob_effect::FIRE_RESISTANCE) > 0
+            && matches!(
+                damage_type,
+                "minecraft:in_fire" | "minecraft:on_fire" | "minecraft:lava"
+            )
+        {
+            damage = 0.0;
+        }
+        let dealt = if damage_type == "minecraft:magic" {
+            damage
+        } else if mob.hurt_ticks > 0 {
             damage - mob.last_damage
         } else {
             damage
@@ -1538,12 +1664,13 @@ impl World {
         }
     }
 
-    fn kill_mob(&mut self, id: i32, mob: &mut Mob) {
+    pub(super) fn kill_mob(&mut self, id: i32, mob: &mut Mob) {
         if mob.dying.is_some() {
             return;
         }
         mob.dying = Some(0);
         mob.health = 0.0;
+        mob.effects.clear();
         self.send_to_viewers(mob, entity_event(id, ENTITY_EVENT_MOB_DEATH));
         // A big magma cube breaks into two to four smaller ones.
         if mob.kind == MobKind::MagmaCube && mob.slime_size > 1 {
@@ -2210,5 +2337,115 @@ mod path_tests {
         let after = &world.mobs[&id];
         assert_eq!(after.health, 40.0, "unhurt");
         assert_ne!(after.pos, before, "gone elsewhere");
+    }
+
+    #[test]
+    fn mob_effects_tick_pulse_and_expire() {
+        use levitas_registry::mob_effect;
+        let mut world = flat_world();
+        let cow = next_entity_id();
+        let mut cow_mob = Mob::new(MobKind::Cow, [0.5, -60.0, 0.5], &mut world.rng);
+        cow_mob.health = 5.0;
+        cow_mob.effects.push(super::super::effects::ActiveEffect {
+            id: mob_effect::REGENERATION,
+            amplifier: 0,
+            duration: 50,
+        });
+        cow_mob.effects.push(super::super::effects::ActiveEffect {
+            id: mob_effect::POISON,
+            amplifier: 0,
+            duration: 25,
+        });
+        world.mobs.insert(cow, cow_mob);
+
+        let spider = next_entity_id();
+        let spider_mob = Mob::new(MobKind::Spider, [2.5, -60.0, 0.5], &mut world.rng);
+        world.mobs.insert(spider, spider_mob);
+        world.add_mob_effect(
+            spider,
+            levitas_registry::Effect {
+                id: mob_effect::POISON,
+                duration: 100,
+                amplifier: 0,
+            },
+        );
+        // Spiders are immune to poison.
+        assert!(world.mobs[&spider].effects.is_empty());
+
+        let zombie = next_entity_id();
+        let zombie_mob = Mob::new(MobKind::Zombie, [4.5, -60.0, 0.5], &mut world.rng);
+        world.mobs.insert(zombie, zombie_mob);
+        world.add_mob_effect(
+            zombie,
+            levitas_registry::Effect {
+                id: mob_effect::REGENERATION,
+                duration: 100,
+                amplifier: 0,
+            },
+        );
+        // Undead are immune to regeneration.
+        assert!(world.mobs[&zombie].effects.is_empty());
+
+        // Tick cow: duration 50 regeneration pulses, duration 25 poison pulses.
+        let mut cow_mob = world.mobs.remove(&cow).unwrap();
+        world.tick_mob_effects(cow, &mut cow_mob);
+        // 5.0 + 1.0 (regen) - 1.0 (poison) = 5.0
+        assert_eq!(cow_mob.health, 5.0);
+        assert_eq!(cow_mob.effects[0].duration, 49);
+        assert_eq!(cow_mob.effects[1].duration, 24);
+        world.mobs.insert(cow, cow_mob);
+    }
+
+    #[test]
+    fn mob_effects_modify_speed_damage_and_defense() {
+        use levitas_registry::mob_effect;
+        let mut world = flat_world();
+        let mut zombie = Mob::new(MobKind::Zombie, [0.5, -60.0, 0.5], &mut world.rng);
+        let base_dmg = zombie.attack_damage();
+        assert_eq!(base_dmg, 3.0);
+
+        zombie.effects.push(super::super::effects::ActiveEffect {
+            id: mob_effect::STRENGTH,
+            amplifier: 0,
+            duration: 100,
+        });
+        assert_eq!(zombie.attack_damage(), 6.0); // +3
+
+        zombie.effects.push(super::super::effects::ActiveEffect {
+            id: mob_effect::WEAKNESS,
+            amplifier: 0,
+            duration: 100,
+        });
+        assert_eq!(zombie.attack_damage(), 2.0); // 6 - 4 = 2
+
+        // Resistance: 1 level reduces damage by 20%.
+        let id = next_entity_id();
+        zombie.effects.push(super::super::effects::ActiveEffect {
+            id: mob_effect::RESISTANCE,
+            amplifier: 0,
+            duration: 100,
+        });
+        world.mobs.insert(id, zombie);
+        world.hit_mob(id, 10.0, None, [0.0, 0.0], "minecraft:generic");
+        // 20.0 - (10.0 * 0.8) = 12.0
+        assert_eq!(world.mobs[&id].health, 12.0);
+    }
+
+    #[test]
+    fn mob_effects_survive_saving_and_loading() {
+        use levitas_registry::mob_effect;
+        let mut rng = Rng::new(99);
+        let mut mob = Mob::new(MobKind::Creeper, [10.0, 64.0, -5.0], &mut rng);
+        mob.effects.push(super::super::effects::ActiveEffect {
+            id: mob_effect::SPEED,
+            amplifier: 1,
+            duration: 600,
+        });
+        let nbt = mob.to_nbt();
+        let loaded = Mob::read(&nbt, &mut rng).expect("loads");
+        assert_eq!(loaded.effects.len(), 1);
+        assert_eq!(loaded.effects[0].id, mob_effect::SPEED);
+        assert_eq!(loaded.effects[0].amplifier, 1);
+        assert_eq!(loaded.effects[0].duration, 600);
     }
 }

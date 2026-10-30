@@ -180,9 +180,15 @@ impl World {
         }
     }
 
-    /// A splash potion breaks at `at`: players near get its effects, those nearer more
+    /// A splash potion breaks at `at`: players and mobs near get its effects, those nearer more
     /// of them, and one it hit directly all of them.
-    pub(super) fn splash(&mut self, at: [f64; 3], potion: Option<u8>, direct: Option<i32>) {
+    pub(super) fn splash(
+        &mut self,
+        at: [f64; 3],
+        potion: Option<u8>,
+        direct_player: Option<i32>,
+        direct_mob: Option<i32>,
+    ) {
         let effects = potion.map(potions::effects).unwrap_or_default();
         let instant = effects.iter().any(|e| potions::is_instant(e.id));
         let event = if instant {
@@ -210,7 +216,7 @@ impl World {
             .filter_map(|(&id, p)| {
                 let d = [p.pos[0] - at[0], p.pos[1] + 0.9 - at[1], p.pos[2] - at[2]];
                 let distance = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt();
-                let strength = if Some(id) == direct {
+                let strength = if Some(id) == direct_player {
                     1.0
                 } else {
                     1.0 - distance / SPLASH_RADIUS
@@ -233,6 +239,70 @@ impl World {
                 let duration = (f64::from(effect.duration) * strength + 0.5) as i32;
                 if duration > 20 {
                     self.add_effect(
+                        id,
+                        Effect {
+                            duration,
+                            ..*effect
+                        },
+                    );
+                }
+            }
+        }
+        let near_mobs: Vec<(i32, f64)> = self
+            .mobs
+            .iter()
+            .filter(|(_, m)| m.alive())
+            .filter_map(|(&id, m)| {
+                let (_, height) = m.size();
+                let d = [
+                    m.pos[0] - at[0],
+                    m.pos[1] + height * 0.5 - at[1],
+                    m.pos[2] - at[2],
+                ];
+                let distance = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt();
+                let strength = if Some(id) == direct_mob {
+                    1.0
+                } else {
+                    1.0 - distance / SPLASH_RADIUS
+                };
+                (strength > 0.0).then_some((id, strength))
+            })
+            .collect();
+        for (id, strength) in near_mobs {
+            let is_undead = self.mobs.get(&id).is_some_and(|m| m.kind.is_undead());
+            for effect in &effects {
+                let level = f32::from(1u8 << effect.amplifier.min(5)) * strength as f32;
+                if effect.id == mob_effect::INSTANT_HEALTH {
+                    if is_undead {
+                        self.hit_mob(
+                            id,
+                            (6.0 * level).round(),
+                            None,
+                            [0.0, 0.0],
+                            "minecraft:magic",
+                        );
+                    } else {
+                        self.heal_mob(id, (4.0 * level).round());
+                    }
+                    continue;
+                }
+                if effect.id == mob_effect::INSTANT_DAMAGE {
+                    if is_undead {
+                        self.heal_mob(id, (4.0 * level).round());
+                    } else {
+                        self.hit_mob(
+                            id,
+                            (6.0 * level).round(),
+                            None,
+                            [0.0, 0.0],
+                            "minecraft:magic",
+                        );
+                    }
+                    continue;
+                }
+                let duration = (f64::from(effect.duration) * strength + 0.5) as i32;
+                if duration > 20 {
+                    self.add_mob_effect(
                         id,
                         Effect {
                             duration,
@@ -297,6 +367,7 @@ mod tests {
 
 #[cfg(test)]
 mod splash_tests {
+    use super::mobs::Mob;
     use super::*;
     use crate::connection::Profile;
 
@@ -327,11 +398,53 @@ mod splash_tests {
         let farther = add(&mut w, 2.5);
         let away = add(&mut w, 10.5);
         let swift = potions::id("swiftness");
-        w.splash([0.5, -59.1, 0.5], swift, None);
+        w.splash([0.5, -59.1, 0.5], swift, None, None);
         let speed =
             |w: &World, id: i32| w.players[&id].effect(mob_effect::SPEED).map(|e| e.duration);
         let (a, b) = (speed(&w, near).unwrap(), speed(&w, farther).unwrap());
         assert!(a > b && a <= 3600, "{a} {b}");
         assert_eq!(speed(&w, away), None);
+    }
+
+    #[test]
+    fn splash_potions_reach_mobs_and_undead_react_inversely_to_healing_and_harming() {
+        let dir = std::env::temp_dir().join(format!("levitas-splash-mobs-{}", std::process::id()));
+        let (mut w, _) = World::new(
+            dir,
+            NewWorld {
+                kind: WorldKind::Flat,
+                seed: Some(0),
+            },
+        );
+        let mut rng = Rng::new(42);
+        let cow = next_entity_id();
+        let mut cow_mob = Mob::new(super::mobs::MobKind::Cow, [0.5, -60.0, 0.5], &mut rng);
+        cow_mob.health = 5.0; // max is 10.0
+        w.mobs.insert(cow, cow_mob);
+
+        let zombie = next_entity_id();
+        let mut zombie_mob = Mob::new(super::mobs::MobKind::Zombie, [1.0, -60.0, 0.5], &mut rng);
+        zombie_mob.health = 20.0;
+        w.mobs.insert(zombie, zombie_mob);
+
+        // Instant health heals the cow and hurts the zombie.
+        let healing = potions::id("healing");
+        w.splash([0.5, -60.0, 0.5], healing, None, Some(cow));
+        assert!(w.mobs[&cow].health > 5.0);
+        assert!(w.mobs[&zombie].health < 20.0);
+
+        // Instant damage hurts the cow and heals the zombie.
+        let zombie_hp_before = w.mobs[&zombie].health;
+        let cow_hp_before = w.mobs[&cow].health;
+        let harming = potions::id("harming");
+        w.splash([1.0, -60.0, 0.5], harming, None, Some(zombie));
+        assert!(w.mobs[&zombie].health > zombie_hp_before);
+        assert!(w.mobs[&cow].health < cow_hp_before);
+
+        // Slowness gives effects to mobs within reach.
+        let slowness = potions::id("slowness");
+        w.splash([0.5, -60.0, 0.5], slowness, None, None);
+        assert!(w.mobs[&cow].effect(mob_effect::SLOWNESS).is_some());
+        assert!(w.mobs[&zombie].effect(mob_effect::SLOWNESS).is_some());
     }
 }
