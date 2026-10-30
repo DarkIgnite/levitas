@@ -11,7 +11,7 @@
   <img alt="Java Edition 26.3" src="https://img.shields.io/badge/Java%20Edition-26.3-f74c00">
   <img alt="Written in Rust" src="https://img.shields.io/badge/written%20in-Rust-b7410e?logo=rust">
   <img alt="License: GPL-3.0-only" src="https://img.shields.io/badge/license-GPL--3.0--only-blue">
-  <img alt="Progress: about 59%" src="https://img.shields.io/badge/progress-~66%25-orange">
+  <img alt="Progress: about 66%" src="https://img.shields.io/badge/progress-~66%25-orange">
 </p>
 
 # Levitas
@@ -28,17 +28,21 @@ needs, with a plugin API for survival-economy servers on top.
 > the Nether and the End to fight the dragon. Raids, minecarts and plugins are still to
 > come. Overall progress: **about 66%** of the [roadmap](docs/ROADMAP.md).
 >
-> **Moving to 26.3.** The server now speaks 26.3 (protocol 777). The rest of the
-> [migration](docs/ROADMAP.md#migration-to-263) (saved data, new blocks, a check in a real
-> client) is under way.
+> **Now on 26.3.** The server speaks Minecraft 26.3 (protocol 777), saves worlds in the
+> 26.3 layout and upgrades 1.21.8 worlds when it opens them. The
+> [migration](docs/ROADMAP.md#migration-to-263) is 95% done: the blocks new in 26.3 still
+> borrow hardness and shapes from similar older blocks.
 
 ## Progress
 
 Each phase of the [roadmap](docs/ROADMAP.md) counts its items; an item that works in part
-counts half. The roadmap lists exactly what is done and what is missing in each one.
+counts for the share of it that works. The overall figure weighs each of phases 1 to 13 by its number of items; the
+migration and infrastructure are shown apart. The roadmap lists exactly what is done and
+what is missing in each one.
 
 | Phase | Progress | |
 |---|---|---|
+| 0. Migration to Minecraft 26.3 | 95% | `█████████▌` |
 | 1. Persistence (saving worlds, players, chunks) | 72% | `███████▏░░` |
 | 2. Blocks behave correctly | 78% | `███████▊░░` |
 | 3. Fluids, gravity and light | 80% | `████████░░` |
@@ -74,8 +78,9 @@ counts half. The roadmap lists exactly what is done and what is missing in each 
   eggs, following food); zombies, spiders,
   creepers and skeletons that spawn in the dark, find their way to you, burn in
   daylight, explode or shoot arrows; armor; bows.
-- **Saving:** everything is stored in the vanilla Anvil format (`region/`, `entities/`,
-  `playerdata/`, `level.dat`), so vanilla and Leaf can open Levitas worlds.
+- **Saving:** everything is stored the way vanilla 26.3 stores it (Anvil regions under
+  `dimensions/minecraft/`, `players/data/`, `data/minecraft/`, `level.dat`), so vanilla
+  can open Levitas worlds; worlds saved by 1.21.8 builds are upgraded when opened.
 
 Not there yet: raids, storage and TNT minecarts, advancements, tipped arrows and plugins. See the [roadmap](docs/ROADMAP.md) for the
 full list.

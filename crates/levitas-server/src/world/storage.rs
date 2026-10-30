@@ -1,5 +1,7 @@
-//! Saving and loading the world in the vanilla 1.21.8 formats: chunks in region files,
-//! `level.dat`, and one `playerdata/<uuid>.dat` per player.
+//! Saving and loading the world in the vanilla 26.3 formats: chunks in region files
+//! under `dimensions/`, `level.dat` with the world's state split into `data/minecraft/`,
+//! and one `players/data/<uuid>.dat` per player. Worlds saved by 1.21.8 are moved into
+//! that layout when they are opened.
 //!
 //! Only chunks that changed are written. Dropped items are not saved yet (they come with
 //! the entity framework).
@@ -50,14 +52,27 @@ impl LevelData {
             match levitas_nbt::from_gzip(&bytes) {
                 Ok((_, root)) => {
                     let data = root.compound("Data").cloned().unwrap_or_default();
-                    if let Some(rules) = data.compound("GameRules") {
-                        crate::rules::load_nbt(rules);
+                    // 26.3 keeps these apart from level.dat; 1.21.8 kept them inside.
+                    let rules = saved_data(dir, "game_rules")
+                        .or_else(|| data.compound("GameRules").cloned());
+                    if let Some(rules) = rules {
+                        crate::rules::load_nbt(&rules);
                     }
-                    let int = |key: &str, default: i64| data.int(key).unwrap_or(default) as i32;
-                    let gen = data
-                        .compound("WorldGenSettings")
-                        .cloned()
+                    let gen = saved_data(dir, "world_gen_settings")
+                        .or_else(|| data.compound("WorldGenSettings").cloned())
                         .unwrap_or_default();
+                    let weather = saved_data(dir, "weather");
+                    let day_time = saved_data(dir, "world_clocks")
+                        .and_then(|c| c.compound("minecraft:overworld")?.int("total_ticks"));
+                    let int = |key: &str, default: i64| data.int(key).unwrap_or(default) as i32;
+                    let spawn = match data.compound("spawn").and_then(|s| s.int_array("pos")) {
+                        Some(&[x, y, z]) => [x, y, z],
+                        _ => [
+                            int("SpawnX", 0),
+                            int("SpawnY", SURFACE_Y as i64),
+                            int("SpawnZ", 0),
+                        ],
+                    };
                     let overworld_type = gen
                         .compound("dimensions")
                         .and_then(|d| d.compound("minecraft:overworld"))
@@ -65,25 +80,26 @@ impl LevelData {
                         .and_then(|g| g.str("type"))
                         .unwrap_or("minecraft:flat");
                     return Some(LevelData {
-                        spawn: [
-                            int("SpawnX", 0),
-                            int("SpawnY", SURFACE_Y as i64),
-                            int("SpawnZ", 0),
-                        ],
+                        spawn,
                         time: data.int("Time").unwrap_or(0),
-                        day_time: data
-                            .int("DayTime")
+                        day_time: day_time
+                            .or_else(|| data.int("DayTime"))
                             .or_else(|| data.int("Time"))
                             .unwrap_or(0),
                         weather: {
-                            let raining = data.int("raining").unwrap_or(0) != 0;
-                            let thundering = data.int("thundering").unwrap_or(0) != 0;
+                            // 26.3's names, else the ones 1.21.8 kept in level.dat.
+                            let get = |new: &str, old: &str| match &weather {
+                                Some(w) => w.int(new).unwrap_or(0),
+                                None => data.int(old).unwrap_or(0),
+                            };
+                            let raining = get("raining", "raining") != 0;
+                            let thundering = get("thundering", "thundering") != 0;
                             super::time::Weather {
                                 raining,
                                 thundering,
-                                rain_time: data.int("rainTime").unwrap_or(0) as i32,
-                                thunder_time: data.int("thunderTime").unwrap_or(0) as i32,
-                                clear_time: data.int("clearWeatherTime").unwrap_or(0) as i32,
+                                rain_time: get("rain_time", "rainTime") as i32,
+                                thunder_time: get("thunder_time", "thunderTime") as i32,
+                                clear_time: get("clear_weather_time", "clearWeatherTime") as i32,
                                 rain_level: if raining { 1.0 } else { 0.0 },
                                 thunder_level: if thundering { 1.0 } else { 0.0 },
                             }
@@ -177,9 +193,29 @@ impl LevelData {
                     ),
                 ),
             );
+        // Every data version that has saved this world, oldest first.
+        let mut history: Vec<i32> = fs::read(dir.join("level.dat"))
+            .ok()
+            .and_then(|bytes| levitas_nbt::from_gzip(&bytes).ok())
+            .and_then(|(_, root)| {
+                let list = root.compound("Data")?.list("version_history")?;
+                Some(
+                    list.iter()
+                        .filter_map(|t| Some(t.as_i64()? as i32))
+                        .collect(),
+                )
+            })
+            .unwrap_or_default();
+        if history.last() != Some(&DATA_VERSION) {
+            history.push(DATA_VERSION);
+        }
         let data = Compound::new()
             .with("DataVersion", DATA_VERSION)
             .with("version", 19133) // the Anvil format
+            .with(
+                "version_history",
+                history.into_iter().map(Tag::Int).collect::<Vec<Tag>>(),
+            )
             .with(
                 "Version",
                 Compound::new()
@@ -190,46 +226,136 @@ impl LevelData {
             )
             .with("LevelName", "world")
             .with("GameType", 0)
-            .with("Difficulty", crate::rules::difficulty() as i8)
-            .with("GameRules", crate::rules::to_nbt())
-            .with("hardcore", false)
+            .with(
+                "difficulty_settings",
+                Compound::new()
+                    .with("difficulty", crate::rules::difficulty().name())
+                    .with("hardcore", false)
+                    .with("locked", false),
+            )
             .with("allowCommands", true)
             .with("initialized", true)
-            .with("SpawnX", self.spawn[0])
-            .with("SpawnY", self.spawn[1])
-            .with("SpawnZ", self.spawn[2])
-            .with("SpawnAngle", 0.0f32)
+            .with(
+                "spawn",
+                Compound::new()
+                    .with("pos", self.spawn.to_vec())
+                    .with("dimension", "minecraft:overworld")
+                    .with("yaw", 0.0f32)
+                    .with("pitch", 0.0f32),
+            )
             .with("Time", self.time)
-            .with("DayTime", self.day_time)
-            .with("raining", self.weather.raining)
-            .with("thundering", self.weather.thundering)
-            .with("rainTime", self.weather.rain_time)
-            .with("thunderTime", self.weather.thunder_time)
-            .with("clearWeatherTime", self.weather.clear_time)
+            .with("ServerBrands", vec![Tag::from("Levitas")])
             .with(
                 "LastPlayed",
                 std::time::UNIX_EPOCH
                     .elapsed()
                     .unwrap_or_default()
                     .as_millis() as i64,
-            )
-            .with(
-                "WorldGenSettings",
-                Compound::new()
-                    .with("seed", self.seed)
-                    .with("generate_features", false)
-                    .with("bonus_chest", false)
-                    .with("dimensions", dimensions),
             );
         let root = Compound::new().with("Data", data);
         // A world where nothing has changed yet has no folder so far.
         fs::create_dir_all(dir)?;
+        save_data(dir, "game_rules", crate::rules::to_nbt())?;
+        save_data(
+            dir,
+            "weather",
+            Compound::new()
+                .with("raining", self.weather.raining)
+                .with("thundering", self.weather.thundering)
+                .with("rain_time", self.weather.rain_time)
+                .with("thunder_time", self.weather.thunder_time)
+                .with("clear_weather_time", self.weather.clear_time),
+        )?;
+        // Both clocks run on the overworld's day.
+        let clock = || Tag::Compound(Compound::new().with("total_ticks", self.day_time));
+        save_data(
+            dir,
+            "world_clocks",
+            Compound::new()
+                .with("minecraft:overworld", clock())
+                .with("minecraft:the_end", clock()),
+        )?;
+        save_data(
+            dir,
+            "world_gen_settings",
+            Compound::new()
+                .with("seed", self.seed)
+                .with("generate_structures", false)
+                .with("bonus_chest", false)
+                .with("dimensions", dimensions),
+        )?;
         let path = dir.join("level.dat");
         if path.exists() {
             // Keep the previous copy as a backup, as vanilla does.
             fs::copy(&path, dir.join("level.dat_old"))?;
         }
         write_atomic(&path, &levitas_nbt::to_gzip("", &root))
+    }
+}
+
+/// The `data` compound of `data/minecraft/<name>.dat`, if the world has that file.
+fn saved_data(dir: &Path, name: &str) -> Option<Compound> {
+    let path = dir
+        .join("data")
+        .join("minecraft")
+        .join(format!("{name}.dat"));
+    let bytes = fs::read(&path).ok()?;
+    match levitas_nbt::from_gzip(&bytes) {
+        Ok((_, root)) => root.compound("data").cloned(),
+        Err(e) => {
+            error!("{} is unreadable: {e}", path.display());
+            None
+        }
+    }
+}
+
+/// Writes `data/minecraft/<name>.dat` as 26.3 does: the data, and its data version.
+fn save_data(dir: &Path, name: &str, data: Compound) -> io::Result<()> {
+    let folder = dir.join("data").join("minecraft");
+    fs::create_dir_all(&folder)?;
+    let root = Compound::new()
+        .with("data", data)
+        .with("DataVersion", DATA_VERSION);
+    write_atomic(
+        &folder.join(format!("{name}.dat")),
+        &levitas_nbt::to_gzip("", &root),
+    )
+}
+
+/// Moves a world saved by 1.21.8 into 26.3's layout: each dimension's regions, entities
+/// and Levitas files under `dimensions/minecraft/`, and player data under
+/// `players/data/`. Anything already in the new place is left alone.
+pub fn upgrade_layout(dir: &Path) {
+    use super::dimension::Dimension;
+    let mut moves = vec![(dir.join("playerdata"), dir.join("players").join("data"))];
+    for dimension in [Dimension::Overworld, Dimension::Nether, Dimension::End] {
+        let (old, new) = (dimension.old_folder(dir), dimension.folder(dir));
+        for name in [
+            "region",
+            "entities",
+            "poi",
+            "levitas_portals.dat",
+            "levitas_dragon.dat",
+        ] {
+            moves.push((old.join(name), new.join(name)));
+        }
+    }
+    for (from, to) in moves {
+        if !from.exists() || to.exists() {
+            continue;
+        }
+        let moved = to
+            .parent()
+            .map_or(Ok(()), fs::create_dir_all)
+            .and_then(|()| fs::rename(&from, &to));
+        match moved {
+            Ok(()) => info!("moved {} to {}", from.display(), to.display()),
+            Err(e) => error!("could not move {}: {e}", from.display()),
+        }
+    }
+    // The old dimension folders are empty now.
+    for old in ["DIM-1", "DIM1"] {
+        let _ = fs::remove_dir(dir.join(old));
     }
 }
 
@@ -263,7 +389,7 @@ const EQUIPMENT: [(&str, usize); 5] = [
 ];
 
 impl Player {
-    /// The vanilla `playerdata/<uuid>.dat` contents.
+    /// The vanilla `players/data/<uuid>.dat` contents.
     pub(super) fn to_nbt(&self) -> Compound {
         // Saved slots: 0-8 hotbar, 9-35 main inventory.
         let saved_slots = (0..9)
@@ -405,7 +531,8 @@ impl Player {
 impl World {
     fn player_path(&self, uuid: u128) -> PathBuf {
         self.dir
-            .join("playerdata")
+            .join("players")
+            .join("data")
             .join(format!("{}.dat", uuid_string(uuid)))
     }
 
@@ -664,6 +791,73 @@ mod tests {
         assert!(loaded.weather.raining && !loaded.weather.thundering);
         assert_eq!(loaded.weather.rain_time, 777);
         assert_eq!((loaded.seed, loaded.kind), (-42, WorldKind::Noise));
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn worlds_saved_by_1_21_8_move_into_the_26_3_layout() {
+        let dir = std::env::temp_dir().join(format!("levitas-upgrade-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        for folder in [
+            "region",
+            "entities",
+            "DIM-1/region",
+            "DIM1/region",
+            "playerdata",
+        ] {
+            fs::create_dir_all(dir.join(folder)).unwrap();
+        }
+        fs::write(dir.join("region/r.0.0.mca"), b"overworld").unwrap();
+        fs::write(dir.join("DIM-1/region/r.0.0.mca"), b"nether").unwrap();
+        fs::write(dir.join("DIM1/levitas_dragon.dat"), b"fight").unwrap();
+        fs::write(dir.join("playerdata/alice.dat"), b"alice").unwrap();
+        // A 1.21.8 level.dat: rules as text, weather and spawn inline.
+        let data = Compound::new()
+            .with("DataVersion", 4440)
+            .with("GameRules", Compound::new().with("keepInventory", "true"))
+            .with("SpawnX", 5)
+            .with("SpawnY", 70)
+            .with("SpawnZ", -9)
+            .with("DayTime", 1234i64)
+            .with("raining", true)
+            .with("rainTime", 50);
+        let root = Compound::new().with("Data", data);
+        fs::write(dir.join("level.dat"), levitas_nbt::to_gzip("", &root)).unwrap();
+
+        upgrade_layout(&dir);
+        let world = dir.join("dimensions/minecraft");
+        let read = |path: &str| fs::read(world.join(path)).unwrap();
+        assert_eq!(read("overworld/region/r.0.0.mca"), b"overworld");
+        assert!(world.join("overworld/entities").is_dir());
+        assert_eq!(read("the_nether/region/r.0.0.mca"), b"nether");
+        assert_eq!(read("the_end/levitas_dragon.dat"), b"fight");
+        assert_eq!(
+            fs::read(dir.join("players/data/alice.dat")).unwrap(),
+            b"alice"
+        );
+        assert!(!dir.join("region").exists() && !dir.join("DIM-1").exists());
+
+        let level = LevelData::load(&dir).unwrap();
+        assert!(crate::rules::bool("keep_inventory"));
+        assert_eq!((level.spawn, level.day_time), ([5, 70, -9], 1234));
+        assert!(level.weather.raining);
+        assert_eq!(level.weather.rain_time, 50);
+        // Saved again, it is a 26.3 world that remembers it was a 1.21.8 one.
+        level.save(&dir).unwrap();
+        let (_, root) = levitas_nbt::from_gzip(&fs::read(dir.join("level.dat")).unwrap()).unwrap();
+        let data = root.compound("Data").unwrap();
+        assert_eq!(data.int("DataVersion"), Some(i64::from(DATA_VERSION)));
+        assert_eq!(
+            data.compound("spawn").unwrap().int_array("pos"),
+            Some(&[5, 70, -9][..])
+        );
+        assert_eq!(
+            saved_data(&dir, "game_rules")
+                .unwrap()
+                .int("minecraft:keep_inventory"),
+            Some(1)
+        );
+        crate::rules::set("keep_inventory", "false").unwrap();
         fs::remove_dir_all(dir).unwrap();
     }
 

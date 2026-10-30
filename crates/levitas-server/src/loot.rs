@@ -76,7 +76,7 @@ impl LootTables {
 
     /// Items dropped by breaking a block, as `(item ID, count)` pairs.
     pub fn block_drops(&self, ctx: &mut LootContext) -> Vec<(i32, i32)> {
-        if !crate::rules::bool("doTileDrops") {
+        if !crate::rules::bool("block_drops") {
             return Vec::new();
         }
         let name = BlockInfo::of(ctx.state).name;
@@ -95,7 +95,7 @@ impl LootTables {
 
     /// Items dropped by a mob of `entity` type (e.g. `minecraft:cow`) when it dies.
     pub fn entity_drops(&self, entity: &str, ctx: &mut LootContext) -> Vec<(i32, i32)> {
-        if !crate::rules::bool("doMobLoot") {
+        if !crate::rules::bool("mob_drops") {
             return Vec::new();
         }
         let mut drops = Vec::new();

@@ -156,7 +156,7 @@ impl World {
             },
             ["gamerule", rule, value] => match crate::rules::set(rule, value) {
                 Ok(()) => {
-                    self.rule_changed(rule);
+                    self.rule_changed(crate::rules::short_name(rule).unwrap_or(rule));
                     format!("Gamerule {rule} is now set to: {value}")
                 }
                 Err(e) => e,
@@ -189,7 +189,7 @@ impl World {
     /// Tells everyone's client about a rule it acts on itself.
     fn rule_changed(&mut self, rule: &str) {
         match rule {
-            "doImmediateRespawn" => {
+            "immediate_respawn" => {
                 let on = crate::rules::bool(rule);
                 self.announce(
                     Writer::packet(clientbound::GAME_EVENT)
@@ -197,7 +197,7 @@ impl World {
                         .f32(if on { 1.0 } else { 0.0 }),
                 );
             }
-            "reducedDebugInfo" => {
+            "reduced_debug_info" => {
                 let event = if crate::rules::bool(rule) {
                     ENTITY_EVENT_REDUCED_DEBUG_INFO
                 } else {
@@ -341,13 +341,13 @@ mod tests {
     #[test]
     fn game_rules_and_difficulty_from_the_console() {
         let mut w = world();
-        w.console("gamerule keepInventory true");
-        assert!(rules::bool("keepInventory"));
-        w.console("gamerule keepInventory sometimes");
-        assert!(rules::bool("keepInventory"), "bad values change nothing");
+        w.console("gamerule keep_inventory true");
+        assert!(rules::bool("keep_inventory"));
+        w.console("gamerule keep_inventory sometimes");
+        assert!(rules::bool("keep_inventory"), "bad values change nothing");
         w.console("difficulty hard");
         assert_eq!(rules::difficulty(), Difficulty::Hard);
-        rules::set("keepInventory", "false").unwrap();
+        rules::set("keep_inventory", "false").unwrap();
         rules::set_difficulty(Difficulty::Normal);
     }
 
@@ -358,16 +358,16 @@ mod tests {
         let dirt = Stack::new(ItemInfo::id_of("minecraft:dirt").unwrap(), 5);
         w.players.get_mut(&id).unwrap().inventory.slots[10] = dirt;
 
-        rules::set("fallDamage", "false").unwrap();
+        rules::set("fall_damage", "false").unwrap();
         w.damage(id, 5.0, survival::Damage::Fall);
         assert_eq!(w.players[&id].health, 20.0);
 
-        rules::set("keepInventory", "true").unwrap();
+        rules::set("keep_inventory", "true").unwrap();
         w.damage(id, 100.0, survival::Damage::Kill);
         assert!(!w.players[&id].alive);
         assert_eq!(w.players[&id].inventory.slots[10], dirt);
-        rules::set("keepInventory", "false").unwrap();
-        rules::set("fallDamage", "true").unwrap();
+        rules::set("keep_inventory", "false").unwrap();
+        rules::set("fall_damage", "true").unwrap();
     }
 }
 

@@ -70,7 +70,7 @@ impl World {
         // The world's age, then its clocks: the time each shows and how fast the
         // client should run it on between updates.
         let clocks = SyncedRegistry::get("minecraft:world_clock").map_or(&[][..], |r| r.entries);
-        let rate = if crate::rules::bool("doDaylightCycle") {
+        let rate = if crate::rules::bool("advance_time") {
             1.0
         } else {
             0.0
@@ -105,10 +105,10 @@ impl World {
     }
 
     pub(super) fn tick_time(&mut self) {
-        if crate::rules::bool("doDaylightCycle") {
+        if crate::rules::bool("advance_time") {
             self.day_time += 1;
         }
-        if crate::rules::bool("doWeatherCycle") {
+        if crate::rules::bool("advance_weather") {
             self.tick_weather();
         }
         self.tick_sleep();
@@ -342,7 +342,7 @@ impl World {
             }
         }
         // `playersSleepingPercentage` of the players must have slept, at least one.
-        let percentage = crate::rules::int("playersSleepingPercentage").max(0);
+        let percentage = crate::rules::int("players_sleeping_percentage").max(0);
         let needed = ((players * percentage + 99) / 100).max(1);
         let everyone_rested = percentage <= 100 && rested >= needed;
         if anyone && !self.can_sleep_now() {

@@ -1,6 +1,6 @@
 //! Dimensions. Each runs as its own world task with its own chunks, entities and
 //! storage; players move between them through portals. They share the world folder's
-//! `level.dat` (written by the overworld) and `playerdata/`.
+//! `level.dat` and `data/` (written by the overworld) and `players/`.
 
 use std::path::{Path, PathBuf};
 
@@ -65,8 +65,15 @@ impl Dimension {
         self == Dimension::Overworld
     }
 
-    /// Where the dimension keeps its regions, inside the world folder.
+    /// Where the dimension keeps its regions, inside the world folder, as 26.3 lays it
+    /// out: `dimensions/minecraft/the_nether`, and so on.
     pub fn folder(self, world: &Path) -> PathBuf {
+        let (namespace, path) = self.name().split_once(':').expect("a namespaced name");
+        world.join("dimensions").join(namespace).join(path)
+    }
+
+    /// Where 1.21.8 kept the dimension's regions.
+    pub fn old_folder(self, world: &Path) -> PathBuf {
         match self {
             Dimension::Overworld => world.to_path_buf(),
             Dimension::Nether => world.join("DIM-1"),

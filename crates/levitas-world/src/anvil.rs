@@ -27,7 +27,7 @@ fn biome_kind() -> Kind {
     Kind::biomes(biomes().entries.len())
 }
 
-/// Serializes a chunk as vanilla 1.21.8 does, so vanilla and Leaf can read it.
+/// Serializes a chunk as vanilla 26.3 does, so vanilla and Leaf can read it.
 #[allow(clippy::too_many_arguments)]
 pub fn to_nbt(
     chunk: &Chunk,

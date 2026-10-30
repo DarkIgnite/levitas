@@ -33,11 +33,14 @@ together with [ROADMAP.md](ROADMAP.md), [ARCHITECTURE.md](ARCHITECTURE.md),
 
 ## Migrating to 26.3
 
-The current piece of work, before any feature. The checklist is in
-[ROADMAP.md](ROADMAP.md#migration-to-263). Done: data, protocol 777, entity data, chunk
-sections (fluid count), synced registries, loot and recipe formats, biome spawn lists
-(now the `minecraft:gameplay/natural_mob_spawns` attribute); all tests pass. Left: saved
-data, game rules, the new blocks' own behaviour, and a check in a real 26.3 client.
+Nearly done; the checklist is in [ROADMAP.md](ROADMAP.md#migration-to-263). Done: data,
+protocol 777, entity data, chunk sections (fluid count), synced registries, loot and
+recipe formats, biome spawn lists (now the `minecraft:gameplay/natural_mob_spawns`
+attribute), the recipe packet (item stack templates, brewing property sets), the 26.3
+world layout with the upgrade of 1.21.8 worlds (`storage::upgrade_layout`), game rules
+by their 26.3 names, and terrain without fallbacks. The owner joins and plays with a
+26.3 client. Left: the blocks new in 26.3 behave as themselves (they borrow hardness and
+shapes through `stand_in` in `levitas-registry/build.rs`).
 26.3 wiki revisions used: packets `oldid=3868170`, entity metadata `oldid=3792654`, data
 types `oldid=3855787`, chunk format `oldid=3661930`. Those pages lag behind 26.3 in two
 places a real client caught: light masks in chunk and light packets are now length-
@@ -66,9 +69,10 @@ whitelist off) and compare what it sends with what Levitas sends. What to know g
   1.21.8 must still load and be upgraded on save.
 - **New content** (poplar wood, dappled forest, red shrub, shelf mushroom, wool and
   concrete stairs and slabs, straw beds, cushions, the abandoned camp) arrives with the
-  data; Pumpkin's generator already places some of it, so `older_name` fallbacks can go.
-- The owner's world in `C:\dev\levitas-server` was made on 1.21.8. Back it up before
-  the first 26.3 deploy.
+  data. Pumpkin's generator places it as it is; Levitas's blocks borrow hardness and
+  shapes from a similar block through `stand_in` until they get their own behaviour.
+- The owner's world in `C:\dev\levitas-server` was made on 1.21.8; a copy from before
+  the move is in `world-backup-1.21.8-20261030-1310` next to it.
 
 ## 2. Hard rules
 
@@ -134,7 +138,7 @@ Workspace crates in `crates/`:
 | `levitas-nbt` | NBT (file, network, gzip), modified UTF-8 |
 | `levitas-registry` | `build.rs` turns `generated/<version>` (1.21.8 until the migration to 26.3) into tables: packet IDs, blocks/states (`block::*` consts, `BlockInfo`, properties, hardness, light emission/filter, requires_tool), items (`ItemInfo`, tools, food, durability), tags, synced registries, collision shapes, sound events, loot tables JSON, recipes JSON. Hardness/shapes/light come from PrismarineJS minecraft-data (MIT, pinned commit) because the data generator lacks them. |
 | `levitas-world` | Paletted containers, `Chunk`/`Section` (y -64..320, 24 sections), `light.rs` (`ChunkLight`, 26 light sections incl. one below/above), `lighting.rs` (`LightEngine`: incremental BFS relight), `anvil.rs` (vanilla chunk NBT incl. light, block_ticks, fluid_ticks), `region.rs` (.mca files) |
-| `levitas-pumpkin` | `PumpkinTerrain`: drives Pumpkin's generation steps over 8x8-chunk areas and translates results to the target version's states/biomes/light. Contains the Pumpkin→1.21.8 block fallback table (`older_name`), which the move to 26.3 should mostly make unnecessary (Pumpkin itself targets 26.x), and plant placement rules (`Portals::can_place_at`, adapted from Pumpkin with attribution). |
+| `levitas-pumpkin` | `PumpkinTerrain`: drives Pumpkin's generation steps over 8x8-chunk areas and translates results to the target version's states/biomes/light. Every Pumpkin block state and biome matches a 26.3 one by name; it also holds plant placement rules (`Portals::can_place_at`, adapted from Pumpkin with attribution). |
 | `levitas-server` | The binary (`levitas`). See below. |
 
 `levitas-server/src`:
@@ -153,7 +157,8 @@ Workspace crates in `crates/`:
 - `world/survival.rs` – health, hunger, damage, death/respawn, eating, `use_item`.
 - `world/containers.rs` – chests (incl. double), furnaces, crafting tables, block entities.
 - `world/items.rs` – dropped item entities and pickup.
-- `world/storage.rs` – level.dat, playerdata, chunk load/save, autosave, unloading.
+- `world/storage.rs` – level.dat and `data/minecraft/`, player data, chunk load/save,
+  autosave, unloading, and moving 1.21.8 worlds into the 26.3 layout.
 - `world/commands.rs` – `/gamemode`, `/give`, `/kill`, `/time`, `/weather`, and the
   Brigadier tree sent on join for tab completion: **add every new command to
   `command_tree()` too**, or the client shows it as unknown.
@@ -180,7 +185,7 @@ Phase 0–1 and most of Phase 2, plus parts of 3 and 12 (details in ROADMAP.md):
   furnaces, chests/double chests/barrels with sounds.
 - Block placement rules, orientation, support, connections, doors/trapdoors/gates/
   buttons/levers.
-- Persistence in vanilla Anvil format (level.dat, playerdata, regions, block entities,
+- Persistence in vanilla 26.3 format (level.dat, players, regions, block entities,
   block/fluid ticks, light).
 - **Real terrain** from Pumpkin (biomes, caves, aquifers, trees, ores, structures'
   blocks), generated on worker threads in 8x8-chunk areas.
@@ -234,7 +239,7 @@ agreed next steps were **falling blocks (done), day/night (done), then mobs**.
 
 - Pumpkin targets Minecraft 26.x (protocol 777); `levitas-pumpkin` maps by name.
   The test `every_pumpkin_state_has_a_match` fails if a Pumpkin update adds blocks with
-  no mapping: extend `older_name`. Pumpkin is pinned to rev
+  no 26.3 counterpart (map it in `map_state`). Pumpkin is pinned to rev
   `cd9e98c966919541fe951d78dfdf8d3401e10112`; updating it may change APIs used in
   `levitas-pumpkin` (`Cache`, `ProtoChunk`, `StagedChunkEnum`, `WorldPortalExt`).
 - Pumpkin's own `generate_single_chunk` runs terrain and features only for the middle

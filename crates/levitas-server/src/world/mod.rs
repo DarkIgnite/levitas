@@ -543,7 +543,7 @@ struct World {
     links: HashMap<Dimension, mpsc::Sender<Event>>,
     /// Nether portals in this dimension, for travellers to come out of.
     portals: Vec<portal::KnownPortal>,
-    /// The world folder: level.dat, region/ and playerdata/.
+    /// The world folder: level.dat, data/, dimensions/ and players/.
     dir: PathBuf,
     storage: RegionStorage,
     /// Mobs are saved apart from blocks, in `entities/` region files like vanilla.
@@ -621,6 +621,9 @@ impl World {
         new: NewWorld,
         dimension: Dimension,
     ) -> (Self, tokio::sync::mpsc::UnboundedReceiver<Vec<Generated>>) {
+        if dimension == Dimension::Overworld {
+            storage::upgrade_layout(&dir);
+        }
         let existing = LevelData::load(&dir);
         let created = existing.is_none();
         let mut level = existing.unwrap_or_else(|| LevelData {
@@ -914,9 +917,9 @@ impl World {
             .varint(crate::config::get().max_players as i32) // unused by the client
             .varint(view_distance())
             .varint(view_distance()) // simulation distance
-            .bool(crate::rules::bool("reducedDebugInfo"))
-            .bool(!crate::rules::bool("doImmediateRespawn")) // respawn screen
-            .bool(crate::rules::bool("doLimitedCrafting"));
+            .bool(crate::rules::bool("reduced_debug_info"))
+            .bool(!crate::rules::bool("immediate_respawn")) // respawn screen
+            .bool(crate::rules::bool("limited_crafting"));
         login = spawn_info(login, mode, self.dimension)
             .bool(crate::config::get().online_mode)
             .bool(false); // enforces secure chat

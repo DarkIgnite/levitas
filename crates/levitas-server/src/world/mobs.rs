@@ -1579,7 +1579,7 @@ impl World {
         for (item, count) in drops {
             self.scatter_item(mob.pos, Stack::new(item, count));
         }
-        if mob.killed_by_player && crate::rules::bool("doMobLoot") {
+        if mob.killed_by_player && crate::rules::bool("mob_drops") {
             self.mob_xp(mob.pos, mob.kind.is_monster());
         }
     }

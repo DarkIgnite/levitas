@@ -535,7 +535,8 @@ impl World {
 
     /// Tries to spawn monster groups in the dark around each player.
     pub(super) fn tick_monster_spawning(&mut self) {
-        if !crate::rules::bool("doMobSpawning")
+        if !crate::rules::bool("spawn_mobs")
+            || !crate::rules::bool("spawn_monsters")
             || crate::rules::difficulty() == crate::rules::Difficulty::Peaceful
         {
             return;

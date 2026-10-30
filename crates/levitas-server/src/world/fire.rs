@@ -66,7 +66,9 @@ impl World {
             return;
         }
         // Soul fire neither ages nor spreads, nor does any fire without `doFireTick`.
-        if blocks::name(state) == "minecraft:soul_fire" || !crate::rules::bool("doFireTick") {
+        if blocks::name(state) == "minecraft:soul_fire"
+            || crate::rules::int("fire_spread_radius_around_player") == 0
+        {
             return;
         }
         let below = self.block(offset(pos, Dir::Down));

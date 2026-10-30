@@ -44,7 +44,7 @@ impl World {
     ) -> Vec<BlockPos> {
         // Mobs' explosions (creepers, fireballs) leave blocks alone without `mobGriefing`.
         let by_mob = !matches!(by, "TNT" | "End Crystal" | "[Intentional Game Design]");
-        let destroyed = if by_mob && !crate::rules::bool("mobGriefing") {
+        let destroyed = if by_mob && !crate::rules::bool("mob_griefing") {
             Default::default()
         } else {
             self.blast_rays(centre, power)

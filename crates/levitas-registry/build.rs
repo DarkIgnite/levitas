@@ -61,7 +61,7 @@ fn main() {
     let version = read_json(&data.join("version.json"));
     writeln!(
         out,
-        "/// Data version of 1.21.8 worlds, stored in chunks, level.dat and player data.\n\
+        "/// Data version of 26.3 worlds, stored in chunks, level.dat and player data.\n\
          pub const DATA_VERSION: i32 = {};\n",
         version["world_version"].as_i64().unwrap()
     )
@@ -522,6 +522,7 @@ fn items_and_entities(data: &Path, block_defaults: &HashMap<String, u64>, out: &
             "Item data component type IDs.",
         ),
         ("particle", "minecraft:particle_type", "Particle type IDs."),
+        ("game_rule", "minecraft:game_rule", "Game rule IDs."),
         (
             "slot_display",
             "minecraft:slot_display",

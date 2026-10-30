@@ -225,9 +225,9 @@ impl World {
         source: Option<i32>,
     ) -> bool {
         let rule = match kind {
-            Damage::Fall => "fallDamage",
-            Damage::Drown => "drowningDamage",
-            _ if kind.is_fire() || matches!(kind, Damage::OnFire) => "fireDamage",
+            Damage::Fall => "fall_damage",
+            Damage::Drown => "drowning_damage",
+            _ if kind.is_fire() || matches!(kind, Damage::OnFire) => "fire_damage",
             _ => "",
         };
         if !rule.is_empty() && !crate::rules::bool(rule) {
@@ -374,7 +374,7 @@ impl World {
         self.get_off(id);
         self.wake_up(id);
         self.clear_effects(id);
-        let keep = crate::rules::bool("keepInventory");
+        let keep = crate::rules::bool("keep_inventory");
         if !keep {
             self.drop_xp_on_death(id);
         }
@@ -409,7 +409,7 @@ impl World {
                 .text(&message),
         );
         self.broadcast(entity_event(id, ENTITY_EVENT_DEATH), Some(id));
-        if crate::rules::bool("showDeathMessages") {
+        if crate::rules::bool("show_death_messages") {
             self.announce(system_chat(&message));
         }
         info!("{message}");
@@ -614,7 +614,7 @@ impl World {
                 continue;
             }
             let difficulty = crate::rules::difficulty();
-            let regenerates = crate::rules::bool("naturalRegeneration");
+            let regenerates = crate::rules::bool("natural_health_regeneration");
             if difficulty == Difficulty::Peaceful {
                 // No hunger in peaceful: health and food come back on their own.
                 if regenerates && p.health < MAX_HEALTH && tick.is_multiple_of(20) {

@@ -2,10 +2,8 @@
 //!
 //! [Pumpkin](https://github.com/Pumpkin-MC/Pumpkin) (GPL-3.0) reimplements Minecraft's
 //! noise terrain, biomes, carvers, features, structures and lighting in Rust. Levitas uses
-//! its `pumpkin-world` crate as a library and translates each generated chunk. Pumpkin
-//! targets a newer Minecraft version, so its block states and biomes are matched to
-//! 1.21.8 by name and properties, and the blocks 1.21.8 does not have yet become their
-//! closest older relative (see [`older_name`]).
+//! its `pumpkin-world` crate as a library and translates each generated chunk. Its block
+//! states and biomes are matched to 26.3's by name and properties.
 
 use levitas_nbt::{Compound, Tag};
 use levitas_registry::{block, BlockInfo, SyncedRegistry};
@@ -58,7 +56,7 @@ pub struct PumpkinTerrain {
     seed: i64,
     /// The sections the dimension's terrain fills; the rest stay empty.
     span: Span,
-    /// The 1.21.8 state of every Pumpkin block state, by Pumpkin state ID.
+    /// The 26.3 state of every Pumpkin block state, by Pumpkin state ID.
     states: Box<[u16]>,
     /// The biome registry index of every Pumpkin biome, by Pumpkin biome ID.
     biomes: Box<[u16]>,
@@ -118,9 +116,7 @@ impl PumpkinTerrain {
         let biomes = (0..=u8::MAX)
             .map(|id| {
                 Biome::from_id(id)
-                    .and_then(|b| {
-                        registry.id_of(&format!("minecraft:{}", older_biome(b.registry_id)))
-                    })
+                    .and_then(|b| registry.id_of(&format!("minecraft:{}", b.registry_id)))
                     .map_or(plains, |i| i as u16)
             })
             .collect();
@@ -220,7 +216,7 @@ impl PumpkinTerrain {
         }
     }
 
-    /// A generated Pumpkin chunk as a 1.21.8 chunk.
+    /// A generated Pumpkin chunk as a 26.3 chunk.
     fn translate(&self, proto: &ProtoChunk) -> Chunk {
         let mut blocks = vec![0u16; 4096];
         let mut biomes = [0u16; 64];
@@ -329,22 +325,14 @@ fn light(sky: &[LightContainer], block: &[LightContainer], span: Span) -> ChunkL
     light
 }
 
-/// The 1.21.8 state for a Pumpkin state: the block of the same name (or its older
-/// relative) with the same property values. `Err` holds a guess for blocks with no
+/// The 26.3 state for a Pumpkin state: the block of the same name with the same
+/// property values. `Err` holds a guess for blocks with no
 /// match: stone if it has a collision box, air otherwise.
 fn map_state(id: BlockStateId) -> Result<u16, u16> {
     let pumpkin = id.to_block();
     let name = format!("minecraft:{}", pumpkin.name);
-    let info = match BlockInfo::by_name(&name) {
-        Some(info) => info,
-        None => match older_name(pumpkin.name) {
-            Some("air") => return Ok(block::AIR),
-            Some(older) => match BlockInfo::by_name(&format!("minecraft:{older}")) {
-                Some(info) => info,
-                None => return Err(guess(id)),
-            },
-            None => return Err(guess(id)),
-        },
+    let Some(info) = BlockInfo::by_name(&name) else {
+        return Err(guess(id));
     };
     let props = pumpkin
         .properties(id)
@@ -358,87 +346,6 @@ fn guess(id: BlockStateId) -> u16 {
         block::AIR
     } else {
         block::STONE
-    }
-}
-
-/// The 1.21.8 block standing in for one added after it (names without the namespace).
-fn older_name(name: &str) -> Option<&'static str> {
-    let exact = match name {
-        "golden_dandelion" => "dandelion",
-        "potted_golden_dandelion" => "potted_dandelion",
-        "shelf_mushroom" => "air",
-        "straw_bed" => "hay_block",
-        "iron_chain" => "chain",
-        "sulfur_spike" => "pointed_dripstone",
-        "sulfur" | "potent_sulfur" => "yellow_terracotta",
-        "sulfur_slab" => "sandstone_slab",
-        "sulfur_stairs" | "sulfur_brick_stairs" => "sandstone_stairs",
-        "sulfur_wall" | "polished_sulfur_wall" | "sulfur_brick_wall" => "sandstone_wall",
-        "polished_sulfur" => "smooth_sandstone",
-        "polished_sulfur_slab" => "smooth_sandstone_slab",
-        "polished_sulfur_stairs" => "smooth_sandstone_stairs",
-        "sulfur_bricks" => "cut_sandstone",
-        "sulfur_brick_slab" => "cut_sandstone_slab",
-        "chiseled_sulfur" => "chiseled_sandstone",
-        "cinnabar" => "granite",
-        "cinnabar_slab" => "granite_slab",
-        "cinnabar_stairs" => "granite_stairs",
-        "cinnabar_wall" | "polished_cinnabar_wall" | "cinnabar_brick_wall" => "granite_wall",
-        "polished_cinnabar" | "cinnabar_bricks" | "chiseled_cinnabar" => "polished_granite",
-        "polished_cinnabar_slab" | "cinnabar_brick_slab" => "polished_granite_slab",
-        "polished_cinnabar_stairs" | "cinnabar_brick_stairs" => "polished_granite_stairs",
-        _ => "",
-    };
-    if !exact.is_empty() {
-        return Some(exact);
-    }
-    if name.ends_with("_shelf") {
-        return Some("air");
-    }
-    if name.ends_with("_poplar_leaves") {
-        return Some("birch_leaves");
-    }
-    if name.contains("poplar") {
-        return BlockInfo::by_name(&format!("minecraft:{}", name.replace("poplar", "birch")))
-            .map(|info| &info.name["minecraft:".len()..]);
-    }
-    if name.ends_with("_shrub") {
-        return Some("bush");
-    }
-    // Wool and concrete slabs and stairs become the full block.
-    if let Some(base) = name
-        .strip_suffix("_slab")
-        .or_else(|| name.strip_suffix("_stairs"))
-        .filter(|base| base.ends_with("_wool") || base.ends_with("_concrete"))
-    {
-        return BlockInfo::by_name(&format!("minecraft:{base}"))
-            .map(|info| &info.name["minecraft:".len()..]);
-    }
-    // Copper versions of older blocks, in any oxidation stage, waxed or not.
-    let copper = name.strip_prefix("waxed_").unwrap_or(name);
-    let copper = ["exposed_", "weathered_", "oxidized_"]
-        .iter()
-        .find_map(|stage| copper.strip_prefix(stage))
-        .unwrap_or(copper);
-    match copper {
-        "copper_chain" => Some("chain"),
-        "copper_bars" => Some("iron_bars"),
-        "copper_chest" => Some("chest"),
-        "copper_lantern" => Some("lantern"),
-        "copper_torch" => Some("torch"),
-        "copper_wall_torch" => Some("wall_torch"),
-        "lightning_rod" => Some("lightning_rod"),
-        "copper_golem_statue" => Some("air"),
-        _ => None,
-    }
-}
-
-/// Biomes added after 1.21.8 become the closest older one.
-fn older_biome(name: &str) -> &str {
-    match name {
-        "dappled_forest" => "forest",
-        "sulfur_caves" => "dripstone_caves",
-        other => other,
     }
 }
 
@@ -642,7 +549,7 @@ mod tests {
             .filter(|&id| map_state(id).is_err())
             .map(|id| id.to_block().name.to_owned())
             .collect();
-        assert!(unmatched.is_empty(), "no 1.21.8 block for {unmatched:?}");
+        assert!(unmatched.is_empty(), "no 26.3 block for {unmatched:?}");
     }
 
     #[test]

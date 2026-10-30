@@ -21,7 +21,7 @@ const LEVEL_EVENT_BONE_MEAL: i32 = 1505;
 impl World {
     pub(super) fn tick_random(&mut self) {
         let mut picks = Vec::new();
-        let speed = crate::rules::int("randomTickSpeed").clamp(0, 4096);
+        let speed = crate::rules::int("random_tick_speed").clamp(0, 4096);
         for (&(cx, cz), chunk) in &self.chunks {
             for (s, section) in chunk.sections().iter().enumerate() {
                 if section.is_empty() {

@@ -116,7 +116,7 @@ async fn join_with_login(addr: SocketAddr, name: &str, uuid: u128) -> (TcpStream
             .varint(1)
             .string("minecraft")
             .string("core")
-            .string("1.21.8"),
+            .string(levitas_protocol::GAME_VERSION),
     )
     .await;
     read_until(
@@ -197,7 +197,14 @@ async fn generated_world_streams_real_terrain() {
 
     // Generated chunks are saved, so the same terrain comes back after a restart.
     shutdown(&world).await;
-    let regions = std::fs::read_dir(dir.join("region")).unwrap().count();
+    let regions = std::fs::read_dir(
+        dir.join("dimensions")
+            .join("minecraft")
+            .join("overworld")
+            .join("region"),
+    )
+    .unwrap()
+    .count();
     assert!(regions > 0, "no region files saved");
     let _ = std::fs::remove_dir_all(dir);
 }
@@ -612,9 +619,28 @@ async fn world_and_players_survive_a_restart() {
     read_until(&mut alice, play::clientbound::DISCONNECT).await;
 
     assert!(dir.join("level.dat").is_file());
-    assert!(dir.join("region").join("r.0.0.mca").is_file());
     assert!(dir
-        .join("playerdata")
+        .join("dimensions")
+        .join("minecraft")
+        .join("overworld")
+        .join("region")
+        .join("r.0.0.mca")
+        .is_file());
+    for name in [
+        "game_rules",
+        "weather",
+        "world_clocks",
+        "world_gen_settings",
+    ] {
+        assert!(dir
+            .join("data")
+            .join("minecraft")
+            .join(format!("{name}.dat"))
+            .is_file());
+    }
+    assert!(dir
+        .join("players")
+        .join("data")
         .join(format!("{}.dat", world::uuid_string(0xA11CE)))
         .is_file());
 
@@ -1684,7 +1710,12 @@ async fn animals_are_saved_with_the_world() {
     command(&mut alice, "summon pig").await;
     spawned(&mut alice, entity_type::PIG).await;
     shutdown(&world).await;
-    assert!(dir.join("entities").is_dir());
+    assert!(dir
+        .join("dimensions")
+        .join("minecraft")
+        .join("overworld")
+        .join("entities")
+        .is_dir());
 
     let (addr, _world) = server_in(dir.clone()).await;
     let mut alice = join(addr, "Alice", 1).await;
