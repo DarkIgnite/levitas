@@ -349,6 +349,31 @@ impl World {
             }
             return true;
         }
+        // A small shelf mushroom grows into a large one; large ones take no bone meal.
+        if blocks::name(state) == "minecraft:shelf_mushroom" {
+            if prop(state, "age") != Some("0") {
+                return false;
+            }
+            self.set_block(pos, with(state, "age", "1"));
+            return true;
+        }
+        // A red shrub tries to put another one next to, above or below itself.
+        if blocks::name(state) == "minecraft:red_shrub" {
+            let dirs = [
+                Dir::North,
+                Dir::South,
+                Dir::West,
+                Dir::East,
+                Dir::Up,
+                Dir::Down,
+            ];
+            let spot = offset(pos, dirs[self.rng.below(6) as usize]);
+            let mut get = |p: BlockPos| self.block(p);
+            if is_air(get(spot)) && blocks::can_survive(state, spot, &mut get) {
+                self.set_block(spot, state);
+            }
+            return true;
+        }
         if blocks::name(state) == "minecraft:grass_block" {
             for _ in 0..16 {
                 let spot = BlockPos::new(

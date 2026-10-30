@@ -917,6 +917,7 @@ dependencies = [
 name = "levitas-registry"
 version = "0.1.0"
 dependencies = [
+ "pumpkin-data",
  "serde_json",
 ]
 

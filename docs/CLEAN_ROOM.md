@@ -17,7 +17,9 @@ Levitas is GPL-3.0 open source. To keep it legally distributable, every contribu
   since it would bring the AGPL's network-use terms with it.
 - Block hardness and collision shapes from [PrismarineJS minecraft-data](https://github.com/PrismarineJS/minecraft-data)
   (MIT), downloaded by `tools/datagen.py` at a pinned commit. The official data generator
-  does not output these.
+  does not output these. For blocks newer than minecraft-data's tables, the same values
+  come from Pumpkin's `pumpkin-data` crate at the pinned revision, read by
+  `levitas-registry`'s build script; nothing of it is committed here.
 
 ## Not allowed
 

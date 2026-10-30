@@ -426,3 +426,63 @@ fn pointed_dripstone_orientation_and_support() {
     w.set(ceiling, block::AIR);
     assert!(!stalactite_supported(hang_pos, &mut |q| w.get(q)));
 }
+
+#[test]
+fn blocks_new_in_26_3_place_and_hold_on_like_their_kin() {
+    let mut w = World::new();
+    // Straw beds take two blocks like any bed.
+    let straw = w
+        .place(state("minecraft:straw_bed"), on_ground(0, 0, EAST_YAW))
+        .unwrap();
+    assert_eq!(straw.len(), 2);
+    assert!(is_bed(straw[0].1) && is_straw_bed(straw[1].1));
+    assert!(!is_straw_bed(state("minecraft:red_bed")));
+
+    // A red shrub grows on soil, not on bare stone.
+    let shrub = state("minecraft:red_shrub");
+    assert!(w.place(shrub, on_ground(5, 5, 0.0)).is_none());
+    w.set(pos(6, -1, 6), state("minecraft:grass_block"));
+    assert!(w.place(shrub, on_ground(6, 6, 0.0)).is_some());
+    // Grass is no longer in 26.3's `dirt` tag; flowers and saplings still grow on it.
+    w.set(pos(7, -1, 7), state("minecraft:grass_block"));
+    assert!(w
+        .place(state("minecraft:poppy"), on_ground(7, 7, 0.0))
+        .is_some());
+    w.set(pos(8, -1, 8), state("minecraft:podzol"));
+    assert!(w
+        .place(state("minecraft:poplar_sapling"), on_ground(8, 8, 0.0))
+        .is_some());
+
+    // A shelf mushroom sticks out of the side of a full block and falls off without it.
+    w.set(pos(10, 0, 0), block::STONE);
+    let mushroom = state("minecraft:shelf_mushroom");
+    let placed = w
+        .place(mushroom, on_side(pos(10, 0, 0), Dir::South, 0.5, 0.0))
+        .unwrap()[0];
+    assert_eq!(placed.0, pos(10, 0, 1));
+    assert_eq!(prop(placed.1, "facing"), Some("south"));
+    assert!(
+        w.place(mushroom, on_ground(12, 12, 0.0)).is_none(),
+        "not on top of blocks"
+    );
+    w.set(pos(10, 0, 0), block::AIR);
+    assert!(is_air(w.update(pos(10, 0, 1))));
+
+    // Sulfur spikes hang from ceilings and stand on floors, like dripstone.
+    let spike = state("minecraft:sulfur_spike");
+    w.set(pos(20, 3, 0), block::STONE);
+    let hanging = w
+        .place(spike, on_side(pos(20, 3, 0), Dir::Down, 0.0, 0.0))
+        .unwrap()[0]
+        .1;
+    assert!(is_stalactite(hanging));
+    let standing = w.place(spike, on_ground(22, 0, 0.0)).unwrap()[0].1;
+    assert!(is_stalagmite(standing));
+    // Only dripstone makes a fall onto it worse.
+    assert!(!is_sharp_stalagmite(standing));
+    assert!(is_sharp_stalagmite(with(
+        state("minecraft:pointed_dripstone"),
+        "vertical_direction",
+        "up"
+    )));
+}

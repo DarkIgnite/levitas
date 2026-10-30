@@ -55,6 +55,7 @@ pub fn flammability(state: u16) -> Option<Flammability> {
         | "minecraft:large_fern"
         | "minecraft:dead_bush"
         | "minecraft:bush"
+        | "minecraft:red_shrub"
         | "minecraft:short_dry_grass"
         | "minecraft:tall_dry_grass"
         | "minecraft:firefly_bush"

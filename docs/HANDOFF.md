@@ -33,14 +33,16 @@ together with [ROADMAP.md](ROADMAP.md), [ARCHITECTURE.md](ARCHITECTURE.md),
 
 ## Migrating to 26.3
 
-Nearly done; the checklist is in [ROADMAP.md](ROADMAP.md#migration-to-263). Done: data,
+Done (2026-10-30); the checklist is in [ROADMAP.md](ROADMAP.md#migration-to-263): data,
 protocol 777, entity data, chunk sections (fluid count), synced registries, loot and
 recipe formats, biome spawn lists (now the `minecraft:gameplay/natural_mob_spawns`
 attribute), the recipe packet (item stack templates, brewing property sets), the 26.3
 world layout with the upgrade of 1.21.8 worlds (`storage::upgrade_layout`), game rules
-by their 26.3 names, and terrain without fallbacks. The owner joins and plays with a
-26.3 client. Left: the blocks new in 26.3 behave as themselves (they borrow hardness and
-shapes through `stand_in` in `levitas-registry/build.rs`).
+by their 26.3 names, terrain without fallbacks, and the blocks new in 26.3. The owner
+joins and plays with a 26.3 client. Blocks minecraft-data has no rows for (it stops at
+26.1) take hardness, light and shapes from `pumpkin-data`, a build dependency of
+`levitas-registry`, and tool needs from `tool_stand_in`. 26.3 took grass, podzol,
+mycelium and moss out of the `dirt` tag; plants are placed by the `supports_*` tags.
 26.3 wiki revisions used: packets `oldid=3868170`, entity metadata `oldid=3792654`, data
 types `oldid=3855787`, chunk format `oldid=3661930`. Those pages lag behind 26.3 in two
 places a real client caught: light masks in chunk and light packets are now length-
@@ -68,9 +70,8 @@ whitelist off) and compare what it sends with what Levitas sends. What to know g
   `condition`) and entity NBT need checking against 26.3; worlds saved by Levitas on
   1.21.8 must still load and be upgraded on save.
 - **New content** (poplar wood, dappled forest, red shrub, shelf mushroom, wool and
-  concrete stairs and slabs, straw beds, cushions, the abandoned camp) arrives with the
-  data. Pumpkin's generator places it as it is; Levitas's blocks borrow hardness and
-  shapes from a similar block through `stand_in` until they get their own behaviour.
+  concrete stairs and slabs, straw beds, sulfur and cinnabar, the abandoned camp) arrives
+  with the data; Pumpkin's generator places it as it is.
 - The owner's world in `C:\dev\levitas-server` was made on 1.21.8; a copy from before
   the move is in `world-backup-1.21.8-20261030-1310` next to it.
 

@@ -233,25 +233,27 @@ impl World {
         if !blocks::is_bed(head_state) || self.players.get(&id).is_none_or(|p| !p.alive) {
             return true;
         }
-        // Beds anywhere but the overworld blow up, setting fires.
+        let straw = blocks::is_straw_bed(head_state);
+        // Beds anywhere but the overworld blow up, setting fires; straw beds just fall
+        // apart, as if slept in.
         if !self.dimension.beds_work() {
-            let foot = blocks::other_part(head_state, head);
-            self.set_block(head, block::AIR);
-            if let Some(foot) = foot {
-                self.set_block(foot, block::AIR);
+            self.remove_bed(head);
+            if !straw {
+                let centre = [head.x, head.y, head.z].map(|v| f64::from(v) + 0.5);
+                self.explode_with_fire(centre, 5.0, "[Intentional Game Design]");
             }
-            let centre = [head.x, head.y, head.z].map(|v| f64::from(v) + 0.5);
-            self.explode_with_fire(centre, 5.0, "[Intentional Game Design]");
             return true;
         }
         if self.players[&id].sleeping.is_some() {
             return true;
         }
-        let p = self.players.get_mut(&id).expect("player exists");
-        let new_spawn = p.respawn != Some(head);
-        p.respawn = Some(head);
-        if new_spawn {
-            self.send(id, action_bar("Respawn point set"));
+        if !straw {
+            let p = self.players.get_mut(&id).expect("player exists");
+            let new_spawn = p.respawn != Some(head);
+            p.respawn = Some(head);
+            if new_spawn {
+                self.send(id, action_bar("Respawn point set"));
+            }
         }
         if !self.can_sleep_now() {
             self.send(
@@ -285,6 +287,15 @@ impl World {
         true
     }
 
+    /// Takes both halves of the bed at `head` away, dropping nothing.
+    fn remove_bed(&mut self, head: BlockPos) {
+        let foot = blocks::other_part(self.block(head), head);
+        self.set_block(head, block::AIR);
+        if let Some(foot) = foot.filter(|&f| blocks::is_bed(self.block(f))) {
+            self.set_block(foot, block::AIR);
+        }
+    }
+
     fn set_bed_occupied(&mut self, head: BlockPos, occupied: bool) {
         let state = self.block(head);
         if !blocks::is_bed(state) {
@@ -316,7 +327,12 @@ impl World {
         p.pos = stand;
         p.moved = true;
         let (yaw, pitch) = (p.yaw, p.pitch);
-        self.set_bed_occupied(head, false);
+        if blocks::is_straw_bed(self.block(head)) {
+            // Used up: a straw bed falls apart once its sleeper is out of it.
+            self.remove_bed(head);
+        } else {
+            self.set_bed_occupied(head, false);
+        }
         self.broadcast(sleep_data(id, None), None);
         self.broadcast(
             Writer::packet(clientbound::ANIMATE)

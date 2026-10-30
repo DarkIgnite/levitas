@@ -338,18 +338,27 @@ mod tests {
         assert_eq!(stairs.properties_of(east).len(), stairs.properties.len());
         assert!(BlockInfo::by_name("minecraft:not_a_block").is_none());
         assert_eq!(DATA_VERSION, 5023, "26.3");
-        // Blocks 26.3 added take hardness and shapes from their older relatives.
-        let poplar = BlockInfo::by_name("minecraft:poplar_planks").unwrap();
-        assert_eq!(poplar.hardness, BlockInfo::of(block::OAK_PLANKS).hardness);
-        let wool_stairs = BlockInfo::by_name("minecraft:white_wool_stairs").unwrap();
+        // Blocks newer than minecraft-data's tables take hardness, light and shapes from
+        // Pumpkin's 26.x data, and tool needs from a related block.
+        let new = |n: &str| BlockInfo::by_name(&format!("minecraft:{n}")).unwrap();
+        assert_eq!(new("poplar_planks").hardness, 2.0);
+        assert_eq!(new("white_wool_stairs").hardness, 0.8);
         assert_eq!(
-            wool_stairs.hardness,
-            BlockInfo::of(block::WHITE_WOOL).hardness
-        );
-        assert_eq!(
-            collision_boxes(wool_stairs.default_state),
+            collision_boxes(new("white_wool_stairs").default_state),
             collision_boxes(block::OAK_STAIRS)
         );
+        let concrete_slab = new("white_concrete_slab");
+        assert_eq!(concrete_slab.hardness, 1.8);
+        assert!(concrete_slab.requires_tool);
+        assert!(!new("white_wool_slab").requires_tool);
+        assert!(new("sulfur").requires_tool);
+        // A straw bed is low; a shrub is not in the way; a spike is thin.
+        assert_eq!(
+            collision_boxes(new("straw_bed").default_state),
+            &[[0.0, 0.0, 0.0, 1.0, 0.25, 1.0]]
+        );
+        assert!(collision_boxes(new("red_shrub").default_state).is_empty());
+        assert_eq!(new("shelf_mushroom").hardness, 0.0);
 
         assert_eq!(BlockInfo::of(block::STONE).hardness, 1.5);
         assert_eq!(BlockInfo::of(block::BEDROCK).hardness, -1.0);

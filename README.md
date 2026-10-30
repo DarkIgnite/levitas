@@ -29,9 +29,9 @@ needs, with a plugin API for survival-economy servers on top.
 > come. Overall progress: **about 66%** of the [roadmap](docs/ROADMAP.md).
 >
 > **Now on 26.3.** The server speaks Minecraft 26.3 (protocol 777), saves worlds in the
-> 26.3 layout and upgrades 1.21.8 worlds when it opens them. The
-> [migration](docs/ROADMAP.md#migration-to-263) is 95% done: the blocks new in 26.3 still
-> borrow hardness and shapes from similar older blocks.
+> 26.3 layout, upgrades 1.21.8 worlds when it opens them, and the blocks new in 26.3
+> (poplars, straw beds, sulfur spikes, potent sulfur geysers, ...) behave as themselves.
+> The [migration](docs/ROADMAP.md#migration-to-263) is done.
 
 ## Progress
 
@@ -42,7 +42,7 @@ what is missing in each one.
 
 | Phase | Progress | |
 |---|---|---|
-| 0. Migration to Minecraft 26.3 | 95% | `█████████▌` |
+| 0. Migration to Minecraft 26.3 | 100% | `██████████` |
 | 1. Persistence (saving worlds, players, chunks) | 72% | `███████▏░░` |
 | 2. Blocks behave correctly | 78% | `███████▊░░` |
 | 3. Fluids, gravity and light | 80% | `████████░░` |

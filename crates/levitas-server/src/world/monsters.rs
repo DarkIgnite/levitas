@@ -652,7 +652,7 @@ impl World {
         level <= self.rng.below(8) as i32
     }
 
-    fn loaded_block_at(&self, pos: BlockPos) -> Option<u16> {
+    pub(super) fn loaded_block_at(&self, pos: BlockPos) -> Option<u16> {
         if !(MIN_Y..=MAX_Y).contains(&pos.y) {
             return None;
         }

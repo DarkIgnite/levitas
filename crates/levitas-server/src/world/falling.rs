@@ -125,7 +125,8 @@ impl World {
             if damage > 0.0 {
                 self.damage_players_in_column(landing_pos, damage, Damage::FallingStalactite);
             }
-            if let Some(item) = ItemInfo::id_of("minecraft:pointed_dripstone") {
+            // Dripstone or a sulfur spike, whichever fell.
+            if let Some(item) = ItemInfo::id_of(blocks::name(falling.state)) {
                 self.drop_at_block(landing_pos, Stack::new(item, 1));
             }
             return;

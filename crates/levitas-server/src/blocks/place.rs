@@ -199,7 +199,10 @@ fn orient(
             || block_has_tag(state, "minecraft:shulker_boxes")
             || n.contains("amethyst_bud")
             || n == "minecraft:amethyst_cluster"
-            || matches!(n, "minecraft:ladder" | "minecraft:tripwire_hook");
+            || matches!(
+                n,
+                "minecraft:ladder" | "minecraft:tripwire_hook" | "minecraft:shelf_mushroom"
+            );
         let dir = if prop(state, "face").is_some() {
             // Buttons, levers, grindstones: on the floor or ceiling they face the way the
             // player looks, on a wall away from it.
@@ -260,6 +263,13 @@ fn orient(
             player.opposite()
         };
         state = with(state, "facing", dir.name());
+    }
+
+    // Pointed dripstone and sulfur spikes hang from what they are put under and stand on
+    // anything else.
+    if prop(state, "vertical_direction").is_some() {
+        let dir = if face == Dir::Down { "down" } else { "up" };
+        state = with(state, "vertical_direction", dir);
     }
 
     if prop(state, "face").is_some() {

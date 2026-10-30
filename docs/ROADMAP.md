@@ -12,8 +12,8 @@ and moved to 26.3 by the migration milestone right below; the owner plays on 26.
 
 ## Migration to 26.3
 
-Nearly done: one item is left, and new features may land again. Where the wiki and a
-real 26.3 client disagreed, a throwaway vanilla 26.3 server settled it (see
+Done on 2026-10-30; new features land again. Where the wiki and a real 26.3 client
+disagreed, a throwaway vanilla 26.3 server settled it (see
 [HANDOFF.md](HANDOFF.md#migrating-to-263)).
 
 - [x] Data: `tools/datagen.py` downloads the 26.3 server.jar and generates
@@ -37,9 +37,21 @@ real 26.3 client disagreed, a throwaway vanilla 26.3 server settled it (see
       are still to come (Phase 11)
 - [x] Terrain: Pumpkin's 26.x blocks and biomes used as they are (dappled forests and
       sulfur caves included); the 1.21.8 fallbacks are gone
-- [ ] New 26.3 blocks behave (poplar wood set, red shrub, shelf mushroom, wool and
-      concrete stairs and slabs, straw beds, cushions); for now they borrow hardness and
-      shapes from a similar 1.21.8 block (`stand_in` in `levitas-registry/build.rs`)
+- [x] New 26.3 blocks behave. Their hardness, blast resistance, light and collision
+      shapes come from Pumpkin's 26.x block data (minecraft-data stops at 26.1), their
+      tool needs from a related block. The poplar wood set, wool and concrete stairs and
+      slabs and the sulfur and cinnabar families work through 26.3's tags; poplar
+      saplings grow poplars (one canopy colour, now and then shelf mushrooms on the
+      trunk); straw beds are slept in once, set no respawn point and do not explode
+      outside the overworld; red shrubs grow on soil and spread with bone meal; shelf
+      mushrooms hang on the side of full blocks, grow large with bone meal and halve a
+      fall onto them; sulfur spikes hang and stand like dripstone and fall, but do not
+      make a fall onto them worse; potent sulfur under shallow water gives off Nausea
+      gas and, over magma or lava, becomes a geyser that throws players up
+      (`world/sulfur.rs`). Plants are placed by 26.3's support tags
+      (`supports_vegetation`, ...), since grass is no longer in the `dirt` tag.
+      Known gaps: sulfur spikes (like dripstone) do not grow yet; the poplar's shape
+      and the geyser's push are approximations; mobs are not thrown by geysers
 - [x] Every end-to-end test passes against the new protocol
 - [x] Tried in a real 26.3 client: the owner joins and plays (2026-10-30)
 

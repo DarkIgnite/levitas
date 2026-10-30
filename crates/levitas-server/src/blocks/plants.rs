@@ -10,7 +10,7 @@ use levitas_protocol::BlockPos;
 use levitas_registry::{block, block_has_tag, BlockInfo};
 use levitas_world::is_air;
 
-use super::{name, prop, with};
+use super::{name, prop, with, Dir};
 
 /// Ages of the crops that grow on farmland, from planted to ripe.
 pub fn crop_max_age(state: u16) -> Option<u8> {
@@ -70,6 +70,9 @@ pub enum Tree {
     Spruce,
     /// Needs a 2x2 square of saplings.
     DarkOak,
+    /// One trunk under an especially large canopy of yellow, orange or red leaves, with
+    /// shelf mushrooms here and there on the trunk.
+    Poplar,
 }
 
 pub fn tree_of(sapling: u16) -> Option<Tree> {
@@ -81,6 +84,7 @@ pub fn tree_of(sapling: u16) -> Option<Tree> {
         "minecraft:cherry_sapling" => Some(Tree::Round("cherry")),
         "minecraft:spruce_sapling" => Some(Tree::Spruce),
         "minecraft:dark_oak_sapling" => Some(Tree::DarkOak),
+        "minecraft:poplar_sapling" => Some(Tree::Poplar),
         _ => None,
     }
 }
@@ -150,6 +154,51 @@ pub fn grow(tree: Tree, base: BlockPos, roll: &mut impl FnMut(u32) -> u32) -> Ve
                             continue;
                         }
                         blocks.push((at(dx, dy, dz), leaf));
+                    }
+                }
+            }
+        }
+        Tree::Poplar => {
+            let height = 7 + roll(3) as i32;
+            let log = wood("poplar", "log");
+            for dy in 0..height {
+                blocks.push((at(0, dy, 0), log));
+            }
+            // The canopy is one colour, picked when the tree grows.
+            let colour = ["yellow_poplar", "orange_poplar", "red_poplar"][roll(3) as usize];
+            let leaf = leaves(colour);
+            // A tall rounded crown: narrow at its foot and top, three blocks out in the
+            // middle, from four blocks under the top of the trunk to two above it.
+            for dy in height - 4..=height + 1 {
+                let radius: i32 = match dy - height {
+                    -4 | 1 => 1,
+                    -3 | 0 => 2,
+                    _ => 3,
+                };
+                for dx in -radius..=radius {
+                    for dz in -radius..=radius {
+                        if dx * dx + dz * dz > radius * radius + 1 {
+                            continue;
+                        }
+                        // Ragged edges: the outermost ring is patchy.
+                        if dx * dx + dz * dz >= radius * radius && roll(3) == 0 {
+                            continue;
+                        }
+                        blocks.push((at(dx, dy, dz), leaf));
+                    }
+                }
+            }
+            // Now and then a shelf mushroom on the bare trunk, facing away from it.
+            if let Some(mushroom) = BlockInfo::by_name("minecraft:shelf_mushroom") {
+                for dy in 1..3 {
+                    for dir in Dir::HORIZONTAL {
+                        if roll(6) != 0 {
+                            continue;
+                        }
+                        let [dx, _, dz] = dir.step();
+                        let state = with(mushroom.default_state, "facing", dir.name());
+                        let age = if roll(2) == 0 { "0" } else { "1" };
+                        blocks.push((at(dx, dy, dz), with(state, "age", age)));
                     }
                 }
             }
@@ -229,6 +278,32 @@ mod tests {
         let crown_top = blocks.iter().map(|(p, _)| p.y).max().unwrap();
         assert_eq!(crown_top, 64 + logs as i32);
         assert!(blocks.iter().any(|(p, s)| is_leaves(*s) && p.x == 2));
+    }
+
+    #[test]
+    fn poplars_grow_tall_with_one_colour_of_leaves() {
+        let mut seed = 7u32;
+        let mut roll = |n: u32| {
+            seed = seed.wrapping_mul(1_103_515_245).wrapping_add(12_345);
+            (seed >> 16) % n
+        };
+        assert_eq!(
+            tree_of(state("minecraft:poplar_sapling")),
+            Some(Tree::Poplar)
+        );
+        let base = BlockPos::new(0, 64, 0);
+        let blocks = grow(Tree::Poplar, base, &mut roll);
+        let logs = blocks.iter().filter(|(_, s)| is_log(*s)).count();
+        assert!((7..=9).contains(&logs));
+        let colours: std::collections::HashSet<&str> = blocks
+            .iter()
+            .filter(|(_, s)| is_leaves(*s))
+            .map(|(_, s)| name(*s))
+            .collect();
+        assert_eq!(colours.len(), 1);
+        assert!(colours.iter().all(|c| c.ends_with("_poplar_leaves")));
+        // The canopy reaches three blocks out from the trunk.
+        assert!(blocks.iter().any(|(p, s)| is_leaves(*s) && p.x.abs() == 3));
     }
 
     #[test]

@@ -1527,6 +1527,32 @@ async fn sleeping_through_the_night_and_respawning_at_the_bed() {
 }
 
 #[tokio::test]
+async fn straw_beds_are_slept_in_once() {
+    let mut alice = join(server().await, "Alice", 1).await;
+    read_until(&mut alice, play::clientbound::PLAYER_POSITION).await;
+    give(&mut alice, "straw_bed", 1).await;
+    send(&mut alice, use_on(BlockPos::new(4, -61, 0), 1, 1)).await;
+    let foot = BlockPos::new(4, -60, 0);
+    assert!(crate::blocks::is_straw_bed(
+        block_at(&mut alice, foot).await
+    ));
+    command(&mut alice, "time set midnight").await;
+    send(&mut alice, use_on(foot, 1, 2)).await;
+    // Sleeping works as in any bed, but no respawn point is set.
+    loop {
+        let body = read_until(&mut alice, play::clientbound::SET_ENTITY_DATA).await;
+        let mut r = Reader::new(&body);
+        r.varint().unwrap();
+        if (r.u8().unwrap(), r.varint().unwrap(), r.varint().unwrap()) == (6, 20, 2) {
+            break;
+        }
+    }
+    day_time_until(&mut alice, |t| t.rem_euclid(24_000) == 0 && t > 0).await;
+    // Morning: the straw bed is used up and gone, leaving nothing behind.
+    assert_eq!(block_at(&mut alice, foot).await, block::AIR);
+}
+
+#[tokio::test]
 async fn chunks_carry_heightmaps_for_rain() {
     let mut alice = join(server().await, "Alice", 1).await;
     let body = read_until(&mut alice, play::clientbound::LEVEL_CHUNK_WITH_LIGHT).await;

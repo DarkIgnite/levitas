@@ -174,8 +174,15 @@ pub fn is_door(state: u16) -> bool {
     block_has_tag(state, "minecraft:doors")
 }
 
+/// Beds, straw beds included (they are not in the `beds` tag: villagers ignore them).
 pub fn is_bed(state: u16) -> bool {
-    block_has_tag(state, "minecraft:beds")
+    block_has_tag(state, "minecraft:beds") || is_straw_bed(state)
+}
+
+/// A straw bed: slept in once, it never becomes a respawn point and falls apart when its
+/// sleeper gets up.
+pub fn is_straw_bed(state: u16) -> bool {
+    name(state) == "minecraft:straw_bed"
 }
 
 pub fn is_chest(state: u16) -> bool {
@@ -222,8 +229,9 @@ fn supports_center_top(state: u16) -> bool {
     })
 }
 
+/// Ground most plants grow on: dirt, grass, moss, mud and farmland (26.3's tag).
 fn is_soil(state: u16) -> bool {
-    block_has_tag(state, "minecraft:dirt") || name(state) == "minecraft:farmland"
+    block_has_tag(state, "minecraft:supports_vegetation")
 }
 
 /// Whether a block can stay at `pos` given its neighbours. Blocks that cannot are popped
@@ -274,8 +282,11 @@ pub fn can_survive(state: u16, pos: BlockPos, get: &mut impl FnMut(BlockPos) -> 
             _ => sturdy(get(offset(pos, facing.opposite())), facing),
         };
     }
-    let wall_attached =
-        is_wall_mounted(state) || matches!(n, "minecraft:ladder" | "minecraft:tripwire_hook");
+    let wall_attached = is_wall_mounted(state)
+        || matches!(
+            n,
+            "minecraft:ladder" | "minecraft:tripwire_hook" | "minecraft:shelf_mushroom"
+        );
     if wall_attached && !n.contains("hanging") {
         if let Some(facing) = facing(state) {
             return sturdy(get(offset(pos, facing.opposite())), facing);
@@ -304,20 +315,16 @@ pub fn can_survive(state: u16, pos: BlockPos, get: &mut impl FnMut(BlockPos) -> 
         return name(ground) == "minecraft:farmland";
     }
     if n == "minecraft:nether_wart" {
-        return name(ground) == "minecraft:soul_sand";
+        return block_has_tag(ground, "minecraft:supports_nether_wart");
     }
     if n == "minecraft:dead_bush" {
-        return is_soil(ground)
-            || block_has_tag(ground, "minecraft:sand")
-            || block_has_tag(ground, "minecraft:terracotta");
+        return block_has_tag(ground, "minecraft:supports_dry_vegetation");
     }
     if n == "minecraft:cactus" {
-        return same_block(ground, state) || block_has_tag(ground, "minecraft:sand");
+        return same_block(ground, state) || block_has_tag(ground, "minecraft:supports_cactus");
     }
     if n == "minecraft:sugar_cane" {
-        return same_block(ground, state)
-            || is_soil(ground)
-            || block_has_tag(ground, "minecraft:sand");
+        return same_block(ground, state) || block_has_tag(ground, "minecraft:supports_sugar_cane");
     }
     let plant = block_has_tag(state, "minecraft:small_flowers")
         || block_has_tag(state, "minecraft:saplings")
@@ -339,10 +346,12 @@ pub fn can_survive(state: u16, pos: BlockPos, get: &mut impl FnMut(BlockPos) -> 
                 | "minecraft:short_dry_grass"
                 | "minecraft:tall_dry_grass"
                 | "minecraft:leaf_litter"
+                | "minecraft:red_shrub"
         );
     if plant {
         return is_soil(ground)
-            || (n == "minecraft:wither_rose" && name(ground) == "minecraft:soul_sand");
+            || (n == "minecraft:wither_rose"
+                && block_has_tag(ground, "minecraft:supports_wither_rose"));
     }
     if matches!(n, "minecraft:brown_mushroom" | "minecraft:red_mushroom") {
         return sturdy(ground, Dir::Up);
@@ -592,15 +601,21 @@ pub fn is_gravity_block(state: u16) -> bool {
         )
 }
 
-/// A pointed dripstone pointing down (stalactite, hangs from ceiling).
+/// A pointed dripstone or sulfur spike pointing down (stalactite, hangs from ceiling).
 pub fn is_stalactite(state: u16) -> bool {
-    name(state) == "minecraft:pointed_dripstone"
+    block_has_tag(state, "minecraft:speleothems")
         && prop(state, "vertical_direction") == Some("down")
 }
 
-/// A pointed dripstone pointing up (stalagmite, grows from ground).
+/// A pointed dripstone or sulfur spike pointing up (stalagmite, grows from ground).
 pub fn is_stalagmite(state: u16) -> bool {
-    name(state) == "minecraft:pointed_dripstone" && prop(state, "vertical_direction") == Some("up")
+    block_has_tag(state, "minecraft:speleothems") && prop(state, "vertical_direction") == Some("up")
+}
+
+/// A stalagmite that hurts what falls on it more than the ground would: dripstone's do,
+/// sulfur spikes' do not.
+pub fn is_sharp_stalagmite(state: u16) -> bool {
+    is_stalagmite(state) && name(state) == "minecraft:pointed_dripstone"
 }
 
 /// Whether a falling block can fall through (or into) this block.

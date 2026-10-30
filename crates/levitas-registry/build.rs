@@ -171,43 +171,65 @@ const PLACED_UNDER_ANOTHER_NAME: &[(&str, &str)] = &[
 ];
 
 /// For a block minecraft-data has no row for yet (it trails the game: 26.1's tables serve
-/// 26.3), the older blocks to take its hardness, light and tool needs from, and its
-/// collision shapes from (one with the very same properties): `(material, shape)`.
-fn stand_in(name: &str) -> (String, String) {
+/// 26.3), the older block whose tool needs it shares: whether it drops without the right
+/// tool. Its hardness, light and shapes come from Pumpkin's 26.x data instead.
+fn tool_stand_in(name: &str) -> String {
     let short = name.strip_prefix("minecraft:").unwrap_or(name);
     // The poplar wood set is built like oak's.
     if short.contains("poplar") {
-        let oak = if short.ends_with("_poplar_leaves") {
+        return if short.ends_with("_poplar_leaves") {
             "oak_leaves".to_owned()
         } else {
             short.replace("poplar", "oak")
         };
-        return (oak.clone(), oak);
     }
-    for (suffix, shape) in [
-        ("_stairs", "oak_stairs"),
-        ("_slab", "oak_slab"),
-        ("_wall", "cobblestone_wall"),
-    ] {
+    for suffix in ["_stairs", "_slab", "_wall"] {
         if let Some(base) = short.strip_suffix(suffix) {
-            // Wool and concrete stairs and slabs are as soft or hard as their block;
-            // the sulfur and cinnabar families are stone-like.
-            let material = if base.ends_with("_wool") || base.ends_with("_concrete") {
+            // Wool and concrete stairs and slabs need what their block needs; the sulfur
+            // and cinnabar families are stone-like.
+            return if base.ends_with("_wool") || base.ends_with("_concrete") {
                 base.to_owned()
             } else {
                 "stone".to_owned()
             };
-            return (material, shape.to_owned());
         }
     }
-    let same = |b: &str| (b.to_owned(), b.to_owned());
     match short {
-        "sulfur_spike" => same("pointed_dripstone"),
-        "red_shrub" => same("dead_bush"),
-        "shelf_mushroom" => same("brown_mushroom"),
-        "straw_bed" => same("white_bed"),
-        _ => same("stone"),
+        "sulfur_spike" => "pointed_dripstone",
+        "red_shrub" => "dead_bush",
+        "shelf_mushroom" => "brown_mushroom",
+        "straw_bed" => "white_bed",
+        _ => "stone",
     }
+    .to_owned()
+}
+
+/// A block's row in Pumpkin's 26.x block data.
+fn pumpkin_block(name: &str) -> &'static pumpkin_data::Block {
+    pumpkin_data::Block::from_name(name)
+        .unwrap_or_else(|| panic!("{name} is in neither minecraft-data nor Pumpkin's data"))
+}
+
+/// Collision boxes of the Pumpkin state of `name` with the given property values.
+fn pumpkin_boxes(name: &str, props: &serde_json::Map<String, Value>) -> Vec<[f32; 6]> {
+    let block = pumpkin_block(name);
+    let state = block
+        .states
+        .iter()
+        .find(|state| {
+            let theirs = block
+                .properties(state.id)
+                .map(|p| p.to_props())
+                .unwrap_or_default();
+            theirs
+                .iter()
+                .all(|p| props.get(p.key_str()).and_then(Value::as_str) == Some(p.value_str()))
+        })
+        .unwrap_or_else(|| panic!("no Pumpkin state of {name} with {props:?}"));
+    state
+        .get_block_collision_shapes()
+        .map(|b| [b.min.x, b.min.y, b.min.z, b.max.x, b.max.y, b.max.z].map(|v| v as f32))
+        .collect()
 }
 
 /// Every item's default components, by item name. 26.x reports them one file per item
@@ -336,23 +358,39 @@ fn blocks(data: &Path, out: &mut String) -> HashMap<String, u64> {
             .iter()
             .map(|(k, values)| format!("({k:?}, &{values:?})"))
             .collect();
-        let e = extra
-            .get(name)
-            .or_else(|| extra.get(&format!("minecraft:{}", stand_in(name).0)))
-            .unwrap_or_else(|| panic!("no hardness for {name}, and no stand-in"));
-        rows[block_id as usize] = format!(
-            "BlockInfo {{ name: {name:?}, first_state: {first}, default_state: {default}, \
-             properties: &[{}], hardness: {:?}, resistance: {:?}, light_emission: {}, \
-             light_filter: {}, requires_tool: {} }},",
-            props.join(", "),
-            e["hardness"].as_f64().unwrap_or(-1.0) as f32,
-            e["resistance"].as_f64().unwrap_or(0.0) as f32,
-            e["emitLight"].as_u64().unwrap_or(0),
-            e["filterLight"].as_u64().unwrap_or(0),
-            // Blocks listing harvest tools only drop with a correct tool.
+        // Blocks listing harvest tools only drop with a correct tool.
+        let needs_tool = |e: &Value| {
             e.get("harvestTools")
                 .and_then(Value::as_object)
-                .is_some_and(|t| !t.is_empty()),
+                .is_some_and(|t| !t.is_empty())
+        };
+        let (hardness, resistance, light, filter, requires_tool) = match extra.get(name) {
+            Some(e) => (
+                e["hardness"].as_f64().unwrap_or(-1.0) as f32,
+                e["resistance"].as_f64().unwrap_or(0.0) as f32,
+                e["emitLight"].as_u64().unwrap_or(0),
+                e["filterLight"].as_u64().unwrap_or(0),
+                needs_tool(e),
+            ),
+            None => {
+                let p = pumpkin_block(name);
+                let tools = extra
+                    .get(&format!("minecraft:{}", tool_stand_in(name)))
+                    .unwrap_or_else(|| panic!("no tool stand-in for {name}"));
+                (
+                    p.hardness,
+                    p.blast_resistance,
+                    u64::from(p.default_state.luminance),
+                    u64::from(p.default_state.opacity),
+                    needs_tool(tools),
+                )
+            }
+        };
+        rows[block_id as usize] = format!(
+            "BlockInfo {{ name: {name:?}, first_state: {first}, default_state: {default}, \
+             properties: &[{}], hardness: {hardness:?}, resistance: {resistance:?}, \
+             light_emission: {light}, light_filter: {filter}, requires_tool: {requires_tool} }},",
+            props.join(", "),
         );
     }
     out.push_str("}\n\n");
@@ -382,6 +420,25 @@ fn blocks(data: &Path, out: &mut String) -> HashMap<String, u64> {
 fn shapes(data: &Path, blocks: &Value, state_count: usize, out: &mut String) {
     let collision = read_json(&data.join("minecraft-data/blockCollisionShapes.json"));
     let mut state_shape = vec![0u64; state_count];
+    let count = collision["shapes"].as_object().unwrap().len();
+    let mut shapes: Vec<Vec<[f32; 6]>> = (0..count)
+        .map(|i| {
+            collision["shapes"][i.to_string()]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|b| {
+                    let v: Vec<f32> = b
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .map(|x| x.as_f64().unwrap() as f32)
+                        .collect();
+                    [v[0], v[1], v[2], v[3], v[4], v[5]]
+                })
+                .collect()
+        })
+        .collect();
     for (name, block) in blocks.as_object().unwrap() {
         let short = name.strip_prefix("minecraft:").unwrap();
         let states = block["states"].as_array().unwrap();
@@ -392,44 +449,32 @@ fn shapes(data: &Path, blocks: &Value, state_count: usize, out: &mut String) {
             .unwrap();
         for state in states {
             let id = state["id"].as_u64().unwrap();
-            let source = if collision["blocks"].get(short).is_some() {
-                short.to_owned()
-            } else {
-                stand_in(name).1
-            };
-            state_shape[id as usize] = match &collision["blocks"][&source] {
+            state_shape[id as usize] = match &collision["blocks"][short] {
                 Value::Array(per_state) => per_state
                     .get((id - first) as usize)
                     .or(per_state.first())
                     .and_then(Value::as_u64)
                     .unwrap_or_else(|| panic!("no shape for {name}")),
+                Value::Null => {
+                    // New since minecraft-data's version: Pumpkin's shape for the state
+                    // with the same properties, shared with an equal shape if there is one.
+                    let empty = serde_json::Map::new();
+                    let props = state["properties"].as_object().unwrap_or(&empty);
+                    let boxes = pumpkin_boxes(name, props);
+                    let index = shapes.iter().position(|s| *s == boxes).unwrap_or_else(|| {
+                        shapes.push(boxes);
+                        shapes.len() - 1
+                    });
+                    index as u64
+                }
                 one => one
                     .as_u64()
-                    .unwrap_or_else(|| panic!("no shape for {name} (stand-in {source})")),
+                    .unwrap_or_else(|| panic!("no shape for {name}")),
             };
         }
     }
-    let count = collision["shapes"].as_object().unwrap().len();
-    let mut shapes = Vec::with_capacity(count);
-    let mut sturdy = Vec::with_capacity(count);
-    for i in 0..count {
-        let boxes: Vec<[f32; 6]> = collision["shapes"][i.to_string()]
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|b| {
-                let v: Vec<f32> = b
-                    .as_array()
-                    .unwrap()
-                    .iter()
-                    .map(|x| x.as_f64().unwrap() as f32)
-                    .collect();
-                [v[0], v[1], v[2], v[3], v[4], v[5]]
-            })
-            .collect();
-        sturdy.push(sturdy_faces(&boxes));
-        shapes.push(format!("&{boxes:?}"));
-    }
+    let sturdy: Vec<u8> = shapes.iter().map(|boxes| sturdy_faces(boxes)).collect();
+    let shapes: Vec<String> = shapes.iter().map(|boxes| format!("&{boxes:?}")).collect();
     writeln!(
         out,
         "/// Collision shapes: lists of boxes `[min_x, min_y, min_z, max_x, max_y, max_z]`.\n\

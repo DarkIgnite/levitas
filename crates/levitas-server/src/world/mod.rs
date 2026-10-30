@@ -42,6 +42,7 @@ mod shields;
 mod signs;
 mod spawners;
 mod storage;
+mod sulfur;
 mod survival;
 mod thrown;
 mod time;
@@ -1120,7 +1121,17 @@ impl World {
                     (ground_pos.z & 15) as usize,
                 )
             });
-        if (crate::blocks::is_stalagmite(at_feet) || crate::blocks::is_stalagmite(at_ground))
+        // Landing on a shelf mushroom counts half the fall.
+        let fallen = if [at_feet, at_ground]
+            .iter()
+            .any(|&s| crate::blocks::name(s) == "minecraft:shelf_mushroom")
+        {
+            fallen * 0.5
+        } else {
+            fallen
+        };
+        if (crate::blocks::is_sharp_stalagmite(at_feet)
+            || crate::blocks::is_sharp_stalagmite(at_ground))
             && fallen > 0.0
         {
             let dmg = (fallen * 2.0 - 1.0).floor().max(1.0) as f32;
@@ -1386,6 +1397,7 @@ impl World {
         self.tick_brewing();
         self.tick_survival();
         self.tick_hazards();
+        self.tick_potent_sulfur();
         self.tick_portals();
         self.tick_end_portals();
         self.tick_dragon_fight();
