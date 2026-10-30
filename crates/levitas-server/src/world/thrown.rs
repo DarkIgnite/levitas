@@ -254,7 +254,7 @@ impl World {
             _ => {}
         }
         match t.kind {
-            ThrownKind::SplashPotion | ThrownKind::LingeringPotion => {
+            ThrownKind::SplashPotion => {
                 let direct_player = match hit {
                     Hit::Player(id) => Some(id),
                     _ => None,
@@ -271,6 +271,20 @@ impl World {
                     None,
                 );
                 self.splash(t.pos, t.stack.potion, direct_player, direct_mob);
+            }
+            ThrownKind::LingeringPotion => {
+                self.play_sound_at(
+                    "minecraft:entity.splash_potion.break",
+                    t.pos,
+                    1.0,
+                    1.0,
+                    None,
+                );
+                let mut cloud_pos = t.pos;
+                if self.point_in_block(cloud_pos) {
+                    cloud_pos[1] = cloud_pos[1].floor() + 1.0;
+                }
+                self.spawn_lingering_cloud(cloud_pos, t.stack.potion, thrower);
             }
             ThrownKind::EnderPearl => {
                 let Some(id) = thrower.filter(|id| self.players[id].alive) else {

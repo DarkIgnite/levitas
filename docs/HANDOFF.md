@@ -257,6 +257,16 @@ economy the owner wants for their server.
   - Conduits (`world/conduit.rs`): 3x3x3 water cage and 16-42 prismarine/sea lantern frame blocks,
     grants Conduit Power to players submerged or in rain, and attacks hostile mobs with 4 magic damage
     every 40 ticks when complete (42 blocks). Prevents drowning in `hazards.rs`.
+- Area Effect Clouds, Lingering Potions & Dragon's Breath (2026-10-30):
+  - Area Effect Clouds (`world/clouds.rs`, `entity_type::AREA_EFFECT_CLOUD`): spawns when a lingering
+    potion impacts (`world/thrown.rs`) or when the ender dragon perches on the exit portal (`world/dragon.rs`).
+  - Supports 20-tick initial wait time, 20-tick reapplication delay per entity, shrinking 0.5 blocks per
+    application (`radius_on_use`), and radius decay over its 30-second duration.
+  - Applies 1/4-duration status effects or scaled instant healing/damage, and deals 3.0 magic damage for dragon's breath.
+  - Empty glass bottles collect dragon's breath into `minecraft:dragon_breath` (`world/fluids.rs` `fill_bottle`),
+    playing `item.bottle.fill_dragonbreath` and shrinking the cloud by 0.5 blocks.
+  - Splash potions emit particle colors matching the potion effects (`potions::color`).
+  - Phase 8 is now 100% complete.
 
 ## 9. Testing pattern
 

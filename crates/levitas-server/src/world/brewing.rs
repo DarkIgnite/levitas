@@ -201,11 +201,12 @@ impl World {
             at[1].floor() as i32,
             at[2].floor() as i32,
         );
+        let color = potion.map_or(SPLASH_COLOR, potions::color);
         self.broadcast(
             Writer::packet(clientbound::LEVEL_EVENT)
                 .i32(event)
                 .position(pos)
-                .i32(SPLASH_COLOR)
+                .i32(color)
                 .bool(false),
             None,
         );

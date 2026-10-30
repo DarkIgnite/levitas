@@ -92,6 +92,79 @@ pub fn effects(id: u8) -> Vec<Effect> {
         .collect()
 }
 
+/// The default particle and splash color for water and effect-less potions.
+pub const SPLASH_COLOR: i32 = 0x38_5D_C6;
+
+/// Standard particle/tint color for each status effect.
+pub fn effect_color(effect: i32) -> i32 {
+    use mob_effect::*;
+    match effect {
+        SPEED => 3402751,
+        SLOWNESS => 9154528,
+        HASTE => 14270531,
+        MINING_FATIGUE => 4866583,
+        STRENGTH => 16762624,
+        INSTANT_HEALTH => 16262179,
+        INSTANT_DAMAGE => 11101546,
+        JUMP_BOOST => 16646020,
+        NAUSEA => 5578058,
+        REGENERATION => 13458603,
+        RESISTANCE => 9520880,
+        FIRE_RESISTANCE => 16750848,
+        WATER_BREATHING => 10017472,
+        INVISIBILITY => 16185078,
+        BLINDNESS => 2039587,
+        NIGHT_VISION => 12779366,
+        HUNGER => 5797459,
+        WEAKNESS => 4738376,
+        POISON => 8889187,
+        WITHER => 7561558,
+        HEALTH_BOOST => 16284963,
+        ABSORPTION => 2445989,
+        SATURATION => 16262179,
+        GLOWING => 9740385,
+        LEVITATION => 13565951,
+        LUCK => 5882118,
+        UNLUCK => 12624973,
+        SLOW_FALLING => 15978425,
+        CONDUIT_POWER => 1950417,
+        DOLPHINS_GRACE => 8954814,
+        BAD_OMEN => 745784,
+        HERO_OF_THE_VILLAGE => 4521796,
+        DARKNESS => 2696993,
+        TRIAL_OMEN => 1484454,
+        RAID_OMEN => 14565464,
+        WIND_CHARGED => 12438015,
+        WEAVING => 7891290,
+        OOZING => 10092451,
+        INFESTED => 9214860,
+        BREATH_OF_THE_NAUTILUS => 65518,
+        _ => SPLASH_COLOR,
+    }
+}
+
+/// Blended RGB color for potion particles and splashes.
+pub fn color(potion_id: u8) -> i32 {
+    let effects = effects(potion_id);
+    if effects.is_empty() {
+        return SPLASH_COLOR;
+    }
+    let mut r_sum = 0.0f32;
+    let mut g_sum = 0.0f32;
+    let mut b_sum = 0.0f32;
+    let count = effects.len() as f32;
+    for eff in &effects {
+        let c = effect_color(eff.id);
+        r_sum += ((c >> 16) & 0xFF) as f32;
+        g_sum += ((c >> 8) & 0xFF) as f32;
+        b_sum += (c & 0xFF) as f32;
+    }
+    let r = (r_sum / count).round() as i32;
+    let g = (g_sum / count).round() as i32;
+    let b = (b_sum / count).round() as i32;
+    (r << 16) | (g << 8) | b
+}
+
 /// Whether an effect acts at once (healing, harming) rather than over time.
 pub fn is_instant(effect: i32) -> bool {
     effect == mob_effect::INSTANT_HEALTH || effect == mob_effect::INSTANT_DAMAGE
@@ -303,5 +376,28 @@ mod tests {
         let p = stack("minecraft:splash_potion", "long_swiftness");
         assert_eq!(Stack::from_nbt(&p.to_nbt()), p);
         assert_ne!(p, stack("minecraft:splash_potion", "swiftness"));
+    }
+
+    #[test]
+    fn potion_colors_match_effect_palette() {
+        let speed_id = id("swiftness").unwrap();
+        assert_eq!(color(speed_id), 3402751);
+
+        let water_id = id("water").unwrap();
+        assert_eq!(color(water_id), SPLASH_COLOR);
+
+        let turtle_id = id("turtle_master").unwrap();
+        // Turtle master blends slowness and resistance with float rounding.
+        let slowness = effect_color(mob_effect::SLOWNESS);
+        let resistance = effect_color(mob_effect::RESISTANCE);
+        let expected_r =
+            (((slowness >> 16) & 0xFF) as f32 + ((resistance >> 16) & 0xFF) as f32) / 2.0;
+        let expected_g =
+            (((slowness >> 8) & 0xFF) as f32 + ((resistance >> 8) & 0xFF) as f32) / 2.0;
+        let expected_b = ((slowness & 0xFF) as f32 + (resistance & 0xFF) as f32) / 2.0;
+        let expected = (expected_r.round() as i32) << 16
+            | (expected_g.round() as i32) << 8
+            | expected_b.round() as i32;
+        assert_eq!(color(turtle_id), expected);
     }
 }

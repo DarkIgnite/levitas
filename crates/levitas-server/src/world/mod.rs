@@ -11,6 +11,7 @@ mod breeding;
 mod brewing;
 mod building;
 mod campfire;
+mod clouds;
 mod combat;
 mod commands;
 mod conduit;
@@ -581,6 +582,7 @@ struct World {
     fireballs: HashMap<i32, fireballs::Fireball>,
     /// Ender pearls, snowballs and eggs in flight.
     thrown: HashMap<i32, thrown::Thrown>,
+    pub area_effect_clouds: HashMap<i32, clouds::AreaEffectCloud>,
     boats: HashMap<i32, boats::Boat>,
     carts: HashMap<i32, minecarts::Cart>,
     /// Item frames and paintings.
@@ -694,6 +696,7 @@ impl World {
             tnt: HashMap::new(),
             fireballs: HashMap::new(),
             thrown: HashMap::new(),
+            area_effect_clouds: HashMap::new(),
             boats: HashMap::new(),
             carts: HashMap::new(),
             hanging: HashMap::new(),
@@ -1040,6 +1043,7 @@ impl World {
         packets.extend(self.arrow_packets());
         packets.extend(self.fireball_packets());
         packets.extend(self.thrown_packets());
+        packets.extend(self.area_effect_cloud_packets());
         packets.extend(self.boat_packets());
         packets.extend(self.cart_packets());
         packets.extend(self.hanging_packets());
@@ -1418,6 +1422,7 @@ impl World {
         self.tick_arrows();
         self.tick_fireballs();
         self.tick_thrown();
+        self.tick_area_effect_clouds();
         self.tick_boats();
         self.tick_minecarts();
         self.tick_hanging();

@@ -362,7 +362,24 @@ impl World {
             }
             Phase::Landing if distance < 2.0 => Phase::Perched { ticks: PERCH_TICKS },
             Phase::Perched { ticks: 0 } => Phase::Circling { waypoint: 0 },
-            Phase::Perched { ticks } => Phase::Perched { ticks: ticks - 1 },
+            Phase::Perched { ticks } => {
+                if ticks % 40 == 0 && ticks > 0 {
+                    let podium_pos = [
+                        f64::from(podium.x) + 0.5,
+                        f64::from(podium.y) + 1.0,
+                        f64::from(podium.z) + 0.5,
+                    ];
+                    self.play_sound_at(
+                        "minecraft:entity.ender_dragon.growl",
+                        dragon.pos,
+                        2.5,
+                        1.0,
+                        None,
+                    );
+                    self.spawn_dragon_breath_cloud(podium_pos);
+                }
+                Phase::Perched { ticks: ticks - 1 }
+            }
             other => other,
         };
 

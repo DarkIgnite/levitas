@@ -50,7 +50,7 @@ what is missing in each one.
 | 5. Mobs | 65% | `██████▌░░░` |
 | 6. Farming, nature and time | 62% | `██████▏░░░` |
 | 7. Redstone | 68% | `██████▊░░░` |
-| 8. Progression (enchanting, brewing, ...) | 64% | `██████▍░░░` |
+| 8. Progression (enchanting, brewing, ...) | 100% | `██████████` |
 | 9. Dimensions (Nether, End) | 60% | `██████░░░░` |
 | 10. Villagers and raids | 32% | `███▏░░░░░░` |
 | 11. Everything else (commands, config, ...) | 48% | `████▊░░░░░` |
@@ -82,7 +82,7 @@ what is missing in each one.
   `dimensions/minecraft/`, `players/data/`, `data/minecraft/`, `level.dat`), so vanilla
   can open Levitas worlds; worlds saved by 1.21.8 builds are upgraded when opened.
 
-Not there yet: raids, storage and TNT minecarts, advancements, tipped arrows and plugins. See the [roadmap](docs/ROADMAP.md) for the
+Not there yet: raids, storage and TNT minecarts, advancements, and plugins. See the [roadmap](docs/ROADMAP.md) for the
 full list.
 
 ## Playing

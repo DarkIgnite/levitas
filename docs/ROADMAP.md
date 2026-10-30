@@ -366,18 +366,22 @@ Known gaps are listed under each phase instead of being hidden.
       and an empty name takes a custom name off. Name tags name mobs, which then
       never despawn. Grindstones strip all but curses, merge two items and give
       experience back.
-- [ ] Brewing stand, potions, splash and lingering potions, tipped arrows. Potions
+- [x] Brewing stand, potions, splash and lingering potions, tipped arrows. Potions
       (`potions.rs`, effects and recipes from the wiki's tables) are carried as the
       `minecraft:potion_contents` component. Glass bottles fill at water; drinking
       gives the effects. Brewing stands (`world/brewing.rs`) take blaze powder for 20
       brews and brew in 20 seconds: base potions, effects, redstone and glowstone,
       fermented spider eyes, gunpowder (splash) and dragon's breath (lingering), fed
       by hoppers as in vanilla. Splash potions give players and mobs within 4 blocks their
-      effects, weaker with distance. Tipped arrows, shot from bows and dispensers,
-      give players and mobs their potion for an eighth of its time and are picked up as tipped
-      arrows; Infinity does not spare them. Undead mobs invert healing and harming; undead
-      and spiders ignore poison; resistance and fire resistance protect mobs. Missing:
-      lingering clouds (they splash for now), splash colours.
+      effects, weaker with distance, with accurate particle colors (`potions::color`).
+      Lingering potions and dragon's breath spawn Area Effect Clouds (`world/clouds.rs`,
+      `entity_type::AREA_EFFECT_CLOUD`) that linger, shrink per application, apply
+      quarter-duration effects or magic damage, and dragon's breath can be scooped into
+      bottles (`minecraft:item.bottle.fill_dragonbreath`). Tipped arrows, shot from bows
+      and dispensers, give players and mobs their potion for an eighth of its time and
+      are picked up as tipped arrows; Infinity does not spare them. Undead mobs invert
+      healing and harming; undead and spiders ignore poison; resistance and fire resistance
+      protect mobs.
 - [x] Beacons, conduits. Beacons (`world/beacon.rs`) calculate pyramid layers (1 to 4) of
       mineral blocks (`minecraft:beacon_base_blocks`), verify unobstructed sky above
       (`light_filter < 15`), provide container (`menu::BEACON`) with payment slot for

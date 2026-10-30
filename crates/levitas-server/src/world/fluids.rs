@@ -315,6 +315,78 @@ impl World {
         }
         let (eye, look, reach) = p.eye_ray();
         let survival = p.survival();
+        let breath_cloud = self.area_effect_clouds.iter().find_map(|(&cid, c)| {
+            if !c.is_dragon_breath {
+                return None;
+            }
+            let d = [c.pos[0] - eye[0], c.pos[1] - eye[1], c.pos[2] - eye[2]];
+            let dist = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt();
+            if dist <= (c.radius as f64) + 1.5 {
+                Some(cid)
+            } else {
+                None
+            }
+        });
+        if let Some(cloud_id) = breath_cloud {
+            self.play_sound_at(
+                "minecraft:item.bottle.fill_dragonbreath",
+                eye,
+                1.0,
+                1.0,
+                None,
+            );
+            let cloud = self.area_effect_clouds.get_mut(&cloud_id).unwrap();
+            cloud.radius -= 0.5;
+            let dead = cloud.radius <= 0.0;
+            if dead {
+                self.broadcast(items::remove_entity(cloud_id), None);
+                self.area_effect_clouds.remove(&cloud_id);
+            } else {
+                cloud.last_sent_radius = cloud.radius;
+                let wait = cloud.wait_time > 0;
+                let radius = cloud.radius;
+                self.broadcast(clouds::update_packet(cloud_id, radius, wait), None);
+            }
+            let breath_item = Stack::new(ItemInfo::id_of("minecraft:dragon_breath").unwrap(), 1);
+            if !survival {
+                let updates: Vec<Writer> = {
+                    let p = self.players.get_mut(&id).expect("player exists");
+                    let (changed, _) = p.inventory.add(breath_item);
+                    changed
+                        .into_iter()
+                        .map(|s| p.inventory.set_slot_packet(s))
+                        .collect()
+                };
+                for u in updates {
+                    self.send(id, u);
+                }
+                return true;
+            }
+            if stack.count == 1 {
+                let update = {
+                    let p = self.players.get_mut(&id).expect("player exists");
+                    p.inventory.slots[slot] = breath_item;
+                    p.inventory.set_slot_packet(slot)
+                };
+                self.send(id, update);
+                return true;
+            }
+            let (updates, at, over) = {
+                let p = self.players.get_mut(&id).expect("player exists");
+                p.inventory.take(slot, 1);
+                let mut updates = vec![p.inventory.set_slot_packet(slot)];
+                let (changed, over) = p.inventory.add(breath_item);
+                updates.extend(changed.into_iter().map(|s| p.inventory.set_slot_packet(s)));
+                (updates, p.pos, over)
+            };
+            for update in updates {
+                self.send(id, update);
+            }
+            if over > 0 {
+                self.scatter_item(at, breath_item);
+            }
+            return true;
+        }
         let Some((pos, _)) = self.ray_cast(eye, look, reach, true) else {
             return true;
         };
