@@ -16,6 +16,7 @@ const KEEP_ALIVE_INTERVAL: Duration = Duration::from_secs(10);
 /// The protocol caps the slots one container click may change.
 const MAX_CHANGED_SLOTS: i32 = 128;
 const CLIENT_COMMAND_RESPAWN: i32 = 0;
+const CLIENT_COMMAND_REQUEST_STATS: i32 = 1;
 /// Flag in the player input packet for the sneak key.
 const INPUT_FORWARD: u8 = 0x01;
 const INPUT_SNEAK: u8 = 0x20;
@@ -314,6 +315,7 @@ fn decode(id: i32, packet: &[u8]) -> io::Result<Option<Event>> {
         }
         serverbound::CLIENT_COMMAND => match r.varint()? {
             CLIENT_COMMAND_RESPAWN => Event::Respawn { id },
+            CLIENT_COMMAND_REQUEST_STATS => Event::RequestStats { id },
             _ => return Ok(None),
         },
         serverbound::INTERACT => {

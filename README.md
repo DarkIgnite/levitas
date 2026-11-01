@@ -53,7 +53,7 @@ what is missing in each one.
 | 8. Progression (enchanting, brewing, ...) | 97% | `█████████▋` |
 | 9. Dimensions (Nether, End) | 60% | `██████░░░░` |
 | 10. Villagers and raids | 93% | `█████████▎` |
-| 11. Everything else (commands, config, ...) | 56% | `█████▌░░░░` |
+| 11. Everything else (commands, config, ...) | 58% | `█████▊░░░░` |
 | 12. World generation | 60% | `██████░░░░` |
 | 13. Plugins and economy | 0% | `░░░░░░░░░░` |
 | Infrastructure (CI, parallel ticking, benchmarks) | 0% | `░░░░░░░░░░` |
@@ -84,7 +84,7 @@ what is missing in each one.
   `dimensions/minecraft/`, `players/data/`, `data/minecraft/`, `level.dat`), so vanilla
   can open Levitas worlds; worlds saved by 1.21.8 builds are upgraded when opened.
 
-Not there yet: storage and TNT minecarts, statistics, and plugins. See the [roadmap](docs/ROADMAP.md) for the
+Not there yet: storage and TNT minecarts and plugins. See the [roadmap](docs/ROADMAP.md) for the
 full list.
 
 ## Playing

@@ -603,6 +603,7 @@ impl World {
             error!("could not save {}: {e}", path.display());
         }
         self.save_advancements(id);
+        self.save_stats(id);
     }
 
     /// Reads a chunk from disk and registers its block entities.

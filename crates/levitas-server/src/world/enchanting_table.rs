@@ -136,6 +136,12 @@ impl World {
         if survival {
             self.give_levels(id, -price);
         }
+        self.stat(
+            id,
+            levitas_registry::stat_type::CUSTOM,
+            levitas_registry::custom_stat::ENCHANT_ITEM,
+            1,
+        );
         self.advance(
             id,
             super::advancements::Trigger::EnchantedItem {

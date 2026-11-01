@@ -406,6 +406,8 @@ impl World {
             }
             self.damage_item(id, bow_slot, 1, ENTITY_EVENT_MAINHAND_BREAK);
         }
+        let bow_item = self.players[&id].inventory.slots[bow_slot].item;
+        self.stat(id, levitas_registry::stat_type::USED, bow_item, 1);
         let shot = Shot {
             from: eye,
             dir: look,

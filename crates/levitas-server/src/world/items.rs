@@ -204,6 +204,18 @@ impl World {
             -pitch.sin() * 0.3 + 0.1,
             yaw.cos() * pitch.cos() * 0.3,
         ];
+        self.stat(
+            id,
+            levitas_registry::stat_type::DROPPED,
+            stack.item,
+            stack.count,
+        );
+        self.stat(
+            id,
+            levitas_registry::stat_type::CUSTOM,
+            levitas_registry::custom_stat::DROP,
+            1,
+        );
         self.spawn_item(stack, at, vel, PICKUP_DELAY_THROWN);
     }
 
@@ -319,6 +331,11 @@ impl World {
         if picked == 0 {
             return false;
         }
+        p.stats.add(
+            levitas_registry::stat_type::PICKED_UP,
+            item.stack.item,
+            picked,
+        );
         let updates: Vec<Writer> = changed
             .into_iter()
             .map(|slot| p.inventory.set_slot_packet(slot))

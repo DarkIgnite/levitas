@@ -579,6 +579,16 @@ fn items_and_entities(data: &Path, block_defaults: &HashMap<String, u64>, out: &
         ("particle", "minecraft:particle_type", "Particle type IDs."),
         ("game_rule", "minecraft:game_rule", "Game rule IDs."),
         (
+            "stat_type",
+            "minecraft:stat_type",
+            "Statistic category IDs (`MINED`, `CUSTOM`, ...).",
+        ),
+        (
+            "custom_stat",
+            "minecraft:custom_stat",
+            "Custom statistic IDs (`PLAY_TIME`, `WALK_ONE_CM`, ...).",
+        ),
+        (
             "map_decoration",
             "minecraft:map_decoration_type",
             "Map decoration (icon) type IDs.",

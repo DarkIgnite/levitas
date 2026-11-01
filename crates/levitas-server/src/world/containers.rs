@@ -498,6 +498,9 @@ impl World {
             ),
             _ => return false,
         };
+        if let Some(stat) = super::stats::opened(BlockInfo::of(state).name) {
+            self.stat(id, levitas_registry::stat_type::CUSTOM, stat, 1);
+        }
         self.close_container(id);
         let mut first_viewer = false;
         for (part, _) in view.parts() {
@@ -754,9 +757,14 @@ impl World {
             choice: p.open.as_ref().and_then(|o| o.choice),
             trades,
             rename: rename.as_deref(),
+            crafted: Vec::new(),
         };
         let thrown = click::click(&mut w, click::Click { slot, button, mode });
         let used = w.used;
+        for made in std::mem::take(&mut w.crafted) {
+            p.stats
+                .add(levitas_registry::stat_type::CRAFTED, made.item, made.count);
+        }
         let choice = w.choice;
         if let Some(open) = p.open.as_mut() {
             let input_changed = before.first() != slots.first();

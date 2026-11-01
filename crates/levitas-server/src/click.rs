@@ -301,6 +301,9 @@ pub struct Window<'a> {
     pub trades: Vec<Trade>,
     /// The name typed into an anvil's box.
     pub rename: Option<&'a str>,
+    /// Results taken from a crafting grid, stonecutter or smithing table, for the
+    /// crafted statistics.
+    pub crafted: Vec<Stack>,
 }
 
 /// Applies one click. Returns the stacks the player threw out.
@@ -483,6 +486,7 @@ fn take_result(w: &mut Window) -> Stack {
             for s in 0..3 {
                 w.slots[s] = w.slots[s].with_count(w.slots[s].count - 1);
             }
+            w.crafted.push(result);
             refresh_result(w);
             return result;
         }
@@ -495,6 +499,7 @@ fn take_result(w: &mut Window) -> Stack {
             if w.slots[0].is_empty() {
                 w.choice = None;
             }
+            w.crafted.push(result);
             refresh_result(w);
             return result;
         }
@@ -542,6 +547,7 @@ fn take_result(w: &mut Window) -> Stack {
             _ => s.with_count(s.count - 1),
         };
     }
+    w.crafted.push(result);
     refresh_result(w);
     result
 }

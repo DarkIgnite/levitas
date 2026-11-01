@@ -173,7 +173,7 @@ impl World {
         away: [f64; 2],
         knockback: f64,
     ) -> bool {
-        match target {
+        let hit = match target {
             Target::Mob(id) => {
                 // `hit_mob` pushes by the base knockback along `away`.
                 let away = away.map(|v| v * knockback / KNOCKBACK);
@@ -186,7 +186,18 @@ impl World {
                 self.push_player(id, [away[0] * knockback, KNOCKBACK, away[1] * knockback]);
                 true
             }
+        };
+        if hit {
+            // Damage statistics count tenths of a heart point.
+            let tenths = (damage * 10.0).round() as i32;
+            self.stat(
+                attacker,
+                levitas_registry::stat_type::CUSTOM,
+                levitas_registry::custom_stat::DAMAGE_DEALT,
+                tenths,
+            );
         }
+        hit
     }
 
     /// A sweeping blow: everything else close to the target takes a light hit.

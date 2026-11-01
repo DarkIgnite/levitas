@@ -94,6 +94,8 @@ impl World {
                         self.sign_placed(id, q);
                         self.try_build_golem(q);
                     }
+                    let used = self.players[&id].inventory.slots[slot].item;
+                    self.stat(id, levitas_registry::stat_type::USED, used, 1);
                     if survival {
                         let p = self.players.get_mut(&id).expect("player exists");
                         p.inventory.take(slot, 1);

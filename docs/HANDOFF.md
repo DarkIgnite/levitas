@@ -162,6 +162,8 @@ Workspace crates in `crates/`:
   autosave, unloading, and moving 1.21.8 worlds into the 26.3 layout.
 - `world/advancements.rs` – the advancement tree, criteria triggers (`World::advance`
   with a `Trigger`), the update packet, toasts and announcements, saving progress.
+- `world/stats.rs` – statistics: `Stats` per player, `World::stat`, distance
+  counting in `move_player`, the award packet, saving.
 - `world/maps.rs` – filled maps: grid squares, drawing while held, `map_<id>.dat`, the
   shared map ID counter, cartography locking and zooming.
 - `world/commands.rs` – `/gamemode`, `/give`, `/kill`, `/time`, `/weather`, and the
@@ -220,8 +222,7 @@ the blocks new in 26.3, special crafting recipes (repairing, leather dyeing, tra
 tipped arrows), status effects on mobs, maps drawn as players carry them
 (`world/maps.rs`), compasses, cartography tables, spyglasses, lingering clouds, beacons,
 conduits, raids, wandering traders and zombie villagers. Good next candidates for a
-playable world: statistics and more advancement triggers (Phase 11), the rest of
-Phase 5's mobs,
+playable world: more advancement triggers (Phase 11), the rest of Phase 5's mobs,
 storage and TNT minecarts, and the Phase 13 plugin API and economy the owner wants for
 their server.
 

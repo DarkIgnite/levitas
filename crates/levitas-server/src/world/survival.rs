@@ -253,6 +253,9 @@ impl World {
                 return false;
             }
         }
+        let hurt_by = source
+            .and_then(|s| self.mobs.get(&s))
+            .map(|m| m.kind.entity_type());
         let Some(p) = self.players.get_mut(&id) else {
             return false;
         };
@@ -292,6 +295,17 @@ impl World {
         let absorbed = amount.min(p.absorption);
         p.absorption -= absorbed;
         let amount = amount - absorbed;
+        p.stats.custom(
+            levitas_registry::custom_stat::DAMAGE_TAKEN,
+            (amount * 10.0).round() as i32,
+        );
+        if hurt_by.is_some() {
+            p.hurt_by = hurt_by;
+        }
+        p.stats.custom(
+            levitas_registry::custom_stat::DAMAGE_ABSORBED,
+            (absorbed * 10.0).round() as i32,
+        );
         p.health = (p.health - amount).max(0.0);
         p.exhaustion += 0.1;
         let dead = p.health <= 0.0;
@@ -385,6 +399,35 @@ impl World {
         p.alive = false;
         p.eating = None;
         p.fall_distance = 0.0;
+        p.stats.custom(levitas_registry::custom_stat::DEATHS, 1);
+        p.stats.set(
+            levitas_registry::stat_type::CUSTOM,
+            levitas_registry::custom_stat::TIME_SINCE_DEATH,
+            0,
+        );
+        // Killed by a mob, or by another player: both sides count it.
+        let killer_kind = match kind {
+            Damage::Player(_) => Some(entity_type::PLAYER),
+            _ => p.hurt_by.take(),
+        };
+        if let Some(kind) = killer_kind {
+            p.stats.add(levitas_registry::stat_type::KILLED_BY, kind, 1);
+        }
+        if let Damage::Player(killer) = kind {
+            self.stat(
+                killer,
+                levitas_registry::stat_type::KILLED,
+                entity_type::PLAYER,
+                1,
+            );
+            self.stat(
+                killer,
+                levitas_registry::stat_type::CUSTOM,
+                levitas_registry::custom_stat::PLAYER_KILLS,
+                1,
+            );
+        }
+        let p = self.players.get_mut(&id).expect("player exists");
         let pos = p.pos;
         let death_pos = BlockPos::new(
             pos[0].floor() as i32,
@@ -717,6 +760,7 @@ impl World {
                 },
             );
         }
+        self.stat(id, levitas_registry::stat_type::USED, eaten.item, 1);
         self.advance(id, super::advancements::Trigger::ConsumeItem(eaten));
     }
 

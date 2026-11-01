@@ -47,6 +47,7 @@ mod redstone;
 mod shields;
 mod signs;
 mod spawners;
+mod stats;
 mod storage;
 mod sulfur;
 mod survival;
@@ -299,6 +300,10 @@ pub enum Event {
     Respawn {
         id: i32,
     },
+    /// The statistics screen opened and asks for the numbers.
+    RequestStats {
+        id: i32,
+    },
     Chat {
         id: i32,
         message: String,
@@ -454,6 +459,9 @@ struct Player {
     pub known_maps: HashSet<i32>,
     /// Which advancement criteria the player has met, and which they were shown.
     pub advancements: advancements::Progress,
+    pub stats: stats::Stats,
+    /// The type of the last mob that hurt the player, for the killed-by statistics.
+    pub hurt_by: Option<i32>,
 }
 
 impl Player {
@@ -521,6 +529,8 @@ impl Player {
             last_death: None,
             known_maps: HashSet::new(),
             advancements: advancements::Progress::default(),
+            stats: stats::Stats::default(),
+            hurt_by: None,
         }
     }
 
@@ -898,6 +908,7 @@ impl World {
             }
             Event::MoveVehicle { id, pos, yaw } => self.boat_moved(id, pos, yaw),
             Event::PaddleBoat { id, left, right } => self.paddle(id, left, right),
+            Event::RequestStats { id } => self.send_stats(id),
             Event::Respawn { id } => self.respawn(id),
             Event::Chat { id, message } => {
                 if let Some(p) = self.players.get(&id) {
@@ -942,6 +953,7 @@ impl World {
         self.players.insert(id, player);
         let saved_in = self.load_player(id);
         self.load_advancements(id);
+        self.load_stats(id);
         // A player who logged out in another dimension goes back there.
         if let Some(other) = saved_in.filter(|&d| d != self.dimension) {
             if self.hand_over(id, other, None, travel::Via::Login) {
@@ -1018,6 +1030,12 @@ impl World {
         self.wake_up(id);
         self.close_container(id);
         self.leave_raids(id);
+        self.stat(
+            id,
+            levitas_registry::stat_type::CUSTOM,
+            levitas_registry::custom_stat::LEAVE_GAME,
+            1,
+        );
         self.save_player(id);
         let Some(player) = self.players.remove(&id) else {
             return;
@@ -1107,8 +1125,10 @@ impl World {
             p.yaw = yaw;
             p.pitch = pitch;
         }
+        let mut moved = None;
         if let Some(pos) = pos {
             let dy = pos[1] - p.pos[1];
+            moved = Some(((pos[0] - p.pos[0]).hypot(pos[2] - p.pos[2]), dy));
             if p.survival() {
                 let horizontal = (pos[0] - p.pos[0]).hypot(pos[2] - p.pos[2]);
                 if p.sprinting {
@@ -1145,6 +1165,24 @@ impl World {
             || block_has_tag(at_feet, "minecraft:climbable")
         {
             p.fall_distance = 0.0;
+        }
+        if let Some((horizontal, vertical)) = moved {
+            let movement = stats::Movement {
+                horizontal,
+                vertical,
+                on_ground,
+                was_on_ground: p.on_ground,
+                in_water: crate::blocks::fluid::fluid_at(at_feet)
+                    .is_some_and(|f| f.fluid == crate::blocks::fluid::Fluid::Water),
+                climbing: block_has_tag(at_feet, "minecraft:climbable"),
+                // Creative and spectator players in the air are flying.
+                flying: !p.survival(),
+            };
+            let (sneaking, sprinting) = (p.sneaking, p.sprinting);
+            // Big jumps are teleports, not movement.
+            if horizontal.hypot(vertical) < 10.0 {
+                p.stats.moved(&movement, sneaking, sprinting);
+            }
         }
         let fallen = if on_ground {
             std::mem::take(&mut p.fall_distance)
@@ -1270,6 +1308,14 @@ impl World {
     }
 
     fn break_block(&mut self, id: i32, pos: BlockPos, state: u16) {
+        if let Some(p) = self.players.get_mut(&id) {
+            let block = i32::from(levitas_registry::STATE_BLOCK[usize::from(state)]);
+            p.stats.add(levitas_registry::stat_type::MINED, block, 1);
+            let tool = p.inventory.held(p.held);
+            if ItemInfo::get(tool.item).is_some_and(|i| i.max_damage > 0) {
+                p.stats.add(levitas_registry::stat_type::USED, tool.item, 1);
+            }
+        }
         self.set_block(pos, block::AIR);
         self.remove_block_entity(pos);
         let effect = Writer::packet(clientbound::LEVEL_EVENT)
@@ -1362,6 +1408,10 @@ impl World {
         stack.damage += amount;
         let broke = stack.damage >= max;
         p.inventory.slots[slot] = if broke { Stack::EMPTY } else { stack };
+        if broke {
+            p.stats
+                .add(levitas_registry::stat_type::BROKEN, stack.item, 1);
+        }
         let update = p.inventory.set_slot_packet(slot);
         self.send(id, update);
         if broke {
@@ -1468,6 +1518,7 @@ impl World {
         self.tick_beacons();
         self.tick_maps();
         self.tick_advancements();
+        self.tick_stats();
         self.tick_conduits();
         self.tick_daylight_detectors();
         self.tick_spawners();

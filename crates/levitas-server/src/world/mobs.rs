@@ -1886,6 +1886,13 @@ impl World {
         let kind = mob.kind.entity_type();
         self.mobs.insert(target, mob);
         if let Some(attacker) = by_player.filter(|_| killed) {
+            self.stat(attacker, levitas_registry::stat_type::KILLED, kind, 1);
+            self.stat(
+                attacker,
+                levitas_registry::stat_type::CUSTOM,
+                levitas_registry::custom_stat::MOB_KILLS,
+                1,
+            );
             self.advance(attacker, super::advancements::Trigger::KilledEntity(kind));
         }
         if let Some(attacker) = anger_piglins {

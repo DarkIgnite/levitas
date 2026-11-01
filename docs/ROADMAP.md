@@ -509,7 +509,17 @@ Known gaps are listed under each phase instead of being hidden.
       Conditions are matched for items, tags, counts, entity types, biomes and
       dimensions; anything else never matches, so those criteria wait (structures such
       as fortresses, damage sources, block placement, taming, totems, and the rest of
-      the 50 or so triggers). Missing: statistics, recipe advancements, `/advancement`.
+      the 50 or so triggers). Statistics (`world/stats.rs`): blocks mined, items
+      crafted (grid, stonecutter, smithing), used (blocks placed, food, bows, tools),
+      broken, picked up and dropped, mobs and players killed and killed by, and the
+      custom ones: play and world time, time since death and rest, sneaking time,
+      distances walked, sprinted, crouched, swum, climbed, flown and fallen, jumps,
+      deaths, kills, damage dealt, taken and absorbed, beds and straw beds, trades,
+      enchanting, breeding, drops, leaving, and opening chests, barrels, ender chests,
+      shulker boxes and every workstation. Sent when the statistics screen asks, saved
+      in `players/stats/<uuid>.json` as vanilla saves them (both checked against a
+      vanilla 26.3 server). Missing: recipe advancements, `/advancement`, the other
+      advancement triggers, and riding, boating and fishing statistics.
 - [ ] Brigadier command tree with suggestions; console commands. The built-in commands
       are declared to the client (`commands::command_tree`) for tab completion; there is
       no command framework or console input yet.

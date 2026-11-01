@@ -275,6 +275,19 @@ impl World {
         }
         self.set_bed_occupied(head, true);
         self.advance(id, super::advancements::Trigger::SleptInBed);
+        let slept = if straw {
+            levitas_registry::custom_stat::SLEEP_IN_STRAW_BED
+        } else {
+            levitas_registry::custom_stat::SLEEP_IN_BED
+        };
+        self.stat(id, levitas_registry::stat_type::CUSTOM, slept, 1);
+        if let Some(p) = self.players.get_mut(&id) {
+            p.stats.set(
+                levitas_registry::stat_type::CUSTOM,
+                levitas_registry::custom_stat::TIME_SINCE_REST,
+                0,
+            );
+        }
         let p = self.players.get_mut(&id).expect("player exists");
         p.sleeping = Some(head);
         p.sleep_ticks = 0;

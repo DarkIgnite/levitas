@@ -151,6 +151,12 @@ impl World {
         breeders.sort_unstable();
         breeders.dedup();
         for breeder in breeders.into_iter().flatten() {
+            self.stat(
+                breeder,
+                levitas_registry::stat_type::CUSTOM,
+                levitas_registry::custom_stat::ANIMALS_BRED,
+                1,
+            );
             self.advance(breeder, super::advancements::Trigger::BredAnimals(child));
         }
         let xp = 1 + self.rng.below(7) as i32;

@@ -57,6 +57,7 @@ impl Test {
             choice: self.choice,
             trades: Vec::new(),
             rename: None,
+            crafted: Vec::new(),
         };
         let thrown = click(&mut w, Click { slot, button, mode });
         self.used = w.used;

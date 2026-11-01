@@ -1197,6 +1197,12 @@ impl World {
     /// gets a little experience, and the villager may climb a level.
     pub(super) fn traded(&mut self, id: i32, target: i32, index: usize, times: i32) {
         self.advance(id, super::advancements::Trigger::VillagerTrade);
+        self.stat(
+            id,
+            levitas_registry::stat_type::CUSTOM,
+            levitas_registry::custom_stat::TRADED_WITH_VILLAGER,
+            times,
+        );
         let mut player_xp = 0;
         let mut levelled = false;
         let is_trader = self
