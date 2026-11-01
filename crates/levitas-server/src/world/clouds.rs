@@ -125,7 +125,8 @@ pub fn data_packet(id: i32, cloud: &AreaEffectCloud) -> Writer {
         .varint(SERIALIZER_PARTICLE);
 
     if cloud.is_dragon_breath {
-        packet = packet.varint(particle::DRAGON_BREATH);
+        // Since 26.x dragon's breath particles carry a power.
+        packet = packet.varint(particle::DRAGON_BREATH).f32(1.0);
     } else {
         let argb = (0xFFi32 << 24) | (cloud.color & 0x00FF_FFFF);
         packet = packet
@@ -371,8 +372,22 @@ mod tests {
         let s_pkt = spawn_packet(42, &cloud).into_frame();
         assert!(!s_pkt.is_empty());
 
+        // The particle ends the data: its ID, then its options (26.3's particle page).
         let d_pkt = data_packet(42, &cloud).into_frame();
-        assert!(!d_pkt.is_empty());
+        let mut tail = Writer::packet(0).varint(particle::ENTITY_EFFECT);
+        tail = tail.bytes(&((0xFFi32 << 24) | (cloud.color & 0xFF_FFFF)).to_be_bytes());
+        let tail = tail.u8(0xFF).into_frame();
+        assert!(d_pkt.ends_with(&tail[2..]), "entity effect colour");
+        let breath = data_packet(42, &AreaEffectCloud::new_dragon_breath([0.0; 3])).into_frame();
+        let tail = Writer::packet(0)
+            .varint(particle::DRAGON_BREATH)
+            .f32(1.0)
+            .u8(0xFF)
+            .into_frame();
+        assert!(
+            breath.ends_with(&tail[2..]),
+            "dragon's breath with its power"
+        );
 
         let u_pkt = update_packet(42, 2.5, false).into_frame();
         assert!(!u_pkt.is_empty());

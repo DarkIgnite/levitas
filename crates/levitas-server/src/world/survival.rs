@@ -548,12 +548,12 @@ impl World {
         let Some(filled_id) = ItemInfo::id_of("minecraft:filled_map") else {
             return false;
         };
-        let map_id = self.next_map_id;
-        self.next_map_id += 1;
+        let at = p.pos;
+        let map_id = self.create_map(at[0].floor() as i32, at[2].floor() as i32, 0);
+        let p = self.players.get_mut(&id).expect("player exists");
         let mut filled = Stack::new(filled_id, 1);
         filled.map_id = Some(map_id);
         let survival = p.survival();
-        let at = p.pos;
         if stack.count == 1 {
             p.inventory.slots[slot] = filled;
             let update = p.inventory.set_slot_packet(slot);
@@ -585,7 +585,6 @@ impl World {
                 self.scatter_item(at, filled.with_count(over));
             }
         }
-        self.send(id, map_packet(map_id, 0, false));
         self.play_sound_at(
             "minecraft:ui.cartography_table.take_result",
             at,
@@ -936,11 +935,11 @@ mod tests {
         player.inventory.slots[crate::inventory::HOTBAR] = Stack::new(empty_map, 1);
         world.players.insert(id, player);
 
-        let initial_map_id = world.next_map_id;
         assert!(world.open_empty_map(id, 0));
         let held = world.players[&id].inventory.slots[crate::inventory::HOTBAR];
         assert_eq!(held.item, filled_map);
-        assert_eq!(held.map_id, Some(initial_map_id));
-        assert_eq!(world.next_map_id, initial_map_id + 1);
+        // A blank map of the grid square the player stands in.
+        let map = world.map_data(held.map_id.unwrap()).unwrap();
+        assert_eq!((map.center, map.scale), ([0, 0], 0));
     }
 }

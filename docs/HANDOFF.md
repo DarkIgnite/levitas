@@ -137,7 +137,7 @@ Workspace crates in `crates/`:
 |---|---|
 | `levitas-protocol` | VarInt, `Reader`/`Writer` packet codec, `BlockPos`, angles |
 | `levitas-nbt` | NBT (file, network, gzip), modified UTF-8 |
-| `levitas-registry` | `build.rs` turns `generated/<version>` (1.21.8 until the migration to 26.3) into tables: packet IDs, blocks/states (`block::*` consts, `BlockInfo`, properties, hardness, light emission/filter, requires_tool), items (`ItemInfo`, tools, food, durability), tags, synced registries, collision shapes, sound events, loot tables JSON, recipes JSON. Hardness/shapes/light come from PrismarineJS minecraft-data (MIT, pinned commit) because the data generator lacks them. |
+| `levitas-registry` | `build.rs` turns `generated/<version>` (26.3) into tables: packet IDs, blocks/states (`block::*` consts, `BlockInfo`, properties, hardness, light emission/filter, requires_tool), items (`ItemInfo`, tools, food, durability), tags, synced registries, collision shapes, sound events, loot tables JSON, recipes JSON. Hardness/shapes/light come from PrismarineJS minecraft-data (MIT, pinned commit) because the data generator lacks them; blocks newer than its tables, and every block's map colour, come from Pumpkin's `pumpkin-data` (a build dependency). |
 | `levitas-world` | Paletted containers, `Chunk`/`Section` (y -64..320, 24 sections), `light.rs` (`ChunkLight`, 26 light sections incl. one below/above), `lighting.rs` (`LightEngine`: incremental BFS relight), `anvil.rs` (vanilla chunk NBT incl. light, block_ticks, fluid_ticks), `region.rs` (.mca files) |
 | `levitas-pumpkin` | `PumpkinTerrain`: drives Pumpkin's generation steps over 8x8-chunk areas and translates results to the target version's states/biomes/light. Every Pumpkin block state and biome matches a 26.3 one by name; it also holds plant placement rules (`Portals::can_place_at`, adapted from Pumpkin with attribution). |
 | `levitas-server` | The binary (`levitas`). See below. |
@@ -160,6 +160,8 @@ Workspace crates in `crates/`:
 - `world/items.rs` – dropped item entities and pickup.
 - `world/storage.rs` – level.dat and `data/minecraft/`, player data, chunk load/save,
   autosave, unloading, and moving 1.21.8 worlds into the 26.3 layout.
+- `world/maps.rs` – filled maps: grid squares, drawing while held, `map_<id>.dat`, the
+  shared map ID counter, cartography locking and zooming.
 - `world/commands.rs` – `/gamemode`, `/give`, `/kill`, `/time`, `/weather`, and the
   Brigadier tree sent on join for tab completion: **add every new command to
   `command_tree()` too**, or the client shows it as unknown.
@@ -213,13 +215,19 @@ The owner's standing request is to keep going until the world plays like vanilla
 open items, with what each still lacks, are in [ROADMAP.md](ROADMAP.md); the progress
 table in the README shows where the most is missing. Recently done: the move to 26.3,
 the blocks new in 26.3, special crafting recipes (repairing, leather dyeing, transmute,
-tipped arrows), status effects on mobs (potions, splash potions, tipped arrows), and
-maps, compasses, recovery compasses, lodestone compasses, cartography tables, and spyglass
-(Phase 8). Good next candidates for a playable world: lingering potion clouds, beacons,
-conduits, advancements (Phase 11), raids (Phase 10), and the Phase 13 plugin API and
-economy the owner wants for their server.
+tipped arrows), status effects on mobs, maps drawn as players carry them
+(`world/maps.rs`), compasses, cartography tables, spyglasses, lingering clouds, beacons,
+conduits, raids, wandering traders and zombie villagers. Good next candidates for a
+playable world: advancements and statistics (Phase 11), the rest of Phase 5's mobs,
+storage and TNT minecarts, and the Phase 13 plugin API and economy the owner wants for
+their server.
 
 ## 8. Known gaps and pitfalls
+
+- Work done by other agents gets reviewed like any change: on 2026-11-01 a review of
+  six commits found a dragon's breath particle missing its 26.3 `power` field (a client
+  disconnect), map IDs counted per dimension, and maps that were never drawn. Tests that
+  only check a packet is non-empty miss layout errors; check the bytes against the wiki.
 
 - Pumpkin targets Minecraft 26.x (protocol 777); `levitas-pumpkin` maps by name.
   The test `every_pumpkin_state_has_a_match` fails if a Pumpkin update adds blocks with

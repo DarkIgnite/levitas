@@ -94,6 +94,9 @@ pub struct BlockInfo {
     /// Whether the block drops nothing unless mined with a correct tool (stone without a
     /// pickaxe, for example).
     pub requires_tool: bool,
+    /// The block's base colour on maps (0 for blocks maps see through), from Pumpkin's
+    /// 26.x block data; a map pixel is this times four plus a shade.
+    pub map_color: u8,
 }
 
 impl BlockInfo {

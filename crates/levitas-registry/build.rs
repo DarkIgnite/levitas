@@ -389,8 +389,10 @@ fn blocks(data: &Path, out: &mut String) -> HashMap<String, u64> {
         rows[block_id as usize] = format!(
             "BlockInfo {{ name: {name:?}, first_state: {first}, default_state: {default}, \
              properties: &[{}], hardness: {hardness:?}, resistance: {resistance:?}, \
-             light_emission: {light}, light_filter: {filter}, requires_tool: {requires_tool} }},",
+             light_emission: {light}, light_filter: {filter}, requires_tool: {requires_tool},              map_color: {map_color} }},",
             props.join(", "),
+            // Map colours are not in minecraft-data; Pumpkin's data has them for every block.
+            map_color = pumpkin_data::Block::from_name(name).map_or(0, |b| b.map_color),
         );
     }
     out.push_str("}\n\n");
@@ -568,6 +570,11 @@ fn items_and_entities(data: &Path, block_defaults: &HashMap<String, u64>, out: &
         ),
         ("particle", "minecraft:particle_type", "Particle type IDs."),
         ("game_rule", "minecraft:game_rule", "Game rule IDs."),
+        (
+            "map_decoration",
+            "minecraft:map_decoration_type",
+            "Map decoration (icon) type IDs.",
+        ),
         (
             "slot_display",
             "minecraft:slot_display",

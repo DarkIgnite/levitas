@@ -415,15 +415,17 @@ pub fn cartography_recipe(map: Stack, material: Stack) -> Stack {
         if mat_name == "minecraft:map" {
             return map.with_count(2);
         }
-        // Locking: filled map (not already locked) + glass pane -> locked filled map
-        if is_glass_pane && !map.map_locked {
+        // Locking and zooming out: the result shows what will happen; taking it makes
+        // the new map (see `World::finish_map_posts`).
+        if is_glass_pane {
             let mut locked = map.with_count(1);
-            locked.map_locked = true;
+            locked.map_post = Some(crate::inventory::MAP_LOCK);
             return locked;
         }
-        // Zooming / extending: filled map (not locked) + paper -> zoomed filled map
-        if mat_name == "minecraft:paper" && !map.map_locked {
-            return map.with_count(1);
+        if mat_name == "minecraft:paper" {
+            let mut zoomed = map.with_count(1);
+            zoomed.map_post = Some(crate::inventory::MAP_SCALE);
+            return zoomed;
         }
     } else if map_name == "minecraft:paper" && material.is_empty() {
         // Craft empty map from single paper

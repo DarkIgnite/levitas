@@ -393,16 +393,24 @@ Known gaps are listed under each phase instead of being hidden.
       prismarine/sea lantern frame blocks, grant Conduit Power (underwater breathing, night vision,
       mining speed) to nearby players in water or rain, and attack hostile mobs with 4 magic damage
       every 40 ticks when fully framed (42 blocks).
-- [x] Maps, compasses, recovery compasses, clocks, spyglass. `inventory.rs` serializes and saves
+- [ ] Maps, compasses, recovery compasses, clocks, spyglass. `inventory.rs` serializes and saves
       `minecraft:lodestone_tracker` and `minecraft:map_id` item components. Right-clicking a lodestone
       with a compass binds it (`item.lodestone_compass.lock`) to that position and dimension. Dying
       records `LastDeathLocation: {dimension, pos}` in player NBT and sends it in login and respawn
-      packets so recovery compasses point to the player's last death. Right-clicking an empty map
-      creates a filled map with a sequential ID (`idcounts.dat`) and plays `ui.cartography_table.take_result`.
-      Cartography tables (`menu::CARTOGRAPHY_TABLE`) support map cloning (filled map + empty map),
-      locking (filled map + glass pane -> `map_locked`), zooming (filled map + paper), and empty map crafting.
-      Using a spyglass raises living flags and plays `item.spyglass.use`; releasing, switching slots,
-      or dying stops usage and plays `item.spyglass.stop_using`. Clocks reflect day/night time ticks.
+      packets so recovery compasses point to the player's last death. Maps (`world/maps.rs`):
+      using an empty map starts a filled map of the grid square the player stands in; while
+      held it draws the terrain within 128 blocks (64 in the Nether) from the highest block
+      maps can see, shaded by height against the pixel to the north and water by depth, a
+      share of the columns each tick, and sends the changed pixels with the holders' markers.
+      Maps are saved as `data/minecraft/map_<id>.dat`; their IDs (`idcounts.dat`) are shared by
+      all dimensions. Cartography tables clone maps, and locking (glass pane) or zooming out
+      (paper) makes a new map, as vanilla does (`minecraft:map_post_processing` marks the
+      result until it is taken). Using a spyglass raises living flags and plays
+      `item.spyglass.use`; releasing, switching slots, or dying stops usage. Clocks and
+      compasses are drawn by the client. Missing: banner and item frame markers, maps shown
+      in item frames to players who never held them, explorer maps, mixing colours over a
+      zoomed-out pixel's area (one block per pixel is sampled); the marker's direction is
+      untested in a real client.
 
 ## Phase 9: Dimensions
 

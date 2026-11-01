@@ -33,6 +33,7 @@ mod hanging;
 mod hazards;
 mod hoppers;
 mod items;
+mod maps;
 mod minecarts;
 mod mobs;
 mod monsters;
@@ -448,6 +449,8 @@ struct Player {
     pub using_spyglass: Option<i32>,
     /// Dimension and position where the player last died (for recovery compass).
     pub last_death: Option<(&'static str, BlockPos)>,
+    /// Maps this player's client has been sent in full.
+    pub known_maps: HashSet<i32>,
 }
 
 impl Player {
@@ -513,6 +516,7 @@ impl Player {
             enchant_seed: profile_seed,
             using_spyglass: None,
             last_death: None,
+            known_maps: HashSet::new(),
         }
     }
 
@@ -622,8 +626,8 @@ struct World {
     recipes: Recipes,
     rng: Rng,
     tick: u64,
-    /// Counter for map IDs (the `map` count in `idcounts.dat`).
-    pub next_map_id: i32,
+    /// Maps used here, loaded as needed (see `maps.rs`).
+    maps: HashMap<i32, maps::MapData>,
 }
 
 fn frame(packet: Writer) -> Frame {
@@ -729,7 +733,7 @@ impl World {
             recipes: Recipes::load(),
             rng: Rng::from_time(),
             tick: level.time.max(0) as u64,
-            next_map_id: level.next_map_id,
+            maps: HashMap::new(),
         };
         (world, generated)
     }
@@ -1456,6 +1460,7 @@ impl World {
         self.tick_campfires();
         self.tick_hoppers();
         self.tick_beacons();
+        self.tick_maps();
         self.tick_conduits();
         self.tick_daylight_detectors();
         self.tick_spawners();
@@ -1816,15 +1821,6 @@ fn spawn_info(
     packet
         .varint(0) // portal cooldown
         .varint(dimension.sea_level())
-}
-
-pub fn map_packet(map_id: i32, scale: i8, locked: bool) -> Writer {
-    Writer::packet(clientbound::MAP_ITEM_DATA)
-        .varint(map_id)
-        .i8(scale)
-        .bool(locked)
-        .bool(false) // no icons
-        .u8(0) // no pixel updates
 }
 
 fn position_packet(pos: [f64; 3], yaw: f32, pitch: f32) -> Writer {

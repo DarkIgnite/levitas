@@ -367,11 +367,11 @@ fn cartography_table_cloning_locking_and_zooming() {
     t.slots[0] = filled;
     t.slots[1] = stack("glass_pane", 1);
     t.click(OUTSIDE, 0, PICKUP);
-    assert!(t.slots[2].map_locked);
+    assert_eq!(t.slots[2].map_post, Some(crate::inventory::MAP_LOCK));
     assert_eq!(t.slots[2].map_id, Some(15));
     t.click(2, 0, PICKUP);
     let locked_map = t.carried;
-    assert!(locked_map.map_locked);
+    assert_eq!(locked_map.map_post, Some(crate::inventory::MAP_LOCK));
     t.carried = Stack::EMPTY;
 
     // Zooming unlocked map with paper
@@ -380,19 +380,10 @@ fn cartography_table_cloning_locking_and_zooming() {
     t.click(OUTSIDE, 0, PICKUP);
     assert_eq!(t.slots[2].item, item("filled_map"));
     assert_eq!(t.slots[2].count, 1);
-
-    // Locked map cannot be zoomed or locked again
-    t.slots[0] = locked_map;
-    t.slots[1] = stack("paper", 3);
-    t.click(OUTSIDE, 0, PICKUP);
-    assert!(t.slots[2].is_empty(), "locked map cannot be zoomed");
-
-    t.slots[1] = stack("glass_pane", 1);
-    t.click(OUTSIDE, 0, PICKUP);
-    assert!(
-        t.slots[2].is_empty(),
-        "already locked map cannot be locked again"
-    );
+    assert_eq!(t.slots[2].map_post, Some(crate::inventory::MAP_SCALE));
+    // Whether a map is locked is in its data, not the item: the world refuses to zoom
+    // a locked map when the result is taken (see `maps::tests`).
+    let _ = locked_map;
 
     // Paper alone makes an empty map
     t.slots[0] = stack("paper", 1);

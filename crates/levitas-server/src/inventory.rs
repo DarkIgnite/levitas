@@ -45,9 +45,14 @@ pub struct Stack {
     pub lodestone: Option<LodestoneTracker>,
     /// A map ID (the `minecraft:map_id` component).
     pub map_id: Option<i32>,
-    /// Whether a map is locked with a glass pane.
-    pub map_locked: bool,
+    /// A cartography table's pending change to a map (the `minecraft:map_post_processing`
+    /// component): `MAP_LOCK` or `MAP_SCALE`. The world turns it into a new map.
+    pub map_post: Option<u8>,
 }
+
+/// `map_post` values, as 26.3 numbers them.
+pub const MAP_LOCK: u8 = 0;
+pub const MAP_SCALE: u8 = 1;
 
 /// An armor trim: entries of the trim material and trim pattern registries.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -97,7 +102,7 @@ impl Stack {
         color: None,
         lodestone: None,
         map_id: None,
-        map_locked: false,
+        map_post: None,
     };
 
     pub fn new(item: i32, count: i32) -> Self {
@@ -129,7 +134,7 @@ impl Stack {
             && self.color == other.color
             && self.lodestone == other.lodestone
             && self.map_id == other.map_id
-            && self.map_locked == other.map_locked
+            && self.map_post == other.map_post
     }
 
     pub fn is_empty(&self) -> bool {
@@ -199,8 +204,8 @@ impl Stack {
         if let Some(map_id) = self.map_id {
             components.insert("minecraft:map_id", map_id);
         }
-        if self.map_locked {
-            components.insert("minecraft:map_post_processing", 1);
+        if let Some(post) = self.map_post {
+            components.insert("minecraft:map_post_processing", i32::from(post));
         }
         if !components.is_empty() {
             nbt.insert("components", components);
@@ -251,9 +256,10 @@ impl Stack {
         let map_id = components
             .and_then(|c| c.int("minecraft:map_id"))
             .map(|id| id as i32);
-        let map_locked = components
+        let map_post = components
             .and_then(|c| c.int("minecraft:map_post_processing"))
-            .is_some_and(|v| v != 0);
+            .and_then(|v| u8::try_from(v).ok())
+            .filter(|&v| v <= MAP_SCALE);
         Stack {
             item,
             count,
@@ -280,7 +286,7 @@ impl Stack {
                 .map(|c| c as i32 & 0xFF_FFFF),
             lodestone,
             map_id,
-            map_locked,
+            map_post,
         }
     }
 }
@@ -333,7 +339,9 @@ fn write_components(packet: Writer, stack: &Stack) -> Writer {
     let dyed = stack.color.is_some();
     let lodestone = stack.lodestone.is_some();
     let mapped = stack.map_id.is_some();
+    let processing = stack.map_post.is_some();
     let added = i32::from(damaged)
+        + i32::from(processing)
         + i32::from(dyed)
         + i32::from(enchanted)
         + i32::from(worked)
@@ -393,6 +401,11 @@ fn write_components(packet: Writer, stack: &Stack) -> Writer {
     }
     if let Some(map_id) = stack.map_id {
         packet = packet.varint(component::MAP_ID).varint(map_id);
+    }
+    if let Some(post) = stack.map_post {
+        packet = packet
+            .varint(component::MAP_POST_PROCESSING)
+            .varint(i32::from(post));
     }
     packet
 }
@@ -669,7 +682,7 @@ mod tests {
         let filled_map = item("minecraft:filled_map");
         let mut stack = Stack::new(filled_map, 1);
         stack.map_id = Some(42);
-        stack.map_locked = true;
+        stack.map_post = Some(MAP_LOCK);
 
         let nbt = stack.to_nbt();
         let loaded = Stack::from_nbt(&nbt);
@@ -679,10 +692,12 @@ mod tests {
         let expected = Writer::packet(0)
             .varint(1)
             .varint(filled_map)
-            .varint(1) // 1 component added (map_id)
+            .varint(2) // the map ID and the post-processing mark
             .varint(0)
             .varint(component::MAP_ID)
             .varint(42)
+            .varint(component::MAP_POST_PROCESSING)
+            .varint(0) // lock
             .into_frame();
         assert_eq!(sent, expected);
     }

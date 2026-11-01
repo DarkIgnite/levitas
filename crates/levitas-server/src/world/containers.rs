@@ -813,6 +813,9 @@ impl World {
                 self.grindstone_used(pos, xp)
             }
             (View::Cartography(pos), Some(click::Used::Cartography)) => {
+                // The new map IDs reach the client with the whole window.
+                self.finish_map_posts(id);
+                self.resync_window(id, window, view);
                 self.play_sound("minecraft:ui.cartography_table.take_result", pos, None);
             }
             _ => {}

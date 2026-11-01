@@ -83,6 +83,8 @@ impl LevelData {
                     let next_map_id = saved_data(dir, "idcounts")
                         .and_then(|c| c.int("map"))
                         .unwrap_or(0) as i32;
+                    // Map IDs are shared by every dimension; none is given twice.
+                    super::maps::reserve_ids(next_map_id);
                     return Some(LevelData {
                         spawn,
                         time: data.int("Time").unwrap_or(0),
@@ -686,6 +688,7 @@ impl World {
             self.save_chunk(*x, *z);
         }
         self.save_mobs();
+        self.save_maps();
         let ids: Vec<i32> = self.players.keys().copied().collect();
         for id in ids {
             self.save_player(id);
@@ -706,7 +709,7 @@ impl World {
             weather: self.weather.clone(),
             seed: self.seed,
             kind: self.kind,
-            next_map_id: self.next_map_id,
+            next_map_id: super::maps::next_id(),
         };
         if let Err(e) = level.save(&self.dir) {
             error!("could not save level.dat: {e}");
