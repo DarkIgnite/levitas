@@ -602,6 +602,7 @@ impl World {
         if let Err(e) = result {
             error!("could not save {}: {e}", path.display());
         }
+        self.save_advancements(id);
     }
 
     /// Reads a chunk from disk and registers its block entities.

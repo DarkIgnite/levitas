@@ -160,6 +160,8 @@ Workspace crates in `crates/`:
 - `world/items.rs` – dropped item entities and pickup.
 - `world/storage.rs` – level.dat and `data/minecraft/`, player data, chunk load/save,
   autosave, unloading, and moving 1.21.8 worlds into the 26.3 layout.
+- `world/advancements.rs` – the advancement tree, criteria triggers (`World::advance`
+  with a `Trigger`), the update packet, toasts and announcements, saving progress.
 - `world/maps.rs` – filled maps: grid squares, drawing while held, `map_<id>.dat`, the
   shared map ID counter, cartography locking and zooming.
 - `world/commands.rs` – `/gamemode`, `/give`, `/kill`, `/time`, `/weather`, and the
@@ -218,7 +220,8 @@ the blocks new in 26.3, special crafting recipes (repairing, leather dyeing, tra
 tipped arrows), status effects on mobs, maps drawn as players carry them
 (`world/maps.rs`), compasses, cartography tables, spyglasses, lingering clouds, beacons,
 conduits, raids, wandering traders and zombie villagers. Good next candidates for a
-playable world: advancements and statistics (Phase 11), the rest of Phase 5's mobs,
+playable world: statistics and more advancement triggers (Phase 11), the rest of
+Phase 5's mobs,
 storage and TNT minecarts, and the Phase 13 plugin API and economy the owner wants for
 their server.
 
@@ -245,7 +248,8 @@ their server.
 - Fluids: placing a waterloggable block into water does not waterlog it; flowing water
   does not push items; fluids never tick in chunks until something changes nearby.
 - The minecraft.wiki protocol pages lagged 26.3 in places (light masks, synced
-  registries, slot display IDs, item stack templates). When a real client disconnects,
+  registries, slot display IDs, item stack templates, and advancements: their screen
+  position now follows the telemetry flag, and icons are item stack templates). When a real client disconnects,
   its report is in the Modrinth profile "Remarkably Optimized" under `debug/`; compare
   with a throwaway vanilla 26.3 server (`generated/server-26.3.jar`, offline mode,
   whitelist off) by logging in to both with the same small probe client.

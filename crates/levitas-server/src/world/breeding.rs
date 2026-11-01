@@ -69,6 +69,7 @@ impl World {
             true
         } else if mob.age == 0 && mob.love == 0 {
             mob.love = LOVE_TICKS;
+            mob.helped_by = Some(player);
             self.send_to_viewers(&mob, entity_event(target, ENTITY_EVENT_LOVE_HEARTS));
             true
         } else {
@@ -135,14 +136,22 @@ impl World {
                 self.mobs[&pid].color
             };
         }
+        let child = baby.kind.entity_type();
         self.mobs.insert(next_entity_id(), baby);
         mob.love = 0;
         mob.age = BREED_COOLDOWN;
         mob.target = None;
+        let mut breeders = vec![mob.helped_by.take()];
         if let Some(partner) = self.mobs.get_mut(&pid) {
             partner.love = 0;
             partner.age = BREED_COOLDOWN;
             partner.target = None;
+            breeders.push(partner.helped_by.take());
+        }
+        breeders.sort_unstable();
+        breeders.dedup();
+        for breeder in breeders.into_iter().flatten() {
+            self.advance(breeder, super::advancements::Trigger::BredAnimals(child));
         }
         let xp = 1 + self.rng.below(7) as i32;
         self.spawn_xp(at, xp);

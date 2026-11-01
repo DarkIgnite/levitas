@@ -274,6 +274,7 @@ impl World {
             return true;
         }
         self.set_bed_occupied(head, true);
+        self.advance(id, super::advancements::Trigger::SleptInBed);
         let p = self.players.get_mut(&id).expect("player exists");
         p.sleeping = Some(head);
         p.sleep_ticks = 0;

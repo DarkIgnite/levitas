@@ -579,6 +579,7 @@ impl World {
                                     amplifier: bad_omen as u8,
                                 },
                             );
+                            self.advance(pid, super::advancements::Trigger::HeroOfTheVillage);
                         }
                         self.play_sound_at(
                             "minecraft:ui.toast.challenge_complete",

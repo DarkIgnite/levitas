@@ -179,6 +179,19 @@ impl World {
             let mut golem = Mob::new(MobKind::IronGolem, at, &mut self.rng);
             golem.player_created = true;
             self.mobs.insert(next_entity_id(), golem);
+            // Players close by built it.
+            let builders: Vec<i32> = self
+                .players
+                .iter()
+                .filter(|(_, p)| (0..3).map(|i| (p.pos[i] - at[i]).powi(2)).sum::<f64>() <= 25.0)
+                .map(|(&pid, _)| pid)
+                .collect();
+            for pid in builders {
+                self.advance(
+                    pid,
+                    super::advancements::Trigger::SummonedEntity(entity_type::IRON_GOLEM),
+                );
+            }
             return;
         }
     }

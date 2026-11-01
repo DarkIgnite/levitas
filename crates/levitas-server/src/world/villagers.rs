@@ -1196,6 +1196,7 @@ impl World {
     /// Trades went through: the villager counts the uses and its experience, the player
     /// gets a little experience, and the villager may climb a level.
     pub(super) fn traded(&mut self, id: i32, target: i32, index: usize, times: i32) {
+        self.advance(id, super::advancements::Trigger::VillagerTrade);
         let mut player_xp = 0;
         let mut levelled = false;
         let is_trader = self

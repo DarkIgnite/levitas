@@ -3,6 +3,7 @@
 //! packet frames, so world state needs no locks.
 
 mod admin;
+mod advancements;
 mod armor_stands;
 mod arrows;
 mod beacon;
@@ -451,6 +452,8 @@ struct Player {
     pub last_death: Option<(&'static str, BlockPos)>,
     /// Maps this player's client has been sent in full.
     pub known_maps: HashSet<i32>,
+    /// Which advancement criteria the player has met, and which they were shown.
+    pub advancements: advancements::Progress,
 }
 
 impl Player {
@@ -517,6 +520,7 @@ impl Player {
             using_spyglass: None,
             last_death: None,
             known_maps: HashSet::new(),
+            advancements: advancements::Progress::default(),
         }
     }
 
@@ -937,6 +941,7 @@ impl World {
         ONLINE.fetch_add(1, Ordering::Relaxed);
         self.players.insert(id, player);
         let saved_in = self.load_player(id);
+        self.load_advancements(id);
         // A player who logged out in another dimension goes back there.
         if let Some(other) = saved_in.filter(|&d| d != self.dimension) {
             if self.hand_over(id, other, None, travel::Via::Login) {
@@ -997,6 +1002,7 @@ impl World {
         self.send_permissions(id);
         let recipes = self.recipes.update_packet();
         self.send(id, recipes);
+        self.sync_advancements(id, &[], true);
         self.send(
             id,
             system_chat(&format!(
@@ -1461,6 +1467,7 @@ impl World {
         self.tick_hoppers();
         self.tick_beacons();
         self.tick_maps();
+        self.tick_advancements();
         self.tick_conduits();
         self.tick_daylight_detectors();
         self.tick_spawners();

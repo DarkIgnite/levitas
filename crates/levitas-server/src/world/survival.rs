@@ -642,6 +642,7 @@ impl World {
         if stack.is_empty() {
             return;
         }
+        let eaten = stack.with_count(1);
         if let Some(food) = &info.food {
             p.food = (p.food + food.nutrition).min(20);
             p.saturation = (p.saturation + food.saturation).min(p.food as f32);
@@ -716,6 +717,7 @@ impl World {
                 },
             );
         }
+        self.advance(id, super::advancements::Trigger::ConsumeItem(eaten));
     }
 
     /// Hunger, natural regeneration, starvation, void damage and eating, once per tick.

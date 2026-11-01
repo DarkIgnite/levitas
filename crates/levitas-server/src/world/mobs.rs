@@ -276,7 +276,7 @@ impl MobKind {
         )
     }
 
-    fn entity_type(self) -> i32 {
+    pub(super) fn entity_type(self) -> i32 {
         match self {
             MobKind::Cow => entity_type::COW,
             MobKind::Pig => entity_type::PIG,
@@ -482,6 +482,9 @@ pub struct Mob {
     pub celebrating: bool,
     /// Zombie villager curing countdown timer in ticks.
     pub converting: Option<u32>,
+    /// The player who fed this animal into love, or started curing this zombie villager:
+    /// they get the advancement when it pays off. Not saved.
+    pub helped_by: Option<i32>,
     /// Wandering trader despawn countdown in ticks.
     pub despawn_timer: Option<u32>,
     /// Entity ID of the leader mob (e.g. wandering trader for trader llamas).
@@ -563,6 +566,7 @@ impl Mob {
             is_patrol_leader: false,
             celebrating: false,
             converting: None,
+            helped_by: None,
             despawn_timer: None,
             leader: None,
             panic_ticks: 0,
@@ -1139,6 +1143,9 @@ impl World {
                         });
                         if let Some(v) = mob.villager.as_mut() {
                             v.cured_discount = true;
+                        }
+                        if let Some(curer) = mob.helped_by.take() {
+                            self.advance(curer, super::advancements::Trigger::CuredZombieVillager);
                         }
                         self.send_to_viewers(&mob, items::remove_entity(id));
                         for p in mob.spawn_packets(id) {
@@ -1868,6 +1875,7 @@ impl World {
                 .varint(cause)
                 .bool(false),
         );
+        let killed = mob.health <= 0.0 && mob.dying.is_none();
         if mob.health <= 0.0 {
             self.kill_mob(target, &mut mob);
         } else {
@@ -1875,7 +1883,11 @@ impl World {
             self.mob_sound(&mob, &sound);
         }
         let at = mob.pos;
+        let kind = mob.kind.entity_type();
         self.mobs.insert(target, mob);
+        if let Some(attacker) = by_player.filter(|_| killed) {
+            self.advance(attacker, super::advancements::Trigger::KilledEntity(kind));
+        }
         if let Some(attacker) = anger_piglins {
             self.anger_piglins(at, attacker);
         }
@@ -2034,6 +2046,7 @@ impl World {
                 return false;
             }
             mob.converting = Some(3600);
+            mob.helped_by = Some(id);
             (mob.pos, mob.viewers.clone())
         };
         let p = self.players.get_mut(&id).expect("checked");

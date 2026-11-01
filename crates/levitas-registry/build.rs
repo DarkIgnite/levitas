@@ -145,6 +145,14 @@ fn main() {
     embed_json_dir(
         &data,
         &out_dir,
+        "advancement",
+        "ADVANCEMENTS_JSON",
+        "Advancements as JSON: an object mapping advancement names to their definitions.",
+        &mut out,
+    );
+    embed_json_dir(
+        &data,
+        &out_dir,
         "recipe",
         "RECIPES_JSON",
         "Recipes as JSON: an object mapping recipe names to recipes.",
@@ -784,6 +792,10 @@ fn embed_json_dir(data: &Path, out_dir: &Path, dir: &str, name: &str, doc: &str,
     collect_entries(&dir, &dir, &mut names);
     names.sort();
     for entry in names {
+        // The recipe-unlocking advancements wait for a recipe book.
+        if name == "ADVANCEMENTS_JSON" && entry.starts_with("minecraft:recipes/") {
+            continue;
+        }
         let path = dir.join(format!(
             "{}.json",
             entry.strip_prefix("minecraft:").unwrap()

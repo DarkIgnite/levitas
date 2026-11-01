@@ -469,6 +469,12 @@ impl World {
                 self.set_block_updating(pos, taken);
                 self.play_sound(&format!("minecraft:item.bucket.{sound}"), pos, None);
                 self.exchange_held(id, slot, filled);
+                if let Some(bucket) = ItemInfo::id_of(filled) {
+                    self.advance(
+                        id,
+                        super::advancements::Trigger::FilledBucket(Stack::new(bucket, 1)),
+                    );
+                }
             }
             Some(fluid) => {
                 let Some((hit, face)) = self.ray_cast(eye, look, reach, false) else {

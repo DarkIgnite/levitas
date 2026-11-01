@@ -162,6 +162,22 @@ impl World {
         if matches!(via, Via::NetherPortal | Via::EndPortal) {
             self.after_portal_arrival(id);
         }
+        // Portals lead between two known dimensions; a command could come from either.
+        let here = self.dimension;
+        let from = match via {
+            Via::NetherPortal if here == Dimension::Nether => Some(Dimension::Overworld),
+            Via::NetherPortal => Some(Dimension::Nether),
+            Via::EndPortal if here == Dimension::End => Some(Dimension::Overworld),
+            Via::EndPortal => Some(Dimension::End),
+            _ => None,
+        };
+        self.advance(
+            id,
+            super::advancements::Trigger::ChangedDimension {
+                from: from.map_or("", Dimension::name),
+                to: here.name(),
+            },
+        );
     }
 
     /// Sends a message to everyone in every dimension but player `except`.

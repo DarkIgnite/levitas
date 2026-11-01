@@ -136,6 +136,13 @@ impl World {
         if survival {
             self.give_levels(id, -price);
         }
+        self.advance(
+            id,
+            super::advancements::Trigger::EnchantedItem {
+                item: result,
+                levels: offer.cost as i32,
+            },
+        );
         let view = View::Enchanting(table);
         self.resync_window(id, window, view);
         self.play_sound("minecraft:block.enchantment_table.use", table, None);

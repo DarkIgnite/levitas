@@ -498,7 +498,18 @@ Known gaps are listed under each phase instead of being hidden.
 
 ## Phase 11: Everything else
 
-- [ ] Advancements and statistics
+- [ ] Advancements and statistics. Advancements (`world/advancements.rs`): the 126 of
+      26.3's data (the recipe-unlocking ones wait for a recipe book), laid out as trees,
+      shown as vanilla shows them (a tab once its root is done, then two levels ahead),
+      with toasts, chat announcements (`show_advancement_messages`) and experience
+      rewards, saved in `players/advancements/<uuid>.json` in vanilla's format. Criteria
+      met: inventory changes, location (biome, dimension), killing mobs, eating and
+      drinking, breeding, changing dimension, enchanting, sleeping, trading, curing
+      zombie villagers, Hero of the Village, building iron golems, filling buckets.
+      Conditions are matched for items, tags, counts, entity types, biomes and
+      dimensions; anything else never matches, so those criteria wait (structures such
+      as fortresses, damage sources, block placement, taming, totems, and the rest of
+      the 50 or so triggers). Missing: statistics, recipe advancements, `/advancement`.
 - [ ] Brigadier command tree with suggestions; console commands. The built-in commands
       are declared to the client (`commands::command_tree`) for tab completion; there is
       no command framework or console input yet.
