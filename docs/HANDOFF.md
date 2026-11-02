@@ -216,6 +216,16 @@ Phase 0–1 and most of Phase 2, plus parts of 3 and 12 (details in ROADMAP.md):
 - **Day/night and weather**: time sync every second, rain/thunder cycle with fading,
   `/time`, `/weather`, sleeping skips the night, beds are respawn points.
 
+## 6b. Moving a Leaf or vanilla world to Levitas
+
+Stop the old server, back the world up, and copy its folders next to `levitas.exe`:
+`world` (it replaces Levitas's own), and for Paper or Leaf also `world_nether` and
+`world_the_end`. On start Levitas moves them into the 26.3 layout (the log says what it
+moved), renames blocks and items that were renamed since, and keeps players, inventories,
+statistics and advancements. The world must come from 1.20.5 or later (items with
+components). Leaf's plugin data (economy, claims, ...) is not read; the Phase 13 plugins
+will need their own importers.
+
 ## 7. What to do next
 
 The owner's standing request is to keep going until the world plays like vanilla. The

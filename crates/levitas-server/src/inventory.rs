@@ -215,7 +215,7 @@ impl Stack {
 
     /// Reads a saved stack; unknown items come back empty.
     pub fn from_nbt(nbt: &Compound) -> Stack {
-        let Some(item) = nbt.str("id").and_then(ItemInfo::id_of) else {
+        let Some(item) = nbt.str("id").and_then(ItemInfo::id_of_saved) else {
             return Stack::EMPTY;
         };
         let count = nbt.int("count").unwrap_or(1) as i32;

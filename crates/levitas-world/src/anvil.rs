@@ -279,11 +279,12 @@ fn to_bytes(array: &[i8]) -> Vec<u8> {
     array.iter().map(|&b| b as u8).collect()
 }
 
-/// A palette entry `{Name, Properties}` as a block state ID; unknown blocks are air.
+/// A palette entry `{Name, Properties}` as a block state ID; blocks renamed since the
+/// chunk was saved take their new name, and unknown blocks are air.
 fn block_state(entry: Option<&Compound>) -> u16 {
     let Some(info) = entry
         .and_then(|e| e.str("Name"))
-        .and_then(BlockInfo::by_name)
+        .and_then(BlockInfo::by_saved_name)
     else {
         return block::AIR;
     };
@@ -408,6 +409,28 @@ mod tests {
             .with("sections", vec![Tag::Compound(section)]);
         let loaded = from_nbt(&nbt).unwrap().unwrap();
         assert_eq!(loaded.chunk.get(0, 0, 0), block::AIR);
+    }
+
+    #[test]
+    fn blocks_renamed_since_older_versions_keep_their_place() {
+        // A 1.21.8 chunk with a chain hanging along the x axis: it is an iron chain now.
+        let palette = vec![Tag::Compound(
+            Compound::new()
+                .with("Name", "minecraft:chain")
+                .with("Properties", Compound::new().with("axis", "x")),
+        )];
+        let section = Compound::new()
+            .with("Y", 0i8)
+            .with("block_states", Compound::new().with("palette", palette));
+        let nbt = Compound::new()
+            .with("DataVersion", 4440)
+            .with("Status", "minecraft:full")
+            .with("sections", vec![Tag::Compound(section)]);
+        let loaded = from_nbt(&nbt).unwrap().unwrap();
+        let state = loaded.chunk.get(0, 0, 0);
+        let info = BlockInfo::of(state);
+        assert_eq!(info.name, "minecraft:iron_chain");
+        assert_eq!(info.property(state, "axis"), Some("x"));
     }
 
     #[test]

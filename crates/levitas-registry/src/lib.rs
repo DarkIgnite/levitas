@@ -40,6 +40,22 @@ impl TagRegistry {
     }
 }
 
+/// Blocks and items renamed since the versions whose worlds Levitas opens, old name
+/// first: found by comparing the 1.21.8 and 26.3 data generator reports
+/// (`chain`), and in the Minecraft Wiki's history (`grass`, renamed in 1.20.3).
+const RENAMED: &[(&str, &str)] = &[
+    ("minecraft:chain", "minecraft:iron_chain"),
+    ("minecraft:grass", "minecraft:short_grass"),
+];
+
+/// The name a block or item has now, given the name an older world saved it under.
+pub fn current_name(name: &str) -> &str {
+    RENAMED
+        .iter()
+        .find(|&&(old, _)| old == name)
+        .map_or(name, |&(_, new)| new)
+}
+
 /// Face numbering used by the protocol and by [`SHAPE_STURDY`]: down, up, north, south,
 /// west, east.
 pub const FACE_DOWN: usize = 0;
@@ -117,6 +133,12 @@ impl BlockInfo {
             index /= values.len();
         }
         None
+    }
+
+    /// The block a world saved by an older version calls `name`: by its current name if
+    /// it was renamed since (see [`current_name`]).
+    pub fn by_saved_name(name: &str) -> Option<&'static BlockInfo> {
+        BlockInfo::by_name(current_name(name))
     }
 
     /// The block called `name` (e.g. `minecraft:oak_stairs`).
@@ -201,6 +223,11 @@ impl ItemInfo {
 
     pub fn id_of(name: &str) -> Option<i32> {
         ITEMS.iter().position(|i| i.name == name).map(|i| i as i32)
+    }
+
+    /// The item a world saved by an older version calls `name` (see [`current_name`]).
+    pub fn id_of_saved(name: &str) -> Option<i32> {
+        ItemInfo::id_of(current_name(name))
     }
 
     /// Whether this item, used as a tool, makes `state` drop its loot. `None` if no rule

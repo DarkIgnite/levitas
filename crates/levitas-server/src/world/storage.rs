@@ -339,7 +339,26 @@ fn save_data(dir: &Path, name: &str, data: Compound) -> io::Result<()> {
 /// `players/data/`. Anything already in the new place is left alone.
 pub fn upgrade_layout(dir: &Path) {
     use super::dimension::Dimension;
-    let mut moves = vec![(dir.join("playerdata"), dir.join("players").join("data"))];
+    let players = dir.join("players");
+    let mut moves = vec![
+        (dir.join("playerdata"), players.join("data")),
+        (dir.join("stats"), players.join("stats")),
+        (dir.join("advancements"), players.join("advancements")),
+    ];
+    // Paper and Leaf keep the Nether and the End in folders of their own next to the
+    // world: `world_nether/DIM-1` and `world_the_end/DIM1`.
+    if let (Some(parent), Some(name)) = (dir.parent(), dir.file_name()) {
+        let name = name.to_string_lossy();
+        for (suffix, inner, dimension) in [
+            ("_nether", "DIM-1", Dimension::Nether),
+            ("_the_end", "DIM1", Dimension::End),
+        ] {
+            let old = parent.join(format!("{name}{suffix}")).join(inner);
+            for part in ["region", "entities", "poi"] {
+                moves.push((old.join(part), dimension.folder(dir).join(part)));
+            }
+        }
+    }
     for dimension in [Dimension::Overworld, Dimension::Nether, Dimension::End] {
         let (old, new) = (dimension.old_folder(dir), dimension.folder(dir));
         for name in [
@@ -831,6 +850,46 @@ mod tests {
         assert_eq!((loaded.seed, loaded.kind), (-42, WorldKind::Noise));
         assert_eq!(loaded.next_map_id, 7);
         fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn leaf_worlds_bring_their_nether_end_stats_and_advancements() {
+        // Paper and Leaf: the Nether and the End in folders next to the world, and the
+        // statistics and advancements of 1.21.8 inside it.
+        let root = std::env::temp_dir().join(format!("levitas-leaf-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        let dir = root.join("world");
+        for folder in [
+            "world/region",
+            "world/stats",
+            "world/advancements",
+            "world_nether/DIM-1/region",
+            "world_the_end/DIM1/entities",
+        ] {
+            fs::create_dir_all(root.join(folder)).unwrap();
+        }
+        fs::write(root.join("world_nether/DIM-1/region/r.0.0.mca"), b"nether").unwrap();
+        fs::write(
+            root.join("world_the_end/DIM1/entities/r.0.0.mca"),
+            b"end mobs",
+        )
+        .unwrap();
+        fs::write(dir.join("stats/alice.json"), b"{}").unwrap();
+        fs::write(dir.join("advancements/alice.json"), b"{}").unwrap();
+
+        upgrade_layout(&dir);
+        let world = dir.join("dimensions/minecraft");
+        assert_eq!(
+            fs::read(world.join("the_nether/region/r.0.0.mca")).unwrap(),
+            b"nether"
+        );
+        assert_eq!(
+            fs::read(world.join("the_end/entities/r.0.0.mca")).unwrap(),
+            b"end mobs"
+        );
+        assert!(dir.join("players/stats/alice.json").is_file());
+        assert!(dir.join("players/advancements/alice.json").is_file());
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

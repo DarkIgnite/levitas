@@ -574,9 +574,7 @@ Known gaps are listed under each phase instead of being hidden.
       through `levitas-pumpkin`, on worker threads, 8x8 chunks at a time so trees and
       other features crossing chunk borders come out whole. New worlds use it by default;
       `LEVITAS_WORLD_TYPE=flat` makes the flat test world, `LEVITAS_SEED` picks the seed.
-      Pumpkin targets a newer Minecraft version, so its newer blocks and biomes become
-      their closest 1.21.8 relatives (poplar wood as birch, sulfur as sandstone, ...)
-      until the migration to 26.3, which has most of them.
+      Pumpkin targets 26.x, and every block and biome it places is a 26.3 one.
 - [x] Features: trees, ores, flowers, lakes, ...
 - [x] Structures: villages, strongholds, mineshafts, temples, monuments, ...
       Pumpkin places them along with their block entities, which come out with each
@@ -586,8 +584,17 @@ Known gaps are listed under each phase instead of being hidden.
       the generator gave them. Saved chests from vanilla worlds that were never opened
       are filled when loaded. Known gaps: decorated pots, suspicious sand and gravel,
       mineshaft chest minecarts, and potions, maps and names in loot.
-- [ ] Nether and End generation
-- [ ] Loading existing Leaf/vanilla worlds (pre-generated terrain)
+- [x] Nether and End generation, by Pumpkin like the overworld (see Phase 9).
+- [x] Loading existing Leaf/vanilla worlds (pre-generated terrain). Chunks, entities,
+      block entities, players, statistics and advancements saved by vanilla or Leaf
+      load as they are; blocks and items renamed since (`chain` to `iron_chain`,
+      `grass` to `short_grass`) take their new names (`levitas_registry::current_name`),
+      where unknown ones would become air. Opening a world moves it into 26.3's layout,
+      Paper and Leaf's `world_nether/DIM-1` and `world_the_end/DIM1` included (checked
+      on a world made by a vanilla 1.21.8 server). Known gaps: worlds older than 1.20.5
+      (items saved without components) lose item data; Pumpkin's terrain at the edge of
+      the old world may not line up exactly with what vanilla would have generated;
+      Leaf's own plugin data is not read.
 
 ## Phase 13: Plugins and economy
 
