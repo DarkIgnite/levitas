@@ -293,15 +293,26 @@ Known gaps are listed under each phase instead of being hidden.
       respawn point and skip the night once everyone has slept 100 ticks.
       Known gaps: no lightning bolts, rain does not put out fires or fill cauldrons,
       and sleeping ignores nearby monsters (there are none yet).
-- [ ] Random ticks: crops grow, saplings become trees, grass and mycelium spread.
+- [x] Random ticks: crops grow, saplings become trees, grass and mycelium spread.
       Done (`world/nature.rs`): three random ticks per section per tick; wheat,
       carrots, potatoes and beetroots ripen by the wiki's growth formula; oak, birch,
       spruce, jungle, acacia, cherry and dark oak (2x2) saplings grow trees; grass and
       mycelium spread and die under cover; farmland dries out; sugar cane and cacti
-      grow. Missing: stems, melons and pumpkins, vines, bamboo, kelp, mushrooms.
-- [ ] Bone meal (crops, saplings, grass), hoes tilling farmland, seeds and crops that
-      plant under another name: done. Composters, trampling, sugar cane, cactus, bamboo,
-      kelp, vines, melons and pumpkins, cocoa, sweet berries, mushrooms
+      grow. And (`world/farming.rs`): melon and pumpkin stems ripen by the crop formula
+      and put fruit on a free side with fitting ground (`supports_stem_fruit`), bending
+      to it and straightening when it is taken; cocoa and sweet berry bushes grow a
+      stage a fifth of the time; kelp grows up through still water to age 25; bamboo
+      shoots become stalks that grow to 16 blocks; vines grow down (`spread_vines`);
+      mushrooms spread where it is dark or onto mycelium and podzol, up to five in a
+      9x3x9 area. Known gaps: vines do not spread up or sideways.
+- [x] Bone meal (crops, saplings, grass), hoes tilling farmland, seeds and crops that
+      plant under another name. Bone meal also grows stems, cocoa, sweet berries, kelp
+      and bamboo. Sweet berries are picked by hand (bushes grown two stages and up).
+      Composters take what 26.3's `compostable` component says, with its chances (the
+      first layer always), are full at 7 and ready a second later, and give bone meal.
+      Falls onto farmland trample it with the wiki's chance (height less half a block).
+      Cocoa sits on any jungle log or wood. Known gaps: huge mushrooms, mobs trampling,
+      hoppers and comparators at composters.
 - [x] Leaf decay: leaves track their distance from a log through neighbour updates and
       rot (dropping saplings, sticks and apples) once out of reach; leaves players place
       never decay.

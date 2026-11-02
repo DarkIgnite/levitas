@@ -189,6 +189,9 @@ pub struct ItemInfo {
     pub toughness: f32,
     /// The armor trim material this item gives at a smithing table.
     pub trim_material: Option<&'static str>,
+    /// The chance in percent that the item raises a composter's level (the first layer
+    /// always takes); 0 for items that cannot be composted.
+    pub compost: u8,
 }
 
 impl ItemInfo {

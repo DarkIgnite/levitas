@@ -26,6 +26,7 @@ mod end_portal;
 mod experience;
 mod explosion;
 mod falling;
+mod farming;
 mod fire;
 mod fireballs;
 mod fluids;
@@ -1212,6 +1213,15 @@ impl World {
                     (ground_pos.z & 15) as usize,
                 )
             });
+        // Farmland is a little lower than a block, so the player stands inside it.
+        if fallen > 0.0 {
+            let soil = if crate::blocks::name(at_feet) == "minecraft:farmland" {
+                feet
+            } else {
+                ground_pos
+            };
+            self.trample(soil, fallen);
+        }
         // Landing on a shelf mushroom counts half the fall.
         let fallen = if [at_feet, at_ground]
             .iter()

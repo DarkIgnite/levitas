@@ -164,6 +164,9 @@ Workspace crates in `crates/`:
   with a `Trigger`), the update packet, toasts and announcements, saving progress.
 - `world/stats.rs` – statistics: `Stats` per player, `World::stat`, distance
   counting in `move_player`, the award packet, saving.
+- `world/farming.rs` – stems and fruit, cocoa, sweet berries, kelp, bamboo, vines,
+  mushrooms, composters, trampling (called from `nature.rs`'s random ticks and bone
+  meal, and from using blocks).
 - `world/maps.rs` – filled maps: grid squares, drawing while held, `map_<id>.dat`, the
   shared map ID counter, cartography locking and zooming.
 - `world/commands.rs` – `/gamemode`, `/give`, `/kill`, `/time`, `/weather`, and the

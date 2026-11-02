@@ -29,6 +29,29 @@ pub fn with_age(state: u16, age: u8) -> u16 {
     with(state, "age", &age.to_string())
 }
 
+/// What a stem attached to a fruit becomes once the fruit is gone: a ripe stem again.
+pub fn detached_stem(state: u16, fruit_there: bool) -> Option<u16> {
+    let stem = match name(state) {
+        "minecraft:attached_melon_stem" => "minecraft:melon_stem",
+        "minecraft:attached_pumpkin_stem" => "minecraft:pumpkin_stem",
+        _ => return None,
+    };
+    if fruit_there {
+        return None;
+    }
+    BlockInfo::by_name(stem).map(|b| with_age(b.default_state, 7))
+}
+
+/// Whether the fruit an attached stem faces is still there.
+pub fn stem_holds_fruit(stem: u16, facing: u16) -> bool {
+    let fruit = match name(stem) {
+        "minecraft:attached_melon_stem" => "minecraft:melon",
+        "minecraft:attached_pumpkin_stem" => "minecraft:pumpkin",
+        _ => return true,
+    };
+    name(facing) == fruit
+}
+
 pub fn is_log(state: u16) -> bool {
     block_has_tag(state, "minecraft:logs")
 }

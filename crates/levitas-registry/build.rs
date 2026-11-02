@@ -762,6 +762,7 @@ pub static NAMES: &[&str] = &[{}];",
         let max_damage = c["minecraft:max_damage"].as_i64().unwrap_or(0);
         let equip_slot = c["minecraft:equippable"]["slot"].as_str();
         let trim_material = c["minecraft:provides_trim_material"].as_str();
+        let compost = compost_chance(data, &c["minecraft:compostable"]["layers"]);
         // Main-hand attack modifiers: a player's base damage is 1 and speed 4.
         let modifier_in = |kind: &str, mainhand: bool| {
             c["minecraft:attribute_modifiers"]
@@ -786,11 +787,46 @@ pub static NAMES: &[&str] = &[{}];",
              tool: {tool}, max_damage: {max_damage}, equip_slot: {equip_slot:?}, \
              attack_damage: {attack_damage:?}f32, attack_speed: {attack_speed:?}f32, \
              armor: {armor:?}f32, toughness: {toughness:?}f32, \
-             trim_material: {trim_material:?} }},"
+             trim_material: {trim_material:?}, compost: {compost} }},"
         )
         .unwrap();
     }
     out.push_str("];\n\n");
+}
+
+/// The chance in percent of a compostable item adding a layer: its `layers` provider
+/// (`minecraft:compostable/low`, ...) is a weighted list of 1 or 0 layers past the first
+/// layer, or a constant number of layers.
+fn compost_chance(data: &Path, layers: &Value) -> u8 {
+    let provider = match layers {
+        Value::String(name) => {
+            let path = name.strip_prefix("minecraft:").unwrap_or(name);
+            read_json(
+                &data
+                    .join("data/minecraft/context_int_provider")
+                    .join(format!("{path}.json")),
+            )
+        }
+        Value::Null => return 0,
+        inline => inline.clone(),
+    };
+    let weights = |p: &Value| -> Option<u8> {
+        let list = p["distribution"].as_array()?;
+        let total: u64 = list.iter().filter_map(|e| e["weight"].as_u64()).sum();
+        let adds: u64 = list
+            .iter()
+            .filter(|e| e["data"].as_u64().unwrap_or(0) > 0)
+            .filter_map(|e| e["weight"].as_u64())
+            .sum();
+        (total > 0).then(|| (adds * 100 / total) as u8)
+    };
+    match &provider {
+        Value::Number(n) if n.as_u64().unwrap_or(0) > 0 => 100,
+        Value::Object(_) => weights(&provider["default"])
+            .or_else(|| weights(&provider))
+            .unwrap_or(0),
+        _ => 0,
+    }
 }
 
 /// Collects every JSON file under `data/minecraft/<dir>` into one JSON object keyed by

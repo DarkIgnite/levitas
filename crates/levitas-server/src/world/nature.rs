@@ -48,6 +48,9 @@ impl World {
     }
 
     fn random_tick(&mut self, pos: BlockPos, state: u16) {
+        if self.farm_random_tick(pos, state) {
+            return;
+        }
         let above = offset(pos, Dir::Up);
         let block = blocks::name(state);
         if let Some(max) = crop_max_age(state) {
@@ -128,13 +131,13 @@ impl World {
     }
 
     /// Light at a block ignoring the time of day: the brighter of sky and block light.
-    fn raw_light(&self, pos: BlockPos) -> u8 {
+    pub(super) fn raw_light(&self, pos: BlockPos) -> u8 {
         self.light_at(pos).map_or(0, |(sky, block)| sky.max(block))
     }
 
     /// How fast a crop grows (the wiki's "growth points"): more for farmland around it,
     /// more still when moist, halved when crops of the same kind crowd it in rows.
-    fn growth_speed(&self, pos: BlockPos, crop: u16) -> f64 {
+    pub(super) fn growth_speed(&self, pos: BlockPos, crop: u16) -> f64 {
         let mut speed = 1.0;
         for dx in -1..=1 {
             for dz in -1..=1 {
@@ -386,6 +389,9 @@ impl World {
     }
 
     fn fertilize(&mut self, pos: BlockPos, state: u16) -> bool {
+        if let Some(done) = self.fertilize_farm(pos, state) {
+            return done;
+        }
         if let Some(max) = crop_max_age(state) {
             if age(state) >= max {
                 return false;
@@ -463,6 +469,7 @@ fn ticks_randomly(state: u16) -> bool {
                 | "minecraft:cactus"
         )
         || block_has_tag(state, "minecraft:saplings")
+        || super::farming::ticks_randomly(state)
 }
 
 #[cfg(test)]

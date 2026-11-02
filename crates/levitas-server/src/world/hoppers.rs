@@ -377,7 +377,7 @@ impl World {
         self.level_event(LEVEL_EVENT_SMOKE, pos, facing.face() as i32);
     }
 
-    fn level_event(&mut self, event: i32, pos: BlockPos, data: i32) {
+    pub(super) fn level_event(&mut self, event: i32, pos: BlockPos, data: i32) {
         self.broadcast(
             Writer::packet(clientbound::LEVEL_EVENT)
                 .i32(event)

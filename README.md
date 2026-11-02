@@ -11,7 +11,7 @@
   <img alt="Java Edition 26.3" src="https://img.shields.io/badge/Java%20Edition-26.3-f74c00">
   <img alt="Written in Rust" src="https://img.shields.io/badge/written%20in-Rust-b7410e?logo=rust">
   <img alt="License: GPL-3.0-only" src="https://img.shields.io/badge/license-GPL--3.0--only-blue">
-  <img alt="Progress: about 72%" src="https://img.shields.io/badge/progress-~72%25-orange">
+  <img alt="Progress: about 73%" src="https://img.shields.io/badge/progress-~73%25-orange">
 </p>
 
 # Levitas
@@ -26,7 +26,7 @@ needs, with a plugin API for survival-economy servers on top.
 > **Status: playable.** You can join a generated world and play survival: mine, craft,
 > farm, fight monsters, enchant, brew, build redstone, trade with villagers, and go to
 > the Nether and the End to fight the dragon. Raids, minecarts and plugins are still to
-> come. Overall progress: **about 72%** of the [roadmap](docs/ROADMAP.md).
+> come. Overall progress: **about 73%** of the [roadmap](docs/ROADMAP.md).
 >
 > **Now on 26.3.** The server speaks Minecraft 26.3 (protocol 777), saves worlds in the
 > 26.3 layout, upgrades 1.21.8 worlds when it opens them, and the blocks new in 26.3
@@ -48,7 +48,7 @@ what is missing in each one.
 | 3. Fluids, gravity and light | 80% | `████████░░` |
 | 4. Combat and basic entities | 88% | `████████▊░` |
 | 5. Mobs | 68% | `██████▊░░░` |
-| 6. Farming, nature and time | 62% | `██████▏░░░` |
+| 6. Farming, nature and time | 95% | `█████████▌` |
 | 7. Redstone | 68% | `██████▊░░░` |
 | 8. Progression (enchanting, brewing, ...) | 97% | `█████████▋` |
 | 9. Dimensions (Nether, End) | 60% | `██████░░░░` |
@@ -57,7 +57,7 @@ what is missing in each one.
 | 12. World generation | 60% | `██████░░░░` |
 | 13. Plugins and economy | 0% | `░░░░░░░░░░` |
 | Infrastructure (CI, parallel ticking, benchmarks) | 0% | `░░░░░░░░░░` |
-| **Overall** | **~72%** | `███████▏░░` |
+| **Overall** | **~73%** | `███████▎░░` |
 
 ## What works today
 

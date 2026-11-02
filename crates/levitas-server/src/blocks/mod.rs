@@ -293,8 +293,9 @@ pub fn can_survive(state: u16, pos: BlockPos, get: &mut impl FnMut(BlockPos) -> 
         }
     }
     if n == "minecraft:cocoa" {
+        // On jungle logs and wood, stripped or not.
         let facing = facing(state).unwrap_or(Dir::North);
-        return name(get(offset(pos, facing))) == "minecraft:jungle_log";
+        return block_has_tag(get(offset(pos, facing)), "minecraft:jungle_logs");
     }
     if n.ends_with("lantern") && prop(state, "hanging") == Some("true") {
         let above = get(offset(pos, Dir::Up));
@@ -669,6 +670,13 @@ pub fn updated(state: u16, pos: BlockPos, get: &mut impl FnMut(BlockPos) -> u16)
         return block::AIR;
     }
     let state = concrete_hardens(state, pos, get);
+    // A stem whose fruit is gone stands straight again.
+    if let Some(dir) = facing(state).filter(|_| name(state).starts_with("minecraft:attached_")) {
+        let fruit = get(offset(pos, dir));
+        if let Some(stem) = plants::detached_stem(state, plants::stem_holds_fruit(state, fruit)) {
+            return stem;
+        }
+    }
     if plants::is_leaves(state) {
         let distance = plants::leaf_distance(Dir::ALL.map(|d| get(offset(pos, d))));
         return with(state, "distance", &distance.to_string());

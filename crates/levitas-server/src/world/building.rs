@@ -52,7 +52,8 @@ impl World {
         if may_use
             && (self.use_sign(id, slot, pos, clicked)
                 || self.open_container(id, pos, clicked)
-                || self.interact(id, pos, clicked))
+                || self.interact(id, pos, clicked)
+                || self.use_farm_block(id, slot, pos, clicked))
         {
             return self.ack(id, sequence);
         }
@@ -365,6 +366,7 @@ impl World {
             if crate::blocks::fire::is_fire(state) {
                 self.fire_tick(tick.pos, state);
             }
+            self.composter_tick(tick.pos, state);
             if crate::blocks::redstone::is_component(state) {
                 self.redstone_tick(tick.pos, state);
             }
