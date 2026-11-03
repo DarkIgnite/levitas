@@ -329,6 +329,12 @@ their server.
   brown), so there is no layout to get wrong. Shyness is in `think` (`RABBIT_SHY`).
 
 
+- Skin layers (2026-11-03): the client's Client Information (configuration and play) is read in
+  `connection::client_settings`; `Event::Settings` stores `Player.skin_parts/main_hand` and `player_data` sends
+  them as entity data 15 (main hand, Humanoid Arm) and 16 (skin parts, byte) with every player spawn and on change.
+  In 26.3 these are the Avatar indices 15/16 (they were 17/18 in 1.21.8).
+
+
 ## 9. Testing pattern
 
 - Unit tests next to the rules (`blocks/*`, `levitas-world`, `levitas-pumpkin`).

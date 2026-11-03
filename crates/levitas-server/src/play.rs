@@ -31,6 +31,8 @@ pub async fn run(conn: Conn, profile: Profile, world: mpsc::Sender<Event>) -> io
         mut reader,
         out,
         compressed,
+        skin_parts,
+        main_hand,
     } = conn;
     let id = world::next_entity_id();
     let (tx, rx) = mpsc::channel(OUTGOING_CAPACITY);
@@ -50,6 +52,13 @@ pub async fn run(conn: Conn, profile: Profile, world: mpsc::Sender<Event>) -> io
         writer.abort();
         return Ok(());
     }
+    let _ = world
+        .send(Event::Settings {
+            id,
+            skin_parts,
+            main_hand,
+        })
+        .await;
     let result = read_loop(&mut reader, id, &current, compressed).await;
     let world = current.borrow().clone();
     let _ = world.send(Event::Leave { id }).await;
@@ -313,6 +322,14 @@ fn decode(id: i32, packet: &[u8]) -> io::Result<Option<Event>> {
                 forward: flags & INPUT_FORWARD != 0,
             }
         }
+        serverbound::CLIENT_INFORMATION => match crate::connection::client_settings(&mut r) {
+            Some((skin_parts, main_hand)) => Event::Settings {
+                id,
+                skin_parts,
+                main_hand,
+            },
+            None => return Ok(None),
+        },
         serverbound::CLIENT_COMMAND => match r.varint()? {
             CLIENT_COMMAND_RESPAWN => Event::Respawn { id },
             CLIENT_COMMAND_REQUEST_STATS => Event::RequestStats { id },

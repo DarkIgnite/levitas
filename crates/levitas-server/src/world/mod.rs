@@ -309,6 +309,12 @@ pub enum Event {
     Respawn {
         id: i32,
     },
+    /// The client's skin layers (bit mask) and main hand (0 left, 1 right).
+    Settings {
+        id: i32,
+        skin_parts: u8,
+        main_hand: u8,
+    },
     /// The statistics screen opened and asks for the numbers.
     RequestStats {
         id: i32,
@@ -405,6 +411,9 @@ struct Player {
     sprinting: bool,
     sneaking: bool,
     alive: bool,
+    /// Skin layers the client shows (bit mask) and its main hand (0 left, 1 right).
+    skin_parts: u8,
+    main_hand: u8,
     /// Hand and start tick of the food being eaten.
     eating: Option<(i32, u64)>,
     /// The block being dug in survival and the tick digging started.
@@ -504,6 +513,8 @@ impl Player {
             sprinting: false,
             sneaking: false,
             alive: true,
+            skin_parts: 0,
+            main_hand: 1,
             eating: None,
             digging: None,
             drag: Default::default(),
@@ -931,6 +942,21 @@ impl World {
             }
             Event::MoveVehicle { id, pos, yaw } => self.boat_moved(id, pos, yaw),
             Event::PaddleBoat { id, left, right } => self.paddle(id, left, right),
+            Event::Settings {
+                id,
+                skin_parts,
+                main_hand,
+            } => {
+                let Some(p) = self.players.get_mut(&id) else {
+                    return;
+                };
+                if (p.skin_parts, p.main_hand) != (skin_parts, main_hand) {
+                    p.skin_parts = skin_parts;
+                    p.main_hand = main_hand;
+                    let data = player_data(id, p);
+                    self.broadcast(data, Some(id));
+                }
+            }
             Event::RequestStats { id } => self.send_stats(id),
             Event::Respawn { id } => self.respawn(id),
             Event::Chat { id, message } => {
@@ -1949,8 +1975,22 @@ fn entity_event(id: i32, event: i8) -> Writer {
     Writer::packet(clientbound::ENTITY_EVENT).i32(id).i8(event)
 }
 
+/// Entity data of a player others see: the main hand (index 15) and the skin layers
+/// shown (index 16), both set by the client.
+fn player_data(id: i32, p: &Player) -> Writer {
+    Writer::packet(clientbound::SET_ENTITY_DATA)
+        .varint(id)
+        .u8(15)
+        .varint(42) // humanoid arm
+        .varint(i32::from(p.main_hand))
+        .u8(16)
+        .varint(0) // byte
+        .u8(p.skin_parts)
+        .u8(0xFF)
+}
+
 /// Packets that make a player's entity appear for others.
-fn spawn_player(id: i32, p: &Player) -> [Writer; 2] {
+fn spawn_player(id: i32, p: &Player) -> [Writer; 3] {
     [
         Writer::packet(clientbound::ADD_ENTITY)
             .varint(id)
@@ -1964,8 +2004,38 @@ fn spawn_player(id: i32, p: &Player) -> [Writer; 2] {
             .u8(angle(p.yaw))
             .u8(angle(p.yaw)) // head yaw
             .varint(0), // entity data
+        player_data(id, p),
         Writer::packet(clientbound::ROTATE_HEAD)
             .varint(id)
             .u8(angle(p.yaw)),
     ]
+}
+
+#[cfg(test)]
+mod skin_tests {
+    use super::*;
+
+    #[test]
+    fn a_players_skin_layers_come_with_the_entity() {
+        let (tx, _rx) = mpsc::channel(4);
+        let profile = Profile {
+            uuid: 9,
+            name: "Skinny".to_owned(),
+            properties: Vec::new(),
+        };
+        let mut p = Player::new(profile, tx, [0.0, 0.0, 0.0]);
+        p.skin_parts = 0x7F;
+        p.main_hand = 0;
+        let [_, data, _] = spawn_player(5, &p);
+        let frame = data.into_frame();
+        let mut r = levitas_protocol::Reader::new(&frame);
+        r.varint().unwrap(); // length
+        r.varint().unwrap(); // packet ID
+        assert_eq!(r.varint().unwrap(), 5);
+        assert_eq!((r.u8().unwrap(), r.varint().unwrap()), (15, 42));
+        assert_eq!(r.varint().unwrap(), 0);
+        assert_eq!((r.u8().unwrap(), r.varint().unwrap()), (16, 0));
+        assert_eq!(r.u8().unwrap(), 0x7F);
+        assert_eq!(r.u8().unwrap(), 0xFF);
+    }
 }

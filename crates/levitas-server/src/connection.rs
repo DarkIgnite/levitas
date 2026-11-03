@@ -36,6 +36,10 @@ pub struct Conn {
     pub out: Outgoing,
     /// Whether packets from the client come compressed.
     pub compressed: bool,
+    /// What the client said about itself: the skin layers it shows (bit mask) and its
+    /// main hand (0 left, 1 right).
+    pub skin_parts: u8,
+    pub main_hand: u8,
 }
 
 impl Conn {
@@ -49,6 +53,8 @@ impl Conn {
                 cipher: None,
             },
             compressed: false,
+            skin_parts: 0,
+            main_hand: 1,
         }
     }
 
@@ -265,7 +271,7 @@ async fn configure(conn: &mut Conn) -> io::Result<()> {
             .string(GAME_VERSION),
     )
     .await?;
-    wait_for(conn, serverbound::SELECT_KNOWN_PACKS).await?;
+    wait_in_configuration(conn, serverbound::SELECT_KNOWN_PACKS).await?;
 
     for registry in SYNCED_REGISTRIES {
         let mut packet = Writer::packet(clientbound::REGISTRY_DATA)
@@ -293,7 +299,35 @@ async fn configure(conn: &mut Conn) -> io::Result<()> {
 
     conn.send(Writer::packet(clientbound::FINISH_CONFIGURATION))
         .await?;
-    wait_for(conn, serverbound::FINISH_CONFIGURATION).await
+    wait_in_configuration(conn, serverbound::FINISH_CONFIGURATION).await
+}
+
+/// Like `wait_for`, but notes the client's settings when they go by.
+async fn wait_in_configuration(conn: &mut Conn, id: i32) -> io::Result<()> {
+    loop {
+        let packet = conn.read().await?;
+        let mut r = Reader::new(&packet);
+        let got = r.varint()?;
+        if got == configuration::serverbound::CLIENT_INFORMATION {
+            if let Some((skin, hand)) = client_settings(&mut r) {
+                conn.skin_parts = skin;
+                conn.main_hand = hand;
+            }
+        } else if got == id {
+            return Ok(());
+        }
+    }
+}
+
+/// The skin layers and main hand from a client information packet (after its ID).
+pub fn client_settings(r: &mut Reader) -> Option<(u8, u8)> {
+    r.string(16).ok()?; // locale
+    r.u8().ok()?; // view distance
+    r.varint().ok()?; // chat mode
+    r.bool().ok()?; // chat colours
+    let skin = r.u8().ok()?;
+    let hand = r.varint().ok()?;
+    Some((skin, u8::from(hand != 0)))
 }
 
 /// Online mode's handshake: the encryption request and response, then the session
@@ -406,16 +440,6 @@ pub async fn read_packet<R: AsyncRead + Unpin>(
     }
 }
 
-/// Reads packets until one with `id` arrives, ignoring others (client settings, brand).
-async fn wait_for(conn: &mut Conn, id: i32) -> io::Result<()> {
-    loop {
-        let packet = conn.read().await?;
-        if Reader::new(&packet).varint()? == id {
-            return Ok(());
-        }
-    }
-}
-
 /// Reads one length-prefixed packet from an uncompressed connection.
 pub async fn read_frame<R: AsyncRead + Unpin>(reader: &mut R) -> io::Result<Vec<u8>> {
     let mut len = 0usize;
@@ -454,6 +478,25 @@ pub fn invalid(message: String) -> io::Error {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn client_settings_give_the_skin_layers_and_the_main_hand() {
+        let packet = Writer::packet(0)
+            .string("en_us")
+            .u8(12) // view distance
+            .varint(0) // chat mode
+            .bool(true)
+            .u8(0x7F) // all layers
+            .varint(0) // left hand
+            .bool(false)
+            .bool(true)
+            .varint(0)
+            .into_frame();
+        let mut r = Reader::new(&packet);
+        r.varint().unwrap(); // length
+        r.varint().unwrap(); // packet ID
+        assert_eq!(client_settings(&mut r), Some((0x7F, 0)));
+    }
 
     #[test]
     fn compressed_packets_round_trip() {
