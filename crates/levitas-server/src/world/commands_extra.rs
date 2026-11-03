@@ -71,6 +71,42 @@ fn title_text(words: &[&str]) -> String {
 }
 
 impl World {
+    /// `/spawnpoint [targets] [x y z]`: where the players come back after dying, bed or
+    /// not (the overworld; a bed set later takes over).
+    fn spawnpoint_command(&mut self, id: i32, args: &[&str]) -> String {
+        let (who, coords) = match args {
+            [] => ("@s", &[][..]),
+            [who] if who.starts_with('@') || !looks_like_coordinate(who) => (*who, &[][..]),
+            [who, rest @ ..] if !looks_like_coordinate(who) => (*who, rest),
+            coords => ("@s", coords),
+        };
+        let at = if coords.is_empty() {
+            self.block_pos(id, &["~", "~", "~"])
+        } else {
+            self.block_pos(id, coords)
+        };
+        let Some(at) = at else {
+            return "Usage: /spawnpoint [targets] [x y z]".to_owned();
+        };
+        let ids = match self.targets(id, who) {
+            Ok(ids) => ids,
+            Err(e) => return e,
+        };
+        for &target in &ids {
+            if let Some(p) = self.players.get_mut(&target) {
+                p.respawn = Some(at);
+                p.respawn_forced = true;
+            }
+        }
+        format!(
+            "Set spawn point to {}, {}, {} for {}",
+            at.x,
+            at.y,
+            at.z,
+            self.names_of(&ids)
+        )
+    }
+
     /// `/title <targets> title|subtitle|actionbar <text>`, `clear`, `reset` and
     /// `times <fade in> <stay> <fade out>` (ticks).
     fn title_command(&mut self, id: i32, args: &[&str]) -> String {
@@ -294,6 +330,7 @@ impl World {
                 format!("Set the world spawn point to {}, {}, {}", at.x, at.y, at.z)
             }
             "title" => self.title_command(id, args),
+            "spawnpoint" => self.spawnpoint_command(id, args),
             "setblock" => self.setblock_command(id, args),
             "fill" => self.fill_command(id, args),
             "enchant" => self.enchant_command(id, args),
@@ -771,5 +808,49 @@ mod title_tests {
             title_text(&["{\"text\":\"Json\",\"color\":\"red\"}"]),
             "Json"
         );
+    }
+}
+
+#[cfg(test)]
+mod spawnpoint_tests {
+    use super::*;
+    use crate::connection::Profile;
+
+    #[test]
+    fn spawnpoint_sets_a_respawn_that_needs_no_bed() {
+        let dir = std::env::temp_dir().join(format!("levitas-sp-{}", std::process::id()));
+        let (mut w, _) = World::new(
+            dir,
+            NewWorld {
+                kind: WorldKind::Flat,
+                seed: Some(0),
+            },
+        );
+        let (tx, _rx) = tokio::sync::mpsc::channel(16);
+        let profile = Profile {
+            uuid: 3,
+            name: "Homer".to_owned(),
+            properties: Vec::new(),
+        };
+        w.players
+            .insert(1, Player::new(profile, tx, [0.5, -60.0, 0.5]));
+        let said = w.spawnpoint_command(1, &["Homer", "10", "-60", "12"]);
+        assert!(said.contains("10, -60, 12"), "{said}");
+        let at = w.respawn_point(1);
+        assert_eq!(at, [10.5, -60.0, 12.5]);
+        // It survives saving and loading.
+        let nbt = w.players[&1].to_nbt();
+        let mut p = Player::new(
+            Profile {
+                uuid: 3,
+                name: "Homer".to_owned(),
+                properties: Vec::new(),
+            },
+            tokio::sync::mpsc::channel(1).0,
+            [0.0; 3],
+        );
+        p.load_nbt(&nbt);
+        assert!(p.respawn_forced);
+        assert_eq!(p.respawn, Some(BlockPos::new(10, -60, 12)));
     }
 }

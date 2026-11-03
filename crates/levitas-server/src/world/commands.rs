@@ -441,6 +441,9 @@ pub(super) fn command_tree(op: bool) -> Writer {
     registry.extend_from_slice(b"minecraft:enchantment");
     let which = t.argument(who, "enchantment", command_argument::RESOURCE, registry);
     t.argument(which, "level", integer, at_least(1));
+    let spawnpoint = t.literal(root, "spawnpoint", true);
+    let who = player(&mut t, spawnpoint);
+    pos(&mut t, who, "pos");
     let title = t.literal(root, "title", false);
     let who = player(&mut t, title);
     for name in ["title", "subtitle", "actionbar"] {

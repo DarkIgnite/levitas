@@ -251,6 +251,7 @@ impl World {
             let p = self.players.get_mut(&id).expect("player exists");
             let new_spawn = p.respawn != Some(head);
             p.respawn = Some(head);
+            p.respawn_forced = false;
             if new_spawn {
                 self.send(id, action_bar("Respawn point set"));
             }
@@ -415,6 +416,13 @@ impl World {
         let Some(bed) = self.players.get(&id).and_then(|p| p.respawn) else {
             return self.spawn;
         };
+        if self.players[&id].respawn_forced {
+            return [
+                f64::from(bed.x) + 0.5,
+                f64::from(bed.y),
+                f64::from(bed.z) + 0.5,
+            ];
+        }
         if blocks::is_bed(self.block(bed)) {
             return [
                 f64::from(bed.x) + 0.5,

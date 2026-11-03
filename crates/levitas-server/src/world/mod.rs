@@ -432,6 +432,8 @@ struct Player {
     sleep_ticks: u32,
     /// The bed the player respawns at.
     respawn: Option<BlockPos>,
+    /// Whether `respawn` was set by /spawnpoint (and needs no bed).
+    respawn_forced: bool,
     /// Tick the attack charge last started over (after an attack or switching items).
     attack_reset: u64,
     /// Hand and start tick of a bow being drawn.
@@ -525,6 +527,7 @@ impl Player {
             sleeping: None,
             sleep_ticks: 0,
             respawn: None,
+            respawn_forced: false,
             attack_reset: 0,
             drawing: None,
             xp_level: 0,

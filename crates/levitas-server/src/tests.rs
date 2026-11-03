@@ -1647,6 +1647,7 @@ async fn joining_players_get_the_command_tree() {
             "seed",
             "setblock",
             "setworldspawn",
+            "spawnpoint",
             "summon",
             "teleport",
             "tell",

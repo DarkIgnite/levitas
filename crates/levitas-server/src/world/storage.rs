@@ -475,7 +475,7 @@ impl Player {
                     .with("pos", vec![bed.x, bed.y, bed.z])
                     .with("dimension", "minecraft:overworld")
                     .with("angle", 0.0f32)
-                    .with("forced", false),
+                    .with("forced", self.respawn_forced),
             ),
             None => nbt,
         };
@@ -523,6 +523,9 @@ impl Player {
         }
         self.air = nbt.int("Air").unwrap_or(300).clamp(0, 300) as i32;
         self.fire_ticks = nbt.int("Fire").unwrap_or(0).max(0) as i32;
+        self.respawn_forced = nbt
+            .compound("respawn")
+            .is_some_and(|r| r.int("forced").unwrap_or(0) != 0);
         self.respawn = nbt
             .compound("respawn")
             .filter(|r| {
