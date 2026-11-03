@@ -91,9 +91,25 @@ pub enum MobKind {
     WanderingTrader,
     TraderLlama,
     ZombieVillager,
+    Husk,
+    Stray,
+    CaveSpider,
+    Slime,
 }
 
 impl MobKind {
+    /// The mob whose behaviour it shares: husks act as zombies, strays as skeletons, cave
+    /// spiders as spiders and slimes as magma cubes (with their own differences).
+    pub fn family(self) -> MobKind {
+        match self {
+            MobKind::Husk => MobKind::Zombie,
+            MobKind::Stray => MobKind::Skeleton,
+            MobKind::CaveSpider => MobKind::Spider,
+            MobKind::Slime => MobKind::MagmaCube,
+            other => other,
+        }
+    }
+
     pub fn from_name(name: &str) -> Option<MobKind> {
         match name {
             "minecraft:cow" => Some(MobKind::Cow),
@@ -119,6 +135,10 @@ impl MobKind {
             "minecraft:wandering_trader" => Some(MobKind::WanderingTrader),
             "minecraft:trader_llama" => Some(MobKind::TraderLlama),
             "minecraft:zombie_villager" => Some(MobKind::ZombieVillager),
+            "minecraft:husk" => Some(MobKind::Husk),
+            "minecraft:stray" => Some(MobKind::Stray),
+            "minecraft:cave_spider" => Some(MobKind::CaveSpider),
+            "minecraft:slime" => Some(MobKind::Slime),
             _ => None,
         }
     }
@@ -148,6 +168,10 @@ impl MobKind {
             MobKind::WanderingTrader => "minecraft:wandering_trader",
             MobKind::TraderLlama => "minecraft:trader_llama",
             MobKind::ZombieVillager => "minecraft:zombie_villager",
+            MobKind::Husk => "minecraft:husk",
+            MobKind::Stray => "minecraft:stray",
+            MobKind::CaveSpider => "minecraft:cave_spider",
+            MobKind::Slime => "minecraft:slime",
         }
     }
 
@@ -177,6 +201,10 @@ impl MobKind {
             MobKind::WanderingTrader => "Wandering Trader",
             MobKind::TraderLlama => "Trader Llama",
             MobKind::ZombieVillager => "Zombie Villager",
+            MobKind::Husk => "Husk",
+            MobKind::Stray => "Stray",
+            MobKind::CaveSpider => "Cave Spider",
+            MobKind::Slime => "Slime",
         }
     }
 
@@ -198,6 +226,10 @@ impl MobKind {
                 | MobKind::Witch
                 | MobKind::Evoker
                 | MobKind::ZombieVillager
+                | MobKind::Husk
+                | MobKind::Stray
+                | MobKind::CaveSpider
+                | MobKind::Slime
         )
     }
 
@@ -222,6 +254,8 @@ impl MobKind {
                 | MobKind::Skeleton
                 | MobKind::ZombifiedPiglin
                 | MobKind::ZombieVillager
+                | MobKind::Husk
+                | MobKind::Stray
         )
     }
 
@@ -241,8 +275,8 @@ impl MobKind {
     /// Melee damage on Normal difficulty.
     pub fn attack_damage(self) -> f32 {
         match self {
-            MobKind::Zombie | MobKind::ZombieVillager => 3.0,
-            MobKind::Spider => 2.0,
+            MobKind::Zombie | MobKind::ZombieVillager | MobKind::Husk => 3.0,
+            MobKind::Spider | MobKind::CaveSpider => 2.0,
             // With its golden sword.
             MobKind::ZombifiedPiglin => 8.0,
             MobKind::Blaze => 6.0,
@@ -257,7 +291,10 @@ impl MobKind {
     /// How far away a monster notices players.
     pub fn follow_range(self) -> f64 {
         match self {
-            MobKind::Zombie | MobKind::ZombifiedPiglin | MobKind::ZombieVillager => 35.0,
+            MobKind::Zombie
+            | MobKind::ZombifiedPiglin
+            | MobKind::ZombieVillager
+            | MobKind::Husk => 35.0,
             MobKind::Ghast | MobKind::Enderman => 64.0,
             MobKind::Blaze => 48.0,
             MobKind::Pillager
@@ -270,9 +307,10 @@ impl MobKind {
     }
 
     pub fn burns_in_daylight(self) -> bool {
+        // Husks are the zombies the sun leaves alone.
         matches!(
             self,
-            MobKind::Zombie | MobKind::Skeleton | MobKind::ZombieVillager
+            MobKind::Zombie | MobKind::Skeleton | MobKind::Stray | MobKind::ZombieVillager
         )
     }
 
@@ -301,6 +339,10 @@ impl MobKind {
             MobKind::WanderingTrader => entity_type::WANDERING_TRADER,
             MobKind::TraderLlama => entity_type::TRADER_LLAMA,
             MobKind::ZombieVillager => entity_type::ZOMBIE_VILLAGER,
+            MobKind::Husk => entity_type::HUSK,
+            MobKind::Stray => entity_type::STRAY,
+            MobKind::CaveSpider => entity_type::CAVE_SPIDER,
+            MobKind::Slime => entity_type::SLIME,
         }
     }
 
@@ -310,10 +352,12 @@ impl MobKind {
             MobKind::Sheep => 8.0,
             MobKind::Chicken => 4.0,
             MobKind::Zombie | MobKind::Creeper | MobKind::Skeleton => 20.0,
+            MobKind::Husk | MobKind::Stray => 20.0,
             MobKind::ZombifiedPiglin => 20.0,
             MobKind::Spider => 16.0,
-            // A magma cube's health is its size squared; this is the smallest's.
-            MobKind::MagmaCube => 1.0,
+            MobKind::CaveSpider => 12.0,
+            // A slime's health is its size squared; this is the smallest's.
+            MobKind::MagmaCube | MobKind::Slime => 1.0,
             MobKind::Ghast => 10.0,
             MobKind::Blaze => 20.0,
             MobKind::Enderman => 40.0,
@@ -335,12 +379,14 @@ impl MobKind {
             MobKind::Pig => (0.9, 0.9),
             MobKind::Sheep => (0.9, 1.3),
             MobKind::Chicken => (0.4, 0.7),
-            MobKind::Zombie => (0.6, 1.95),
+            MobKind::Zombie | MobKind::Husk => (0.6, 1.95),
             MobKind::Spider => (1.4, 0.9),
+            MobKind::CaveSpider => (0.7, 0.5),
+            MobKind::Stray => (0.6, 1.99),
             MobKind::Creeper => (0.6, 1.7),
             MobKind::Skeleton => (0.6, 1.99),
             MobKind::ZombifiedPiglin => (0.6, 1.95),
-            MobKind::MagmaCube => (0.52, 0.52),
+            MobKind::MagmaCube | MobKind::Slime => (0.52, 0.52),
             MobKind::Ghast => (4.0, 4.0),
             MobKind::Blaze => (0.6, 1.8),
             MobKind::Enderman => (0.6, 2.9),
@@ -359,12 +405,15 @@ impl MobKind {
     fn speed(self) -> f64 {
         match self {
             MobKind::Chicken => 0.08,
-            MobKind::Zombie => 0.12,
-            MobKind::Spider => 0.15,
+            MobKind::Zombie | MobKind::Husk => 0.12,
+            MobKind::Spider | MobKind::CaveSpider => 0.15,
             MobKind::Creeper => 0.11,
-            MobKind::Skeleton | MobKind::ZombifiedPiglin | MobKind::ZombieVillager => 0.12,
-            // Magma cubes only move by hopping.
-            MobKind::MagmaCube => 0.0,
+            MobKind::Skeleton
+            | MobKind::Stray
+            | MobKind::ZombifiedPiglin
+            | MobKind::ZombieVillager => 0.12,
+            // Slimes only move by hopping.
+            MobKind::MagmaCube | MobKind::Slime => 0.0,
             MobKind::Ghast => 0.08,
             MobKind::Blaze => 0.06,
             MobKind::Enderman => 0.15,
@@ -403,6 +452,10 @@ impl MobKind {
             MobKind::WanderingTrader => "wandering_trader",
             MobKind::TraderLlama => "llama",
             MobKind::ZombieVillager => "zombie_villager",
+            MobKind::Husk => "husk",
+            MobKind::Stray => "stray",
+            MobKind::CaveSpider => "cave_spider",
+            MobKind::Slime => "slime",
         }
     }
 }
@@ -495,12 +548,12 @@ pub struct Mob {
 
 impl Mob {
     pub fn new(kind: MobKind, pos: [f64; 3], rng: &mut Rng) -> Mob {
-        let slime_size: u8 = if kind == MobKind::MagmaCube {
+        let slime_size: u8 = if kind.family() == MobKind::MagmaCube {
             1 << rng.below(3)
         } else {
             1
         };
-        let health = if kind == MobKind::MagmaCube {
+        let health = if kind.family() == MobKind::MagmaCube {
             f32::from(slime_size * slime_size)
         } else {
             kind.max_health()
@@ -585,7 +638,7 @@ impl Mob {
     /// Hitbox width and height: babies are half size, magma cubes grow with theirs.
     pub fn size(&self) -> (f64, f64) {
         let (width, height) = self.kind.size();
-        if self.kind == MobKind::MagmaCube {
+        if self.kind.family() == MobKind::MagmaCube {
             let s = f64::from(self.slime_size);
             return (width * s, height * s);
         }
@@ -599,6 +652,10 @@ impl Mob {
     /// Melee damage: a magma cube's grows with its size, modified by strength and weakness.
     pub fn attack_damage(&self) -> f32 {
         let base = match (self.kind, self.slime_size) {
+            // A slime's blow is its size, and the smallest does none.
+            (MobKind::Slime, 2) => 2.0,
+            (MobKind::Slime, 4) => 4.0,
+            (MobKind::Slime, _) => 0.0,
             (MobKind::MagmaCube, 1) => 3.0,
             (MobKind::MagmaCube, 2) => 4.0,
             (MobKind::MagmaCube, _) => 6.0,
@@ -665,7 +722,7 @@ impl Mob {
         if self.age < 0 {
             packets.push(super::breeding::baby_data(id, true));
         }
-        if self.kind == MobKind::MagmaCube {
+        if self.kind.family() == MobKind::MagmaCube {
             packets.push(
                 Writer::packet(clientbound::SET_ENTITY_DATA)
                     .varint(id)
@@ -681,8 +738,8 @@ impl Mob {
                 packets.push(crate::inventory::write_stack(packet, Stack::new(sword, 1)));
             }
         }
-        if self.kind == MobKind::Skeleton {
-            // Skeletons hold a bow.
+        if self.kind.family() == MobKind::Skeleton {
+            // Skeletons and strays hold a bow.
             if let Some(bow) = ItemInfo::id_of("minecraft:bow") {
                 let packet = Writer::packet(clientbound::SET_EQUIPMENT).varint(id).u8(0); // main hand, the last entry
                 packets.push(crate::inventory::write_stack(packet, Stack::new(bow, 1)));
@@ -741,6 +798,8 @@ impl Mob {
             on_fire: false,
             sheep_color: (self.kind == MobKind::Sheep).then(|| COLORS[usize::from(self.color)]),
             sheared: self.sheared,
+            cube_size: (self.kind.family() == MobKind::MagmaCube)
+                .then_some(i32::from(self.slime_size)),
             killed_by_player: self.killed_by_player,
         }
     }
@@ -776,7 +835,9 @@ impl Mob {
                 nbt.insert("Sheared", self.sheared);
             }
             MobKind::Chicken => nbt.insert("EggLayTime", self.egg_ticks as i32),
-            MobKind::MagmaCube => nbt.insert("Size", i32::from(self.slime_size) - 1),
+            MobKind::MagmaCube | MobKind::Slime => {
+                nbt.insert("Size", i32::from(self.slime_size) - 1);
+            }
             MobKind::ZombifiedPiglin => nbt.insert("AngerTime", self.anger as i32),
             _ => {}
         }
@@ -831,7 +892,10 @@ impl Mob {
         if let Some(Tag::Float(yaw)) = nbt.list("Rotation").and_then(|r| r.first()) {
             mob.yaw = *yaw;
         }
-        if let Some(size) = nbt.int("Size").filter(|_| kind == MobKind::MagmaCube) {
+        if let Some(size) = nbt
+            .int("Size")
+            .filter(|_| kind.family() == MobKind::MagmaCube)
+        {
             mob.slime_size = (size.clamp(0, 3) as u8 + 1).next_power_of_two().min(4);
         }
         mob.anger = nbt.int("AngerTime").unwrap_or(0).max(0) as u32;
@@ -913,7 +977,7 @@ struct SpawnList {
 }
 
 /// Mobs `/summon` knows.
-pub const SUMMONABLE: [&str; 23] = [
+pub const SUMMONABLE: [&str; 27] = [
     "cow",
     "pig",
     "sheep",
@@ -937,6 +1001,10 @@ pub const SUMMONABLE: [&str; 23] = [
     "wandering_trader",
     "trader_llama",
     "zombie_villager",
+    "husk",
+    "stray",
+    "cave_spider",
+    "slime",
 ];
 
 fn spawners(list: &Value) -> Vec<Spawner> {
@@ -1183,7 +1251,7 @@ impl World {
             if mob.kind.is_monster() && self.hunt(id, &mut mob) {
                 continue; // exploded
             }
-            if mob.kind == MobKind::MagmaCube {
+            if mob.kind.family() == MobKind::MagmaCube {
                 self.hop(&mut mob);
             }
             if mob.kind.flies() {
@@ -1224,7 +1292,7 @@ impl World {
                 }
                 levitas_registry::mob_effect::POISON
                     if !is_undead
-                        && mob.kind != MobKind::Spider
+                        && mob.kind.family() != MobKind::Spider
                         && super::effects::pulses(effect.duration, 25, effect.amplifier) =>
                 {
                     poison_damage += 1.0;
@@ -1456,7 +1524,7 @@ impl World {
             mob.vel[0] = dx / distance * speed;
             mob.vel[2] = dz / distance * speed;
             mob.yaw = yaw_towards(mob.pos, [target[0], mob.pos[1], target[1]]);
-            if mob.blocked && mob.kind == MobKind::Spider {
+            if mob.blocked && mob.kind.family() == MobKind::Spider {
                 mob.vel[1] = 0.2; // climbing
             } else if mob.blocked && (mob.on_ground || in_water) {
                 mob.vel[1] = JUMP;
@@ -1514,7 +1582,7 @@ impl World {
                 && fallen > 3.0
                 && !matches!(
                     mob.kind,
-                    MobKind::Chicken | MobKind::MagmaCube | MobKind::IronGolem
+                    MobKind::Chicken | MobKind::MagmaCube | MobKind::Slime | MobKind::IronGolem
                 )
             {
                 mob.health -= (fallen - 3.0).ceil() as f32;
@@ -1932,7 +2000,7 @@ impl World {
         mob.effects.clear();
         self.send_to_viewers(mob, entity_event(id, ENTITY_EVENT_MOB_DEATH));
         // A big magma cube breaks into two to four smaller ones.
-        if mob.kind == MobKind::MagmaCube && mob.slime_size > 1 {
+        if mob.kind.family() == MobKind::MagmaCube && mob.slime_size > 1 {
             let size = mob.slime_size / 2;
             for _ in 0..2 + self.rng.below(3) {
                 let offset = |rng: &mut Rng| (rng.f64() - 0.5) * f64::from(size) * 0.5;
@@ -1941,7 +2009,7 @@ impl World {
                     mob.pos[1] + 0.5,
                     mob.pos[2] + offset(&mut self.rng),
                 ];
-                let mut small = Mob::new(MobKind::MagmaCube, at, &mut self.rng);
+                let mut small = Mob::new(mob.kind, at, &mut self.rng);
                 small.slime_size = size;
                 small.health = f32::from(size * size);
                 self.mobs.insert(next_entity_id(), small);
@@ -2700,6 +2768,107 @@ mod path_tests {
         assert_eq!(world.mobs[&hit].hunting, Some(player));
         assert_eq!(world.mobs[&near].hunting, Some(player));
         assert_eq!(world.mobs[&far].hunting, None);
+    }
+
+    #[test]
+    fn husks_strays_cave_spiders_and_slimes_are_their_own_mobs() {
+        use crate::rules::Difficulty;
+        for (name, kind) in [
+            ("minecraft:husk", MobKind::Husk),
+            ("minecraft:stray", MobKind::Stray),
+            ("minecraft:cave_spider", MobKind::CaveSpider),
+            ("minecraft:slime", MobKind::Slime),
+        ] {
+            assert_eq!(MobKind::from_name(name), Some(kind));
+            assert_eq!(kind.name(), name);
+            assert!(kind.is_monster());
+            assert_eq!(
+                entity_type::NAMES[kind.entity_type() as usize],
+                name,
+                "{name}"
+            );
+        }
+        // Husks are zombies the sun leaves alone; strays burn like skeletons.
+        assert!(MobKind::Zombie.burns_in_daylight() && !MobKind::Husk.burns_in_daylight());
+        assert!(MobKind::Stray.burns_in_daylight());
+        assert!(MobKind::Husk.is_undead() && MobKind::Stray.is_undead());
+        assert!(!MobKind::CaveSpider.is_undead());
+        assert_eq!(MobKind::CaveSpider.max_health(), 12.0);
+        assert_eq!(MobKind::CaveSpider.size(), (0.7, 0.5));
+        assert_eq!(MobKind::Husk.attack_damage(), 3.0);
+        // The hit that comes with the damage.
+        let effect = |k, d| super::super::monsters::melee_effect(k, d).map(|e| (e.id, e.duration));
+        use levitas_registry::mob_effect::{HUNGER, POISON};
+        assert_eq!(
+            effect(MobKind::Husk, Difficulty::Normal),
+            Some((HUNGER, 280))
+        );
+        assert_eq!(effect(MobKind::Husk, Difficulty::Hard), Some((HUNGER, 420)));
+        assert_eq!(effect(MobKind::CaveSpider, Difficulty::Easy), None);
+        assert_eq!(
+            effect(MobKind::CaveSpider, Difficulty::Normal),
+            Some((POISON, 140))
+        );
+        assert_eq!(
+            effect(MobKind::CaveSpider, Difficulty::Hard),
+            Some((POISON, 300))
+        );
+        assert_eq!(effect(MobKind::Zombie, Difficulty::Hard), None);
+    }
+
+    #[test]
+    fn slimes_grow_hit_and_split_by_size() {
+        let mut world = flat_world();
+        let mut slime = Mob::new(MobKind::Slime, [0.5, -60.0, 0.5], &mut world.rng);
+        // Sizes are 1, 2 and 4; a slime's health is its size squared, its blow its size,
+        // and the smallest does none.
+        for (size, health, damage) in [(1, 1.0, 0.0), (2, 4.0, 2.0), (4, 16.0, 4.0)] {
+            slime.slime_size = size;
+            slime.health = health;
+            assert_eq!(slime.attack_damage(), damage, "size {size}");
+            let side = 0.52 * f64::from(size);
+            assert_eq!(slime.size(), (side, side));
+        }
+        // Saved with the size as vanilla counts it (0, 1 or 3), and read back.
+        slime.slime_size = 4;
+        let nbt = slime.to_nbt();
+        assert_eq!(nbt.int("Size"), Some(3));
+        let loaded = Mob::from_nbt(&nbt, &mut world.rng).unwrap();
+        assert_eq!((loaded.kind, loaded.slime_size), (MobKind::Slime, 4));
+        // A big one splits into smaller slimes, not magma cubes.
+        slime.health = 16.0;
+        world.kill_mob(next_entity_id(), &mut slime);
+        let small: Vec<&Mob> = world.mobs.values().collect();
+        assert!((2..=4).contains(&small.len()), "{}", small.len());
+        assert!(small
+            .iter()
+            .all(|m| m.kind == MobKind::Slime && m.slime_size == 2 && m.health == 4.0));
+    }
+
+    #[test]
+    fn deserts_and_snowy_lands_hold_husks_and_strays() {
+        let spawns = BiomeSpawns::load();
+        let mut rng = Rng::from_time();
+        let mut seen = |biome: &str| {
+            let mut kinds = std::collections::HashSet::new();
+            for _ in 0..2000 {
+                if let Some((kind, _)) = spawns.pick_monster(biome, &mut rng) {
+                    kinds.insert(kind);
+                }
+            }
+            kinds
+        };
+        let desert = seen("minecraft:desert");
+        assert!(desert.contains(&MobKind::Husk), "{desert:?}");
+        let snowy = seen("minecraft:snowy_plains");
+        assert!(snowy.contains(&MobKind::Stray), "{snowy:?}");
+        let swamp = seen("minecraft:swamp");
+        assert!(swamp.contains(&MobKind::Slime), "{swamp:?}");
+        // Husks and strays only where the sky is open.
+        let world = flat_world();
+        let at = BlockPos::new(0, -60, 0);
+        assert!(world.sky_allows(MobKind::Husk, at));
+        assert!(world.sky_allows(MobKind::Zombie, at));
     }
 
     #[test]

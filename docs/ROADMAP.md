@@ -259,6 +259,15 @@ Known gaps are listed under each phase instead of being hidden.
       by food, dyeing, biome variants (all are temperate), and every other animal.
 - [ ] Hostile mobs: zombie variants, skeleton variants, creeper, spider, enderman,
       slime, witch, phantom, drowned, pillager, silverfish, ...
+      Variants share their base mob's behaviour (`MobKind::family`): husks (zombies
+      the sun leaves alone, whose hits make players hungry for 7, 14 or 21 seconds on
+      Easy, Normal and Hard; desert), strays (skeletons whose arrows slow for 30
+      seconds; snowy biomes), cave spiders (12 health, small, poison 7 or 15 seconds on
+      Normal and Hard; from mineshaft spawners) and slimes (three sizes by size squared
+      health, size as damage and none for the smallest, split when they die, hop;
+      swamps). Husks and strays spawn only under open sky. Missing: slime chunks
+      underground (and moon phases in swamps), drowned, jockeys, baby husks,
+      reinforcements, converting under water or in powder snow.
       Done: zombies (burn in sunlight), spiders (climb walls, neutral in daylight),
       creepers (hiss and explode). They chase the nearest survival player straight on
       (no pathfinding yet), hit with knockback, and keep players from sleeping nearby.

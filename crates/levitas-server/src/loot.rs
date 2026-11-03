@@ -43,6 +43,8 @@ pub struct EntityProps {
     /// A sheep's wool colour (`white`, `black`, ...) and whether it was sheared.
     pub sheep_color: Option<&'static str>,
     pub sheared: bool,
+    /// A slime's or magma cube's size as vanilla counts it: 1, 2 or 4.
+    pub cube_size: Option<i32>,
     pub killed_by_player: bool,
 }
 
@@ -154,7 +156,7 @@ impl LootTables {
             if !conditions(pool, ctx) {
                 continue;
             }
-            let rolls = number(&pool["rolls"], ctx.rng).floor() as i32;
+            let rolls = int_number(&pool["rolls"], ctx.rng);
             for _ in 0..rolls {
                 let mut candidates = Vec::new();
                 for entry in array(&pool["entries"]) {
@@ -229,7 +231,7 @@ impl LootTables {
                 }
             }
             "minecraft:enchant_with_levels" => {
-                let level = number(&function["levels"], ctx.rng).max(0.0) as u32;
+                let level = int_number(&function["levels"], ctx.rng).max(0) as u32;
                 let options = &function["options"];
                 for (id, l) in enchanting::select_for_loot(ctx.rng, stack.item, level, options) {
                     self.enchant(stack, id, l);
@@ -582,12 +584,29 @@ fn entity_matches(predicate: &Value, entity: &EntityProps) -> bool {
                 name == "minecraft:sheep/color" && value.as_str() == entity.sheep_color
             })
         }),
-        "type_specific" => {
-            wanted["type"] == "minecraft:sheep"
-                && wanted
-                    .get("sheared")
-                    .is_none_or(|s| s.as_bool() == Some(entity.sheared))
-        }
+        "type_specific" => match wanted["type"].as_str() {
+            Some("minecraft:sheep") => wanted
+                .get("sheared")
+                .is_none_or(|s| s.as_bool() == Some(entity.sheared)),
+            Some("minecraft:cube_mob") => entity.cube_size.is_some_and(|size| {
+                let size = i64::from(size);
+                match &wanted["size"] {
+                    Value::Number(n) => n.as_i64() == Some(size),
+                    Value::Object(range) => {
+                        range
+                            .get("min")
+                            .and_then(Value::as_i64)
+                            .is_none_or(|m| size >= m)
+                            && range
+                                .get("max")
+                                .and_then(Value::as_i64)
+                                .is_none_or(|m| size <= m)
+                    }
+                    _ => false,
+                }
+            }),
+            _ => false,
+        },
         _ => false,
     })
 }
@@ -621,7 +640,7 @@ fn apply(function: &Value, count: i32, ctx: &mut LootContext) -> i32 {
     let rng = &mut *ctx.rng;
     match function["function"].as_str().unwrap_or_default() {
         "minecraft:set_count" => {
-            let n = number(&function["count"], rng).floor() as i32;
+            let n = int_number(&function["count"], rng);
             if function["add"].as_bool() == Some(true) {
                 count + n
             } else {
@@ -663,6 +682,22 @@ fn apply(function: &Value, count: i32, ctx: &mut LootContext) -> i32 {
         }
         _ => count,
     }
+}
+
+/// A number provider read as a whole number, as vanilla does for counts, rolls and
+/// levels: a uniform range includes both of its ends (`0` to `2` is 0, 1 or 2), where
+/// read as a fraction it is spread evenly between them.
+fn int_number(value: &Value, rng: &mut Rng) -> i32 {
+    if value["type"].as_str() == Some("minecraft:uniform") {
+        let min = number(&value["min"], rng).floor() as i32;
+        let max = number(&value["max"], rng).floor() as i32;
+        return if max <= min {
+            min
+        } else {
+            min + rng.below((max - min + 1) as u32) as i32
+        };
+    }
+    number(value, rng).floor() as i32
 }
 
 /// Evaluates a number provider: a plain number, or a constant/uniform/binomial object.
@@ -860,6 +895,44 @@ mod tests {
         assert!(!drops
             .iter()
             .any(|(i, _)| *i == item("minecraft:black_wool")));
+    }
+
+    #[test]
+    fn slimes_and_magma_cubes_drop_by_size() {
+        let mut rng = Rng::new(7);
+        let mut drops = |entity: &str, size: i32, item: i32| -> i32 {
+            (0..400)
+                .flat_map(|_| {
+                    tables().entity_drops(
+                        entity,
+                        &mut LootContext {
+                            state: block::AIR,
+                            tool: 0,
+                            rng: &mut rng,
+                            enchants: Default::default(),
+                            entity: EntityProps {
+                                cube_size: Some(size),
+                                killed_by_player: true,
+                                ..Default::default()
+                            },
+                        },
+                    )
+                })
+                .filter(|&(i, _)| i == item)
+                .map(|(_, n)| n)
+                .sum()
+        };
+        // Only the smallest slimes drop slimeballs, up to two each.
+        let slimeball = item("minecraft:slime_ball");
+        let small = drops("minecraft:slime", 1, slimeball);
+        assert!((300..=500).contains(&small), "{small}");
+        assert_eq!(drops("minecraft:slime", 2, slimeball), 0);
+        assert_eq!(drops("minecraft:slime", 4, slimeball), 0);
+        // Magma cubes drop cream from size 2 up.
+        let cream = item("minecraft:magma_cream");
+        assert_eq!(drops("minecraft:magma_cube", 1, cream), 0);
+        assert!(drops("minecraft:magma_cube", 2, cream) > 0);
+        assert!(drops("minecraft:magma_cube", 4, cream) > 0);
     }
 
     fn tables() -> &'static LootTables {

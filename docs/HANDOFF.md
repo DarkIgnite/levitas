@@ -218,6 +218,9 @@ Phase 0–1 and most of Phase 2, plus parts of 3 and 12 (details in ROADMAP.md):
   softens their hits.
 - **Bows and experience**: players draw bows and shoot arrows; experience orbs from
   mobs and ores raise levels (saved, dropped on death).
+- **Loot numbers**: a `uniform` count in a loot table is a whole number with both ends
+  included (`0` to `2` gives 0, 1 or 2), as vanilla counts; until 2026-11-03 it was read
+  as a fraction and rounded down, which halved drops (`loot.rs`: `int_number`).
 - **Animals**: cows, pigs, sheep and chickens spawn with new chunks, wander, panic,
   can be killed for vanilla loot, sheared, milked, and are saved; `/summon`.
 - **Day/night and weather**: time sync every second, rain/thunder cycle with fading,

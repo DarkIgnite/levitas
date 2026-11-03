@@ -119,7 +119,7 @@ impl World {
             mob.hunting = None;
         }
         // Spiders only turn hostile in the dark (unless something provoked them).
-        let hostile = mob.kind != MobKind::Spider || self.light_level(head) <= 7;
+        let hostile = mob.kind.family() != MobKind::Spider || self.light_level(head) <= 7;
         if mob.hunting.is_none() && hostile {
             mob.hunting = self
                 .players
@@ -137,7 +137,7 @@ impl World {
             let dy = target[1] - mob.pos[1];
             (target, distance, dy)
         } else if mob.kind.is_raider()
-            || mob.kind == MobKind::Zombie
+            || mob.kind.family() == MobKind::Zombie
             || mob.kind == MobKind::ZombieVillager
         {
             let prey_valid = mob
@@ -176,10 +176,10 @@ impl World {
             return false;
         };
         mob.head_yaw = yaw_towards(mob.pos, target);
-        if mob.kind == MobKind::Spider {
+        if mob.kind.family() == MobKind::Spider {
             // Spiders climb over whatever is in the way.
             mob.target = Some(([target[0], target[2]], 20));
-        } else if mob.kind == MobKind::MagmaCube || mob.kind.flies() {
+        } else if mob.kind.family() == MobKind::MagmaCube || mob.kind.flies() {
             // Magma cubes hop towards their prey, ghasts and blazes fly.
         } else {
             let goal = BlockPos::new(
@@ -211,7 +211,7 @@ impl World {
             return false;
         }
 
-        if mob.kind == MobKind::Skeleton {
+        if mob.kind.family() == MobKind::Skeleton {
             self.shoot_at(id, mob, target, distance);
             return false;
         }
@@ -274,7 +274,8 @@ impl World {
                         let will_kill = target_mob.health - damage <= 0.0;
                         if will_kill
                             && target_mob.kind == MobKind::Villager
-                            && (mob.kind == MobKind::Zombie || mob.kind == MobKind::ZombieVillager)
+                            && (mob.kind.family() == MobKind::Zombie
+                                || mob.kind == MobKind::ZombieVillager)
                         {
                             let pos = target_mob.pos;
                             let villager = target_mob.villager.take();
@@ -306,10 +307,19 @@ impl World {
                 if hurt {
                     let yaw = f64::from(yaw_towards(mob.pos, target)).to_radians();
                     self.push_player(pid, [-yaw.sin() * knock, 0.36, yaw.cos() * knock]);
+                    if let Some(effect) = melee_effect(mob.kind, crate::rules::difficulty()) {
+                        self.add_effect(pid, effect);
+                    }
                 }
             }
         }
         false
+    }
+
+    /// Whether a monster may appear at `pos`: husks and strays only where the sky is open.
+    pub(super) fn sky_allows(&self, kind: MobKind, pos: BlockPos) -> bool {
+        !matches!(kind, MobKind::Husk | MobKind::Stray)
+            || self.light_at(pos).is_some_and(|(sky, _)| sky >= 15)
     }
 
     fn witch_attack(&mut self, id: i32, mob: &mut Mob, target: [f64; 3], distance: f64) {
@@ -507,6 +517,8 @@ impl World {
                 pickup: false,
                 flaming: false,
                 potion: None,
+                // A stray's arrows slow what they hit.
+                slowness: mob.kind == MobKind::Stray,
             },
         );
         mob.attack_cooldown = SKELETON_SHOT_TICKS;
@@ -754,7 +766,8 @@ impl World {
             let pos = BlockPos::new(gx, y, gz);
             let at = [f64::from(gx) + 0.5, f64::from(y), f64::from(gz) + 0.5];
             // A spider needs more room than the two blocks a zombie needs.
-            if self.monster_can_spawn(pos) && self.mob_fits(kind, at) {
+            if self.monster_can_spawn(pos) && self.sky_allows(kind, pos) && self.mob_fits(kind, at)
+            {
                 let actual_kind = if kind == MobKind::Zombie && self.rng.below(20) == 0 {
                     MobKind::ZombieVillager
                 } else {
@@ -865,4 +878,44 @@ fn creeper_swell(id: i32, swelling: bool) -> Writer {
         .varint(SERIALIZER_INT)
         .varint(if swelling { 1 } else { -1 })
         .u8(0xFF)
+}
+
+/// What a melee hit from this mob does besides damage: husks make players hungry for a
+/// few seconds more the harder the difficulty (the wiki's 7 seconds per step of regional
+/// difficulty, taken as 1, 2 and 3 on Easy, Normal and Hard), cave spiders poison on
+/// Normal (7 seconds) and Hard (15).
+pub(super) fn melee_effect(
+    kind: MobKind,
+    difficulty: crate::rules::Difficulty,
+) -> Option<levitas_registry::Effect> {
+    use crate::rules::Difficulty;
+    use levitas_registry::{mob_effect, Effect};
+    match (kind, difficulty) {
+        (MobKind::Husk, Difficulty::Easy) => Some(Effect {
+            id: mob_effect::HUNGER,
+            duration: 7 * 20,
+            amplifier: 0,
+        }),
+        (MobKind::Husk, Difficulty::Normal) => Some(Effect {
+            id: mob_effect::HUNGER,
+            duration: 14 * 20,
+            amplifier: 0,
+        }),
+        (MobKind::Husk, Difficulty::Hard) => Some(Effect {
+            id: mob_effect::HUNGER,
+            duration: 21 * 20,
+            amplifier: 0,
+        }),
+        (MobKind::CaveSpider, Difficulty::Normal) => Some(Effect {
+            id: mob_effect::POISON,
+            duration: 7 * 20,
+            amplifier: 0,
+        }),
+        (MobKind::CaveSpider, Difficulty::Hard) => Some(Effect {
+            id: mob_effect::POISON,
+            duration: 15 * 20,
+            amplifier: 0,
+        }),
+        _ => None,
+    }
 }

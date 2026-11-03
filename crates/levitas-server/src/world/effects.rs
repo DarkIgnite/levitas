@@ -196,7 +196,10 @@ impl World {
     /// Gives a mob an effect. A stronger or longer one replaces what it has.
     pub(super) fn add_mob_effect(&mut self, id: i32, effect: Effect) {
         let (is_undead, is_spider) = match self.mobs.get(&id) {
-            Some(m) if m.alive() => (m.kind.is_undead(), m.kind == super::mobs::MobKind::Spider),
+            Some(m) if m.alive() => (
+                m.kind.is_undead(),
+                m.kind.family() == super::mobs::MobKind::Spider,
+            ),
             _ => return,
         };
         match effect.id {

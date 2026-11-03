@@ -40,6 +40,8 @@ pub struct Shot {
     pub flaming: bool,
     /// The potion of a tipped arrow.
     pub potion: Option<u8>,
+    /// Whether the arrow slows what it hits for 30 seconds, as a stray's does.
+    pub slowness: bool,
 }
 
 pub struct Arrow {
@@ -53,6 +55,7 @@ pub struct Arrow {
     pickup: bool,
     flaming: bool,
     potion: Option<u8>,
+    slowness: bool,
     stuck: Option<u32>,
     age: u32,
 }
@@ -79,6 +82,7 @@ impl World {
             pickup,
             flaming,
             potion,
+            slowness,
         } = shot;
         let length = (dir[0] * dir[0] + dir[1] * dir[1] + dir[2] * dir[2])
             .sqrt()
@@ -101,6 +105,7 @@ impl World {
             pickup,
             flaming,
             potion,
+            slowness,
             stuck: None,
             age: 0,
         };
@@ -261,6 +266,9 @@ impl World {
                 }
                 self.damage_from(id, damage, Damage::Arrow(shooter_name), Some(arrow.shooter));
                 self.push_player(id, [away[0] * 0.3, 0.1, away[1] * 0.3]);
+                if arrow.slowness {
+                    self.add_effect(id, stray_slowness());
+                }
                 // A tipped arrow gives its potion's effects for an eighth of the time
                 // (instant ones in full).
                 for mut effect in arrow
@@ -278,6 +286,9 @@ impl World {
                     self.ignite_mob(id, 100);
                 }
                 self.hit_mob(id, damage, by, away, "minecraft:arrow");
+                if arrow.slowness {
+                    self.add_mob_effect(id, stray_slowness());
+                }
                 for mut effect in arrow
                     .potion
                     .map(crate::potions::effects)
@@ -423,8 +434,18 @@ impl World {
             pickup: survival && !infinity,
             flaming: bow.level_of("minecraft:flame") > 0,
             potion,
+            slowness: false,
         };
         self.shoot_arrow(id, true, shot);
+    }
+}
+
+/// What a stray's arrow does to what it hits: Slowness for 30 seconds.
+fn stray_slowness() -> levitas_registry::Effect {
+    levitas_registry::Effect {
+        id: levitas_registry::mob_effect::SLOWNESS,
+        duration: 30 * 20,
+        amplifier: 0,
     }
 }
 
@@ -503,6 +524,7 @@ mod tests {
             pickup: false,
             flaming: false,
             potion: Some(swiftness),
+            slowness: false,
             stuck: None,
             age: 0,
         };
@@ -511,6 +533,41 @@ mod tests {
             .effect(levitas_registry::mob_effect::SPEED)
             .expect("swiftness");
         assert_eq!(effect.duration, full / 8);
+    }
+
+    #[test]
+    fn a_strays_arrow_slows_for_thirty_seconds() {
+        let (mut w, id, _frames) = world_with_player([0.5, -60.0, 0.5]);
+        let arrow = Arrow {
+            pos: [0.5, -59.0, 0.5],
+            vel: [0.0, 0.0, 1.0],
+            shooter: 0,
+            by_player: false,
+            critical: false,
+            base_damage: 2.0,
+            pickup: false,
+            flaming: false,
+            potion: None,
+            slowness: true,
+            stuck: None,
+            age: 0,
+        };
+        w.arrow_hits(&arrow, Hit::Player(id));
+        let slow = w.players[&id]
+            .effect(levitas_registry::mob_effect::SLOWNESS)
+            .expect("slowness");
+        assert_eq!(slow.duration, 600);
+        // An ordinary arrow does nothing of the kind.
+        let plain = Arrow {
+            slowness: false,
+            ..arrow
+        };
+        w.players.get_mut(&id).unwrap().health = 20.0;
+        w.clear_effects(id);
+        w.arrow_hits(&plain, Hit::Player(id));
+        assert!(w.players[&id]
+            .effect(levitas_registry::mob_effect::SLOWNESS)
+            .is_none());
     }
 
     #[test]
@@ -532,6 +589,7 @@ mod tests {
             pickup: false,
             flaming: false,
             potion: Some(slowness),
+            slowness: false,
             stuck: None,
             age: 0,
         };

@@ -270,6 +270,7 @@ impl World {
                         pickup: false,
                         flaming: false,
                         potion: stack.potion,
+                        slowness: false,
                     },
                 );
                 self.level_event(LEVEL_EVENT_SHOOT, pos, 0);
