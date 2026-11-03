@@ -1762,6 +1762,7 @@ impl World {
         for (x, z) in fresh {
             self.find_spawners(x, z);
             self.spawn_animals_in_chunk(x, z);
+            self.spawn_water_mobs_in_chunk(x, z);
         }
         let ids: Vec<i32> = self.players.keys().copied().collect();
         for id in ids {

@@ -335,6 +335,12 @@ their server.
   In 26.3 these are the Avatar indices 15/16 (they were 17/18 in 1.21.8).
 
 
+- Water mobs (2026-11-03): squid, cod, salmon swim in `swim_mob` (`world/mobs.rs`). Natural spawning is thinned to
+  one chunk in three because every swimmer sends a movement packet per tick and more of them made
+  `generated_world_streams_real_terrain` lose its connection (the 4096-frame outgoing queue overflowed). If
+  that test starts failing again, look at movement packet volume first.
+
+
 ## 9. Testing pattern
 
 - Unit tests next to the rules (`blocks/*`, `levitas-world`, `levitas-pumpkin`).

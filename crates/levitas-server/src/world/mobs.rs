@@ -99,6 +99,9 @@ pub enum MobKind {
     Slime,
     Wolf,
     Rabbit,
+    Squid,
+    Cod,
+    Salmon,
 }
 
 impl MobKind {
@@ -145,6 +148,9 @@ impl MobKind {
             "minecraft:slime" => Some(MobKind::Slime),
             "minecraft:wolf" => Some(MobKind::Wolf),
             "minecraft:rabbit" => Some(MobKind::Rabbit),
+            "minecraft:squid" => Some(MobKind::Squid),
+            "minecraft:cod" => Some(MobKind::Cod),
+            "minecraft:salmon" => Some(MobKind::Salmon),
             _ => None,
         }
     }
@@ -180,6 +186,9 @@ impl MobKind {
             MobKind::Slime => "minecraft:slime",
             MobKind::Wolf => "minecraft:wolf",
             MobKind::Rabbit => "minecraft:rabbit",
+            MobKind::Squid => "minecraft:squid",
+            MobKind::Cod => "minecraft:cod",
+            MobKind::Salmon => "minecraft:salmon",
         }
     }
 
@@ -215,6 +224,9 @@ impl MobKind {
             MobKind::Slime => "Slime",
             MobKind::Wolf => "Wolf",
             MobKind::Rabbit => "Rabbit",
+            MobKind::Squid => "Squid",
+            MobKind::Cod => "Cod",
+            MobKind::Salmon => "Salmon",
         }
     }
 
@@ -275,6 +287,11 @@ impl MobKind {
             self,
             MobKind::ZombifiedPiglin | MobKind::MagmaCube | MobKind::Ghast | MobKind::Blaze
         )
+    }
+
+    /// Whether it lives in water: it swims about in it and suffocates out of it.
+    pub fn swims(self) -> bool {
+        matches!(self, MobKind::Squid | MobKind::Cod | MobKind::Salmon)
     }
 
     /// Whether it flies instead of walking.
@@ -356,6 +373,9 @@ impl MobKind {
             MobKind::Slime => entity_type::SLIME,
             MobKind::Wolf => entity_type::WOLF,
             MobKind::Rabbit => entity_type::RABBIT,
+            MobKind::Squid => entity_type::SQUID,
+            MobKind::Cod => entity_type::COD,
+            MobKind::Salmon => entity_type::SALMON,
         }
     }
 
@@ -366,6 +386,8 @@ impl MobKind {
             MobKind::Chicken => 4.0,
             MobKind::Wolf => 8.0,
             MobKind::Rabbit => 3.0,
+            MobKind::Squid => 10.0,
+            MobKind::Cod | MobKind::Salmon => 3.0,
             MobKind::Zombie | MobKind::Creeper | MobKind::Skeleton => 20.0,
             MobKind::Husk | MobKind::Stray => 20.0,
             MobKind::ZombifiedPiglin => 20.0,
@@ -396,6 +418,9 @@ impl MobKind {
             MobKind::Chicken => (0.4, 0.7),
             MobKind::Wolf => (0.6, 0.85),
             MobKind::Rabbit => (0.4, 0.5),
+            MobKind::Squid => (0.8, 0.8),
+            MobKind::Cod => (0.5, 0.3),
+            MobKind::Salmon => (0.7, 0.4),
             MobKind::Zombie | MobKind::Husk => (0.6, 1.95),
             MobKind::Spider => (1.4, 0.9),
             MobKind::CaveSpider => (0.7, 0.5),
@@ -424,6 +449,8 @@ impl MobKind {
             MobKind::Chicken => 0.08,
             MobKind::Wolf => 0.15,
             MobKind::Rabbit => 0.14,
+            MobKind::Squid => 0.04,
+            MobKind::Cod | MobKind::Salmon => 0.08,
             MobKind::Zombie | MobKind::Husk => 0.12,
             MobKind::Spider | MobKind::CaveSpider => 0.15,
             MobKind::Creeper => 0.11,
@@ -477,6 +504,9 @@ impl MobKind {
             MobKind::Slime => "slime",
             MobKind::Wolf => "wolf",
             MobKind::Rabbit => "rabbit",
+            MobKind::Squid => "squid",
+            MobKind::Cod => "cod",
+            MobKind::Salmon => "salmon",
         }
     }
 }
@@ -1042,10 +1072,12 @@ struct SpawnList {
     creature_probability: f64,
     creatures: Vec<Spawner>,
     monsters: Vec<Spawner>,
+    /// Squid and fish.
+    water: Vec<Spawner>,
 }
 
 /// Mobs `/summon` knows.
-pub const SUMMONABLE: [&str; 29] = [
+pub const SUMMONABLE: [&str; 32] = [
     "cow",
     "pig",
     "sheep",
@@ -1075,6 +1107,9 @@ pub const SUMMONABLE: [&str; 29] = [
     "slime",
     "wolf",
     "rabbit",
+    "squid",
+    "cod",
+    "salmon",
 ];
 
 fn spawners(list: &Value) -> Vec<Spawner> {
@@ -1137,6 +1172,10 @@ impl BiomeSpawns {
                         .unwrap_or(DEFAULT_CREATURE_PROBABILITY),
                     creatures: spawners(&spawns["creature"]),
                     monsters: spawners(&spawns["monster"]),
+                    water: ["water_creature", "water_ambient"]
+                        .iter()
+                        .flat_map(|c| spawners(&spawns[*c]))
+                        .collect(),
                 };
                 (name, list)
             })
@@ -1190,6 +1229,115 @@ impl World {
                 }
             }
         }
+    }
+
+    /// Puts a group of squid or fish into the water of a freshly generated chunk.
+    pub(super) fn spawn_water_mobs_in_chunk(&mut self, cx: i32, cz: i32) {
+        // One chunk in three: every swimmer costs a movement packet each tick.
+        if self.rng.below(3) != 0 {
+            return;
+        }
+        let (x, z) = (cx * 16 + 8, cz * 16 + 8);
+        let Some(top) = self.surface_y(x, z) else {
+            return;
+        };
+        let centre = |y: i32| [f64::from(x) + 0.5, f64::from(y), f64::from(z) + 0.5];
+        if !self.in_water(centre(top)) {
+            return;
+        }
+        let Some(biome) = self.biome_at(x, top, z) else {
+            return;
+        };
+        let Some(list) = self.biome_spawns.by_biome.get(&biome) else {
+            return;
+        };
+        let Some((kind, size)) = pick(&list.water, &mut self.rng) else {
+            return;
+        };
+        let mut seabed = top;
+        while seabed > MIN_Y && self.in_water(centre(seabed)) {
+            seabed -= 1;
+        }
+        let depth = top - seabed;
+        if depth < 3 {
+            return;
+        }
+        let y = seabed + 1 + self.rng.below((depth - 2) as u32) as i32;
+        for _ in 0..size {
+            let mut pos = centre(y);
+            pos[0] += f64::from(self.rng.below(5)) - 2.0;
+            pos[2] += f64::from(self.rng.below(5)) - 2.0;
+            if self.in_water(pos) && self.mob_fits(kind, pos) {
+                let mob = Mob::new(kind, pos, &mut self.rng);
+                self.mobs.insert(next_entity_id(), mob);
+            }
+        }
+    }
+
+    /// Whether the block at `pos` is water.
+    pub(super) fn in_water(&self, pos: [f64; 3]) -> bool {
+        self.loaded_state(feet(pos))
+            .and_then(fluid_at)
+            .is_some_and(|f| f.fluid == Fluid::Water)
+    }
+
+    /// A squid's or fish's turn in water: drifts to goals inside the water.
+    fn swim_mob(&mut self, mob: &mut Mob) {
+        mob.target = None;
+        mob.panic = mob.panic.saturating_sub(1);
+        let reached = mob
+            .fly_goal
+            .is_none_or(|g| (0..3).map(|i| (g[i] - mob.pos[i]).powi(2)).sum::<f64>() < 1.0);
+        if reached || self.rng.below(150) == 0 {
+            let r = |rng: &mut Rng, reach: f64| (rng.f64() * 2.0 - 1.0) * reach;
+            let goal = [
+                mob.pos[0] + r(&mut self.rng, 8.0),
+                mob.pos[1] + r(&mut self.rng, 2.0),
+                mob.pos[2] + r(&mut self.rng, 8.0),
+            ];
+            mob.fly_goal = self.in_water(goal).then_some(goal);
+        }
+        let speed = mob.kind.speed() * if mob.panic > 0 { 2.5 } else { 1.0 };
+        let goal = mob.fly_goal.unwrap_or(mob.pos);
+        let d = [0, 1, 2].map(|i| goal[i] - mob.pos[i]);
+        let length = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt();
+        let step = if length < 0.3 {
+            [0.0; 3]
+        } else {
+            d.map(|v| v / length * speed)
+        };
+        if length >= 0.3 {
+            mob.yaw = yaw_towards(mob.pos, goal);
+        }
+        let (width, height) = mob.size();
+        let half = width / 2.0;
+        let mut pos = mob.pos;
+        for axis in 0..3 {
+            let push = match axis {
+                0 => mob.knockback[0],
+                2 => mob.knockback[1],
+                _ => 0.0,
+            };
+            let want = step[axis] + push;
+            let mut next = pos;
+            next[axis] += want;
+            // Stay in the water, and out of walls.
+            let delta = if self.in_water(next) {
+                self.clip_move(pos, half, height, axis, want)
+            } else {
+                0.0
+            };
+            if (delta - want).abs() > 1e-9 {
+                mob.fly_goal = None;
+            }
+            pos[axis] += delta;
+        }
+        for k in &mut mob.knockback {
+            *k *= 0.91;
+        }
+        mob.pos = pos;
+        mob.on_ground = false;
+        mob.fall_distance = 0.0;
     }
 
     /// The y of the highest block in a column that is not air or leaves.
@@ -1327,7 +1475,12 @@ impl World {
             if mob.kind.family() == MobKind::MagmaCube {
                 self.hop(&mut mob);
             }
-            if mob.kind.flies() {
+            if mob.kind.swims() && !self.in_water(mob.pos) && self.tick.is_multiple_of(20) {
+                self.hurt_mob(id, &mut mob, 1.0, "minecraft:dry_out");
+            }
+            if mob.kind.swims() && self.in_water(mob.pos) {
+                self.swim_mob(&mut mob);
+            } else if mob.kind.flies() {
                 self.fly_mob(&mut mob);
             } else {
                 self.step(&mut mob);
@@ -2861,6 +3014,41 @@ mod path_tests {
         assert_eq!(world.mobs[&hit].hunting, Some(player));
         assert_eq!(world.mobs[&near].hunting, Some(player));
         assert_eq!(world.mobs[&far].hunting, None);
+    }
+
+    #[test]
+    fn squid_and_fish_swim_inside_the_water_and_dry_out_on_land() {
+        let mut world = flat_world();
+        // A pool of water, 10 x 6 x 10, walled by stone, above the flat ground.
+        for x in 0..10 {
+            for y in -58..-52 {
+                for z in 0..10 {
+                    let wall = x == 0 || x == 9 || z == 0 || z == 9;
+                    world.set_block(
+                        BlockPos::new(x, y, z),
+                        if wall { block::STONE } else { block::WATER },
+                    );
+                }
+            }
+        }
+        for kind in [MobKind::Squid, MobKind::Cod, MobKind::Salmon] {
+            assert!(kind.swims());
+            let mut mob = Mob::new(kind, [4.5, -56.0, 4.5], &mut world.rng);
+            for _ in 0..600 {
+                world.swim_mob(&mut mob);
+                assert!(
+                    world.in_water(mob.pos),
+                    "{kind:?} left the water at {:?}",
+                    mob.pos
+                );
+            }
+        }
+        let mut fish = Mob::new(MobKind::Cod, [4.5, -40.0, 4.5], &mut world.rng);
+        assert!(!world.in_water(fish.pos));
+        let id = next_entity_id();
+        world.tick = 20;
+        world.hurt_mob(id, &mut fish, 1.0, "minecraft:dry_out");
+        assert_eq!(fish.health, 2.0);
     }
 
     #[test]

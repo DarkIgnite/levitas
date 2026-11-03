@@ -268,6 +268,11 @@ Known gaps are listed under each phase instead of being hidden.
       carrots and dandelions, spawn from the biomes' creature lists, drop by their loot
       table. Missing: biome coat variants (all brown), hopping animation timing, the
       killer bunny, eating carrot crops.
+      Squid, cod and salmon (`MobKind::swims`): they drift to goals inside the water, flee
+      faster when hurt, dry out (1 damage a second) on land, and spawn in one freshly
+      generated water chunk in three from the biome's water lists. Missing: pufferfish,
+      tropical fish, glow squid, dolphins, turtles, schooling, fish buckets, ink clouds,
+      and the bucket/from-bucket entity data (none is sent, so fish look default).
 - [ ] Hostile mobs: zombie variants, skeleton variants, creeper, spider, enderman,
       slime, witch, phantom, drowned, pillager, silverfish, ...
       Variants share their base mob's behaviour (`MobKind::family`): husks (zombies
