@@ -167,6 +167,9 @@ Workspace crates in `crates/`:
 - `world/farming.rs` – stems and fruit, cocoa, sweet berries, kelp, bamboo, vines,
   mushrooms, composters, trampling (called from `nature.rs`'s random ticks and bone
   meal, and from using blocks).
+- `world/commands_extra.rs` – player selectors (`World::targets`) and the commands that
+  use them (give, clear, tp, msg, setblock, fill, enchant, ...); `commands.rs` keeps the
+  older forms and the Brigadier tree sent for tab completion (add new commands to both).
 - `world/maps.rs` – filled maps: grid squares, drawing while held, `map_<id>.dat`, the
   shared map ID counter, cartography locking and zooming.
 - `world/commands.rs` – `/gamemode`, `/give`, `/kill`, `/time`, `/weather`, and the

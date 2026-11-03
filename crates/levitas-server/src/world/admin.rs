@@ -21,7 +21,7 @@ pub fn difficulty_packet() -> Writer {
 }
 
 /// Commands every player may use; the rest need an operator.
-pub const EVERYONE: [&str; 2] = ["help", "list"];
+pub const EVERYONE: [&str; 6] = ["help", "list", "msg", "tell", "w", "me"];
 
 impl World {
     /// Tells a player's client what they may do: their permission level and the

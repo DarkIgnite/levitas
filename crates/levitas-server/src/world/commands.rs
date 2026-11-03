@@ -7,8 +7,7 @@ use levitas_registry::command_argument;
 
 use super::*;
 
-const HELP: &str = "Commands: /gamemode <survival|creative>, /give <item> [count], /kill, \
-                    /time <set|add|query> ..., /tp <x> <y> <z>, /effect <give|clear> ..., /weather <clear|rain|thunder> [seconds], /summon <mob>, /xp <add|query> ...";
+const HELP: &str = "Commands: /gamemode <survival|creative> [player], /give [player] <item> [count],                     /clear [player] [item] [count], /kill [player], /time <set|add|query> ...,                     /tp [player] <x y z|player>, /msg <player> <text>, /me <text>, /setblock, /fill,                     /enchant, /effect <give|clear> ..., /weather <clear|rain|thunder> [seconds],                     /summon <mob>, /xp <add|query> ..., /setworldspawn, /seed, /save-all";
 
 impl World {
     pub(super) fn command(&mut self, id: i32, command: &str) {
@@ -28,6 +27,13 @@ impl World {
         if let Some(reply) = self.admin_command(&words, &name) {
             info!("{name} ran /{command}: {reply}");
             self.send(id, system_chat(&reply));
+            return;
+        }
+        if let Some(reply) = self.extra_command(id, &words) {
+            if !reply.is_empty() {
+                info!("{name} ran /{command}: {reply}");
+                self.send(id, system_chat(&reply));
+            }
             return;
         }
         let mut args = command.split_whitespace();
@@ -191,7 +197,7 @@ impl World {
         )
     }
 
-    fn set_game_mode(&mut self, id: i32, mode: u8) -> String {
+    pub(super) fn set_game_mode(&mut self, id: i32, mode: u8) -> String {
         let Some(p) = self.players.get_mut(&id) else {
             return String::new();
         };
@@ -220,7 +226,7 @@ impl World {
         format!("Set own game mode to {name} Mode")
     }
 
-    fn give(&mut self, id: i32, item: &str, count: i32) -> String {
+    pub(super) fn give(&mut self, id: i32, item: &str, count: i32) -> String {
         let name = if item.contains(':') {
             item.to_owned()
         } else {
@@ -351,9 +357,24 @@ pub(super) fn command_tree(op: bool) -> Writer {
     let root = t.add(None, Node::Root, false);
     t.literal(root, "help", true);
     t.literal(root, "list", true);
+    for name in ["msg", "tell", "w"] {
+        let node = t.literal(root, name, false);
+        let target = t.argument(node, "targets", command_argument::GAME_PROFILE, Vec::new());
+        t.argument(target, "message", command_argument::MESSAGE, Vec::new());
+    }
+    let me = t.literal(root, "me", false);
+    t.argument(me, "action", command_argument::MESSAGE, Vec::new());
     if !op {
         return t.packet();
     }
+    let player = |t: &mut Tree, parent: usize| {
+        t.argument(
+            parent,
+            "targets",
+            command_argument::GAME_PROFILE,
+            Vec::new(),
+        )
+    };
 
     // Running the server.
     for name in ["op", "deop", "pardon"] {
@@ -378,7 +399,8 @@ pub(super) fn command_tree(op: bool) -> Writer {
 
     let gamemode = t.literal(root, "gamemode", false);
     for mode in ["survival", "creative"] {
-        t.literal(gamemode, mode, true);
+        let node = t.literal(gamemode, mode, true);
+        player(&mut t, node);
     }
     let gm = t.literal(root, "gm", false);
     t.nodes[gm].redirect = Some(gamemode);
@@ -386,8 +408,43 @@ pub(super) fn command_tree(op: bool) -> Writer {
     let give = t.literal(root, "give", false);
     let item = t.argument(give, "item", command_argument::ITEM_STACK, Vec::new());
     t.argument(item, "count", integer, at_least(1));
+    let who = player(&mut t, give);
+    let item = t.argument(who, "item", command_argument::ITEM_STACK, Vec::new());
+    t.argument(item, "count", integer, at_least(1));
 
-    t.literal(root, "kill", true);
+    let kill = t.literal(root, "kill", true);
+    player(&mut t, kill);
+    let clear = t.literal(root, "clear", true);
+    let who = player(&mut t, clear);
+    let item = t.argument(who, "item", command_argument::ITEM_STACK, Vec::new());
+    t.argument(item, "maxCount", integer, at_least(0));
+
+    let pos = |t: &mut Tree, parent: usize, name: &'static str| {
+        t.argument(parent, name, command_argument::BLOCK_POS, Vec::new())
+    };
+    let setblock = t.literal(root, "setblock", false);
+    let at = pos(&mut t, setblock, "pos");
+    let block = t.argument(at, "block", command_argument::BLOCK_STATE, Vec::new());
+    for mode in ["destroy", "keep", "replace"] {
+        t.literal(block, mode, true);
+    }
+    let fill = t.literal(root, "fill", false);
+    let from = pos(&mut t, fill, "from");
+    let to = pos(&mut t, from, "to");
+    let block = t.argument(to, "block", command_argument::BLOCK_STATE, Vec::new());
+    for mode in ["replace", "destroy", "keep", "hollow", "outline"] {
+        t.literal(block, mode, true);
+    }
+    let enchant = t.literal(root, "enchant", false);
+    let who = player(&mut t, enchant);
+    let mut registry = vec![b"minecraft:enchantment".len() as u8];
+    registry.extend_from_slice(b"minecraft:enchantment");
+    let which = t.argument(who, "enchantment", command_argument::RESOURCE, registry);
+    t.argument(which, "level", integer, at_least(1));
+    let spawn = t.literal(root, "setworldspawn", true);
+    pos(&mut t, spawn, "pos");
+    t.literal(root, "seed", true);
+    t.literal(root, "save-all", true);
     let summon = t.literal(root, "summon", false);
     for mob in mobs::SUMMONABLE {
         t.literal(summon, mob, true);
@@ -431,6 +488,9 @@ pub(super) fn command_tree(op: bool) -> Writer {
     for name in ["tp", "teleport"] {
         let tp = t.literal(root, name, false);
         t.argument(tp, "location", command_argument::VEC3, Vec::new());
+        let who = player(&mut t, tp);
+        t.argument(who, "destination", command_argument::VEC3, Vec::new());
+        player(&mut t, who);
     }
     let execute = t.literal(root, "execute", false);
     let within = t.literal(execute, "in", false);

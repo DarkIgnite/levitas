@@ -536,6 +536,17 @@ Known gaps are listed under each phase instead of being hidden.
       no command framework or console input yet.
 - [ ] Vanilla commands: /tp, /time, /weather, /gamerule, /give with components,
       /effect, /enchant, /summon, /setblock, /fill, /kill, /clear, /spawnpoint, ...
+      Working: /gamemode, /give, /kill, /clear, /tp (coordinates, players, to players),
+      /time, /weather, /gamerule, /difficulty, /effect, /xp, /summon, /enchant (the
+      item in hand, with the level and compatibility rules), /setblock and /fill
+      (`world/commands_extra.rs`; block states like `oak_stairs[facing=north]`;
+      destroy, keep, replace, hollow and outline; limited by `max_block_modifications`
+      and to loaded chunks), /msg, /tell, /w and /me (for everyone), /setworldspawn,
+      /seed, /save-all, and the console commands (op, ban, whitelist, ...). Players are
+      picked by name or `@s`, `@a`, `@p`, `@r`, and all of it is offered for
+      tab-completion. Missing: other selectors (`@e`, arguments like `[distance=..5]`),
+      targets in other dimensions, /spawnpoint, /title, /tellraw, /data, /execute
+      (beyond `in <dimension> run tp`), /locate, /fillbiome, /clone, /scoreboard.
 - [x] Game rules and difficulty. Every 26.3 game rule is kept and saved in
       `data/minecraft/game_rules.dat` as vanilla saves it (`rules.rs`), set with
       `/gamerule` in game or at the console (with or without `minecraft:`). Enforced:

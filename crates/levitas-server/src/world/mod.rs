@@ -15,6 +15,7 @@ mod campfire;
 mod clouds;
 mod combat;
 mod commands;
+mod commands_extra;
 mod conduit;
 mod containers;
 mod devices;
