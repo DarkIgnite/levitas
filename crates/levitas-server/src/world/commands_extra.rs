@@ -366,6 +366,7 @@ impl World {
                 ];
                 format!("Set the world spawn point to {}, {}, {}", at.x, at.y, at.z)
             }
+            "clone" => self.clone_command(id, args),
             "playsound" => self.playsound_command(id, args),
             "tellraw" => {
                 let (&who, text) = args.split_first()?;
@@ -618,6 +619,102 @@ impl World {
             "No blocks were filled".to_owned()
         } else {
             format!("{changed} blocks were filled")
+        }
+    }
+
+    /// `/clone <begin> <end> <destination> [replace|masked] [normal|force|move]`: copies a
+    /// box of blocks (block states only: chests and signs come empty).
+    fn clone_command(&mut self, id: i32, args: &[&str]) -> String {
+        const USAGE: &str =
+            "Usage: /clone <x1 y1 z1> <x2 y2 z2> <x y z> [replace|masked] [normal|force|move]";
+        let (Some(a), Some(b), Some(to)) = (
+            self.block_pos(id, args.get(..3).unwrap_or(&[])),
+            self.block_pos(id, args.get(3..6).unwrap_or(&[])),
+            self.block_pos(id, args.get(6..9).unwrap_or(&[])),
+        ) else {
+            return USAGE.to_owned();
+        };
+        let mut masked = false;
+        let mut overlap = "normal";
+        for word in &args[9..] {
+            match *word {
+                "replace" => masked = false,
+                "masked" => masked = true,
+                "normal" | "force" | "move" => overlap = word,
+                _ => return USAGE.to_owned(),
+            }
+        }
+        let (min, max) = (
+            BlockPos::new(a.x.min(b.x), a.y.min(b.y), a.z.min(b.z)),
+            BlockPos::new(a.x.max(b.x), a.y.max(b.y), a.z.max(b.z)),
+        );
+        let size = (max.x - min.x, max.y - min.y, max.z - min.z);
+        let volume = i64::from(size.0 + 1) * i64::from(size.1 + 1) * i64::from(size.2 + 1);
+        let limit = crate::rules::int("max_block_modifications").max(0);
+        let limit = if limit == 0 {
+            FILL_LIMIT_DEFAULT
+        } else {
+            limit
+        };
+        if volume > i64::from(limit) {
+            return format!(
+                "Too many blocks in the specified area (maximum {limit}, specified {volume})"
+            );
+        }
+        let end = BlockPos::new(to.x + size.0, to.y + size.1, to.z + size.2);
+        let overlaps = to.x <= max.x
+            && end.x >= min.x
+            && to.y <= max.y
+            && end.y >= min.y
+            && to.z <= max.z
+            && end.z >= min.z;
+        if overlaps && overlap == "normal" {
+            return "Source and destination can not overlap".to_owned();
+        }
+        // Copy everything first, so overlapping boxes work.
+        let mut blocks = Vec::new();
+        for x in 0..=size.0 {
+            for y in 0..=size.1 {
+                for z in 0..=size.2 {
+                    let from = BlockPos::new(min.x + x, min.y + y, min.z + z);
+                    let at = BlockPos::new(to.x + x, to.y + y, to.z + z);
+                    let (Some(state), Some(_)) = (self.loaded_block(from), self.loaded_block(at))
+                    else {
+                        return "That position is not loaded".to_owned();
+                    };
+                    blocks.push((from, at, state));
+                }
+            }
+        }
+        let in_destination = |p: BlockPos| {
+            p.x >= to.x
+                && p.x <= end.x
+                && p.y >= to.y
+                && p.y <= end.y
+                && p.z >= to.z
+                && p.z <= end.z
+        };
+        if overlap == "move" {
+            for &(from, _, state) in &blocks {
+                if !is_air(state) && !in_destination(from) {
+                    self.place_by_command(from, block::AIR);
+                }
+            }
+        }
+        let mut changed = 0;
+        for &(_, at, state) in &blocks {
+            if masked && is_air(state) {
+                continue;
+            }
+            if self.loaded_block(at) != Some(state) {
+                self.place_by_command(at, state);
+            }
+            changed += 1;
+        }
+        if changed == 0 {
+            "No blocks were cloned".to_owned()
+        } else {
+            format!("{changed} blocks were cloned")
         }
     }
 
@@ -906,5 +1003,52 @@ mod spawnpoint_tests {
         p.load_nbt(&nbt);
         assert!(p.respawn_forced);
         assert_eq!(p.respawn, Some(BlockPos::new(10, -60, 12)));
+    }
+}
+
+#[cfg(test)]
+mod clone_tests {
+    use super::*;
+    use crate::connection::Profile;
+
+    #[test]
+    fn clone_copies_moves_and_refuses_to_overlap() {
+        let dir = std::env::temp_dir().join(format!("levitas-clone-{}", std::process::id()));
+        let (mut w, _) = World::new(
+            dir,
+            NewWorld {
+                kind: WorldKind::Flat,
+                seed: Some(0),
+            },
+        );
+        w.chunk(0, 0);
+        let (tx, _rx) = tokio::sync::mpsc::channel(16);
+        let profile = Profile {
+            uuid: 4,
+            name: "Cloner".to_owned(),
+            properties: Vec::new(),
+        };
+        w.players
+            .insert(1, Player::new(profile, tx, [0.5, -60.0, 0.5]));
+        for x in 0..3 {
+            w.set_block(BlockPos::new(x, -55, 0), block::STONE);
+        }
+        w.set_block(BlockPos::new(1, -55, 1), block::GOLD_BLOCK);
+        let said = w.clone_command(1, &["0", "-55", "0", "2", "-55", "1", "5", "-55", "5"]);
+        assert_eq!(said, "6 blocks were cloned");
+        assert_eq!(w.block(BlockPos::new(6, -55, 6)), block::GOLD_BLOCK);
+        assert_eq!(w.block(BlockPos::new(5, -55, 5)), block::STONE);
+        let overlap = w.clone_command(1, &["0", "-55", "0", "2", "-55", "1", "1", "-55", "0"]);
+        assert!(overlap.contains("overlap"), "{overlap}");
+        // Move leaves air behind.
+        w.clone_command(
+            1,
+            &[
+                "0", "-55", "0", "2", "-55", "1", "0", "-55", "8", "masked", "move",
+            ],
+        );
+        assert_eq!(w.block(BlockPos::new(1, -55, 9)), block::GOLD_BLOCK);
+        assert!(is_air(w.block(BlockPos::new(1, -55, 1))));
+        assert!(is_air(w.block(BlockPos::new(0, -55, 0))));
     }
 }

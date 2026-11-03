@@ -1636,6 +1636,7 @@ async fn joining_players_get_the_command_tree() {
         [
             "ban",
             "clear",
+            "clone",
             "deop",
             "difficulty",
             "effect",

@@ -435,6 +435,16 @@ pub(super) fn command_tree(op: bool) -> Writer {
     for mode in ["replace", "destroy", "keep", "hollow", "outline"] {
         t.literal(block, mode, true);
     }
+    let clone = t.literal(root, "clone", false);
+    let from = pos(&mut t, clone, "begin");
+    let to = pos(&mut t, from, "end");
+    let dest = pos(&mut t, to, "destination");
+    for mask in ["replace", "masked"] {
+        let node = t.literal(dest, mask, true);
+        for mode in ["normal", "force", "move"] {
+            t.literal(node, mode, true);
+        }
+    }
     let enchant = t.literal(root, "enchant", false);
     let who = player(&mut t, enchant);
     let mut registry = vec![b"minecraft:enchantment".len() as u8];
