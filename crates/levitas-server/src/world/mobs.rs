@@ -45,6 +45,8 @@ const SERIALIZER_BYTE: i32 = 0;
 const SHEARED: u8 = 0x10;
 const ENTITY_EVENT_MOB_DEATH: i8 = 3;
 const ENTITY_EVENT_EAT_GRASS: i8 = 10;
+/// How close a player gets before a rabbit runs.
+const RABBIT_SHY: f64 = 5.0;
 
 /// Wool colours by their dye number, as sheep store them.
 pub(super) const COLORS: [&str; 16] = [
@@ -96,6 +98,7 @@ pub enum MobKind {
     CaveSpider,
     Slime,
     Wolf,
+    Rabbit,
 }
 
 impl MobKind {
@@ -141,6 +144,7 @@ impl MobKind {
             "minecraft:cave_spider" => Some(MobKind::CaveSpider),
             "minecraft:slime" => Some(MobKind::Slime),
             "minecraft:wolf" => Some(MobKind::Wolf),
+            "minecraft:rabbit" => Some(MobKind::Rabbit),
             _ => None,
         }
     }
@@ -175,6 +179,7 @@ impl MobKind {
             MobKind::CaveSpider => "minecraft:cave_spider",
             MobKind::Slime => "minecraft:slime",
             MobKind::Wolf => "minecraft:wolf",
+            MobKind::Rabbit => "minecraft:rabbit",
         }
     }
 
@@ -209,6 +214,7 @@ impl MobKind {
             MobKind::CaveSpider => "Cave Spider",
             MobKind::Slime => "Slime",
             MobKind::Wolf => "Wolf",
+            MobKind::Rabbit => "Rabbit",
         }
     }
 
@@ -349,6 +355,7 @@ impl MobKind {
             MobKind::CaveSpider => entity_type::CAVE_SPIDER,
             MobKind::Slime => entity_type::SLIME,
             MobKind::Wolf => entity_type::WOLF,
+            MobKind::Rabbit => entity_type::RABBIT,
         }
     }
 
@@ -358,6 +365,7 @@ impl MobKind {
             MobKind::Sheep => 8.0,
             MobKind::Chicken => 4.0,
             MobKind::Wolf => 8.0,
+            MobKind::Rabbit => 3.0,
             MobKind::Zombie | MobKind::Creeper | MobKind::Skeleton => 20.0,
             MobKind::Husk | MobKind::Stray => 20.0,
             MobKind::ZombifiedPiglin => 20.0,
@@ -387,6 +395,7 @@ impl MobKind {
             MobKind::Sheep => (0.9, 1.3),
             MobKind::Chicken => (0.4, 0.7),
             MobKind::Wolf => (0.6, 0.85),
+            MobKind::Rabbit => (0.4, 0.5),
             MobKind::Zombie | MobKind::Husk => (0.6, 1.95),
             MobKind::Spider => (1.4, 0.9),
             MobKind::CaveSpider => (0.7, 0.5),
@@ -414,6 +423,7 @@ impl MobKind {
         match self {
             MobKind::Chicken => 0.08,
             MobKind::Wolf => 0.15,
+            MobKind::Rabbit => 0.14,
             MobKind::Zombie | MobKind::Husk => 0.12,
             MobKind::Spider | MobKind::CaveSpider => 0.15,
             MobKind::Creeper => 0.11,
@@ -466,6 +476,7 @@ impl MobKind {
             MobKind::CaveSpider => "cave_spider",
             MobKind::Slime => "slime",
             MobKind::Wolf => "wolf",
+            MobKind::Rabbit => "rabbit",
         }
     }
 }
@@ -1034,7 +1045,7 @@ struct SpawnList {
 }
 
 /// Mobs `/summon` knows.
-pub const SUMMONABLE: [&str; 28] = [
+pub const SUMMONABLE: [&str; 29] = [
     "cow",
     "pig",
     "sheep",
@@ -1063,6 +1074,7 @@ pub const SUMMONABLE: [&str; 28] = [
     "cave_spider",
     "slime",
     "wolf",
+    "rabbit",
 ];
 
 fn spawners(list: &Value) -> Vec<Spawner> {
@@ -1403,6 +1415,16 @@ impl World {
         // Food in a player's hand beats wandering; love sends them to their partner.
         if !panicking && !mob.kind.is_monster() && mob.love == 0 && self.follow_temptation(mob) {
             return;
+        }
+        // Rabbits bolt from players who come close.
+        if mob.kind == MobKind::Rabbit
+            && !panicking
+            && self.players.values().any(|p| {
+                p.alive && (p.pos[0] - mob.pos[0]).hypot(p.pos[2] - mob.pos[2]) < RABBIT_SHY
+            })
+        {
+            mob.panic = 40;
+            mob.target = None;
         }
         // Wandering starts now and then; panic keeps picking new spots nearby.
         let wants_target = if panicking {
@@ -2839,6 +2861,40 @@ mod path_tests {
         assert_eq!(world.mobs[&hit].hunting, Some(player));
         assert_eq!(world.mobs[&near].hunting, Some(player));
         assert_eq!(world.mobs[&far].hunting, None);
+    }
+
+    #[test]
+    fn rabbits_are_small_eat_carrots_and_bolt_from_players() {
+        assert_eq!(
+            MobKind::from_name("minecraft:rabbit"),
+            Some(MobKind::Rabbit)
+        );
+        assert_eq!(MobKind::Rabbit.max_health(), 3.0);
+        assert!(SUMMONABLE.contains(&"rabbit"));
+        assert!(super::super::breeding::is_food(
+            MobKind::Rabbit,
+            "minecraft:carrot"
+        ));
+        assert!(!super::super::breeding::is_food(
+            MobKind::Rabbit,
+            "minecraft:wheat"
+        ));
+        let mut world = flat_world();
+        let mut rabbit = Mob::new(MobKind::Rabbit, [2.5, -60.0, 2.5], &mut world.rng);
+        // Nobody about: it is not scared.
+        world.think(&mut rabbit);
+        assert_eq!(rabbit.panic, 0);
+        let (tx, _rx) = tokio::sync::mpsc::channel(16);
+        let profile = crate::connection::Profile {
+            uuid: 1,
+            name: "Scary".to_owned(),
+            properties: Vec::new(),
+        };
+        world
+            .players
+            .insert(1, Player::new(profile, tx, [4.5, -60.0, 2.5]));
+        world.think(&mut rabbit);
+        assert!(rabbit.panic > 0);
     }
 
     #[test]

@@ -325,6 +325,10 @@ their server.
   `rally_wolves` is called from `hit_mob` (owner hits) and `damage_from` (mob hits the owner).
 
 
+- Rabbits (2026-11-03): `MobKind::Rabbit` in `world/mobs.rs`; no entity data is sent (the default coat is
+  brown), so there is no layout to get wrong. Shyness is in `think` (`RABBIT_SHY`).
+
+
 ## 9. Testing pattern
 
 - Unit tests next to the rules (`blocks/*`, `levitas-world`, `levitas-pumpkin`).

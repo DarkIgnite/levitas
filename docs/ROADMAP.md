@@ -264,6 +264,10 @@ Known gaps are listed under each phase instead of being hidden.
       Pups of tamed wolves are tamed. Missing: biome wolf variants and sound variants
       (all pale and classic), wolves hunting sheep, skeletons and rabbits, armour,
       shaking dry, wagging tails and health-based growls, cats, parrots and horses.
+      Rabbits: 3 health, bolt from players within 5 blocks, breed on carrots, golden
+      carrots and dandelions, spawn from the biomes' creature lists, drop by their loot
+      table. Missing: biome coat variants (all brown), hopping animation timing, the
+      killer bunny, eating carrot crops.
 - [ ] Hostile mobs: zombie variants, skeleton variants, creeper, spider, enderman,
       slime, witch, phantom, drowned, pillager, silverfish, ...
       Variants share their base mob's behaviour (`MobKind::family`): husks (zombies

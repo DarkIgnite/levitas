@@ -30,6 +30,10 @@ const SERIALIZER_BOOLEAN: i32 = 8;
 pub fn is_food(kind: MobKind, item: &str) -> bool {
     match kind {
         MobKind::Cow | MobKind::Sheep => item == "minecraft:wheat",
+        MobKind::Rabbit => matches!(
+            item,
+            "minecraft:carrot" | "minecraft:golden_carrot" | "minecraft:dandelion"
+        ),
         MobKind::Pig => matches!(
             item,
             "minecraft:carrot" | "minecraft:potato" | "minecraft:beetroot"
