@@ -1651,6 +1651,7 @@ async fn joining_players_get_the_command_tree() {
             "teleport",
             "tell",
             "time",
+            "title",
             "tp",
             "w",
             "weather",

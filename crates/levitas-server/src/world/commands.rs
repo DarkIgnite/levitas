@@ -441,6 +441,18 @@ pub(super) fn command_tree(op: bool) -> Writer {
     registry.extend_from_slice(b"minecraft:enchantment");
     let which = t.argument(who, "enchantment", command_argument::RESOURCE, registry);
     t.argument(which, "level", integer, at_least(1));
+    let title = t.literal(root, "title", false);
+    let who = player(&mut t, title);
+    for name in ["title", "subtitle", "actionbar"] {
+        let kind = t.literal(who, name, false);
+        t.argument(kind, "title", command_argument::MESSAGE, Vec::new());
+    }
+    t.literal(who, "clear", true);
+    t.literal(who, "reset", true);
+    let times = t.literal(who, "times", false);
+    let fade_in = t.argument(times, "fadeIn", integer, at_least(0));
+    let stay = t.argument(fade_in, "stay", integer, at_least(0));
+    t.argument(stay, "fadeOut", integer, at_least(0));
     let spawn = t.literal(root, "setworldspawn", true);
     pos(&mut t, spawn, "pos");
     t.literal(root, "seed", true);

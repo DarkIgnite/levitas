@@ -56,7 +56,65 @@ fn parse_block(spec: &str) -> Result<u16, String> {
     Ok(info.state_with(pairs))
 }
 
+/// The plain text of a title argument: bare words, a quoted string or `{"text":"..."}`.
+fn title_text(words: &[&str]) -> String {
+    let raw = words.join(" ");
+    if let Ok(serde_json::Value::String(s)) = serde_json::from_str(&raw) {
+        return s;
+    }
+    if let Ok(v) = serde_json::from_str::<serde_json::Value>(&raw) {
+        if let Some(s) = v.get("text").and_then(serde_json::Value::as_str) {
+            return s.to_owned();
+        }
+    }
+    raw
+}
+
 impl World {
+    /// `/title <targets> title|subtitle|actionbar <text>`, `clear`, `reset` and
+    /// `times <fade in> <stay> <fade out>` (ticks).
+    fn title_command(&mut self, id: i32, args: &[&str]) -> String {
+        const USAGE: &str =
+            "Usage: /title <targets> title|subtitle|actionbar|clear|reset|times ...";
+        let (Some(&who), Some(&what)) = (args.first(), args.get(1)) else {
+            return USAGE.to_owned();
+        };
+        let ids = match self.targets(id, who) {
+            Ok(ids) => ids,
+            Err(e) => return e,
+        };
+        let make: Box<dyn Fn() -> Writer> = match what {
+            "title" | "subtitle" | "actionbar" if args.len() > 2 => {
+                let text = title_text(&args[2..]);
+                let id = match what {
+                    "title" => clientbound::SET_TITLE_TEXT,
+                    "subtitle" => clientbound::SET_SUBTITLE_TEXT,
+                    _ => clientbound::SET_ACTION_BAR_TEXT,
+                };
+                Box::new(move || Writer::packet(id).text(&text))
+            }
+            "clear" => Box::new(|| Writer::packet(clientbound::CLEAR_TITLES).bool(false)),
+            "reset" => Box::new(|| Writer::packet(clientbound::CLEAR_TITLES).bool(true)),
+            "times" => {
+                let times: Vec<i32> = args[2..].iter().filter_map(|a| a.parse().ok()).collect();
+                let &[fade_in, stay, fade_out] = &times[..] else {
+                    return "Usage: /title <targets> times <fade in> <stay> <fade out>".to_owned();
+                };
+                Box::new(move || {
+                    Writer::packet(clientbound::SET_TITLES_ANIMATION)
+                        .i32(fade_in)
+                        .i32(stay)
+                        .i32(fade_out)
+                })
+            }
+            _ => return USAGE.to_owned(),
+        };
+        for &target in &ids {
+            self.send(target, make());
+        }
+        format!("Showed the title to {}", self.names_of(&ids))
+    }
+
     /// The players a target word names, in this dimension: a name, `@s` (the sender),
     /// `@a` (everyone), `@p` (the nearest to the sender) or `@r` (a random one).
     pub(super) fn targets(&mut self, sender: i32, word: &str) -> Result<Vec<i32>, String> {
@@ -235,6 +293,7 @@ impl World {
                 ];
                 format!("Set the world spawn point to {}, {}, {}", at.x, at.y, at.z)
             }
+            "title" => self.title_command(id, args),
             "setblock" => self.setblock_command(id, args),
             "fill" => self.fill_command(id, args),
             "enchant" => self.enchant_command(id, args),
@@ -697,5 +756,20 @@ mod tests {
         assert!(run(&mut w, a, "seed").starts_with("Seed: ["));
         assert!(run(&mut w, a, "setworldspawn 4 -60 4").contains("4, -60, 4"));
         assert_eq!(w.spawn, [4.5, -60.0, 4.5]);
+    }
+}
+
+#[cfg(test)]
+mod title_tests {
+    use super::*;
+
+    #[test]
+    fn title_text_takes_words_quotes_and_json() {
+        assert_eq!(title_text(&["Hello", "there"]), "Hello there");
+        assert_eq!(title_text(&["\"Quoted", "words\""]), "Quoted words");
+        assert_eq!(
+            title_text(&["{\"text\":\"Json\",\"color\":\"red\"}"]),
+            "Json"
+        );
     }
 }
