@@ -316,6 +316,13 @@ their server.
   - Zombie Villager Curing: Feeding a golden apple to a Weakened zombie villager triggers conversion (3600 ticks, Strength I effect, conversion sound `entity.zombie_villager.cure`, shakes metadata index 19). Completes into a cured villager (`entity.zombie_villager.converted`) with a permanent 20-emerald discount (`cured_discount`).
   - Village Iron Golem Spawning: When 3 or more villagers panic (monster within 16 blocks) within a 32-block radius and no golem is present, an Iron Golem automatically spawns to defend the village. Iron golems and monsters actively battle.
   - Phase 10 is now complete.
+- Wolves (2026-11-03, `world/wolves.rs`): `MobKind::Wolf`, `Mob.owner/sitting/collar`. Entity data 18 (flags
+  0x01 sitting, 0x04 tamed), 19 (owner: optional living entity reference, serializer 13), 21 (collar, VarInt),
+  22 (anger, VarLong, -1 when calm) is written by `wolf_data`; the layout comes from the wiki and the
+  vanilla probe could NOT be made to show a wolf, so it is unverified against a real client: if the client
+  disconnects when a wolf appears, start there. Saved with Owner (int array), Sitting, CollarColor (byte)
+  as vanilla does; vanilla keeps anger as `anger_end_time` (a game time), which Levitas does not save yet.
+  `rally_wolves` is called from `hit_mob` (owner hits) and `damage_from` (mob hits the owner).
 
 
 ## 9. Testing pattern

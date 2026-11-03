@@ -290,8 +290,8 @@ impl World {
         let Some(mob) = self.mobs.get_mut(&id) else {
             return;
         };
-        if mob.alive() && mob.health < mob.kind.max_health() {
-            mob.health = (mob.health + amount).min(mob.kind.max_health());
+        if mob.alive() && mob.health < mob.max_health() {
+            mob.health = (mob.health + amount).min(mob.max_health());
         }
     }
 

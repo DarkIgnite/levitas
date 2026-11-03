@@ -47,7 +47,7 @@ what is missing in each one.
 | 2. Blocks behave correctly | 81% | `████████▏░` |
 | 3. Fluids, gravity and light | 80% | `████████░░` |
 | 4. Combat and basic entities | 88% | `████████▊░` |
-| 5. Mobs | 72% | `███████▏░░` |
+| 5. Mobs | 73% | `███████▎░░` |
 | 6. Farming, nature and time | 95% | `█████████▌` |
 | 7. Redstone | 68% | `██████▊░░░` |
 | 8. Progression (enchanting, brewing, ...) | 97% | `█████████▋` |

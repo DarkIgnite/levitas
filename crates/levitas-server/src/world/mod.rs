@@ -59,6 +59,7 @@ mod time;
 mod tnt;
 pub mod travel;
 mod villagers;
+mod wolves;
 
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;

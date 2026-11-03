@@ -47,7 +47,7 @@ const ENTITY_EVENT_MOB_DEATH: i8 = 3;
 const ENTITY_EVENT_EAT_GRASS: i8 = 10;
 
 /// Wool colours by their dye number, as sheep store them.
-const COLORS: [&str; 16] = [
+pub(super) const COLORS: [&str; 16] = [
     "white",
     "orange",
     "magenta",
@@ -95,6 +95,7 @@ pub enum MobKind {
     Stray,
     CaveSpider,
     Slime,
+    Wolf,
 }
 
 impl MobKind {
@@ -139,6 +140,7 @@ impl MobKind {
             "minecraft:stray" => Some(MobKind::Stray),
             "minecraft:cave_spider" => Some(MobKind::CaveSpider),
             "minecraft:slime" => Some(MobKind::Slime),
+            "minecraft:wolf" => Some(MobKind::Wolf),
             _ => None,
         }
     }
@@ -172,6 +174,7 @@ impl MobKind {
             MobKind::Stray => "minecraft:stray",
             MobKind::CaveSpider => "minecraft:cave_spider",
             MobKind::Slime => "minecraft:slime",
+            MobKind::Wolf => "minecraft:wolf",
         }
     }
 
@@ -205,6 +208,7 @@ impl MobKind {
             MobKind::Stray => "Stray",
             MobKind::CaveSpider => "Cave Spider",
             MobKind::Slime => "Slime",
+            MobKind::Wolf => "Wolf",
         }
     }
 
@@ -284,6 +288,7 @@ impl MobKind {
             MobKind::Vindicator => 9.0,
             MobKind::Ravager => 12.0,
             MobKind::Evoker => 6.0,
+            MobKind::Wolf => 4.0,
             _ => 0.0,
         }
     }
@@ -343,6 +348,7 @@ impl MobKind {
             MobKind::Stray => entity_type::STRAY,
             MobKind::CaveSpider => entity_type::CAVE_SPIDER,
             MobKind::Slime => entity_type::SLIME,
+            MobKind::Wolf => entity_type::WOLF,
         }
     }
 
@@ -351,6 +357,7 @@ impl MobKind {
             MobKind::Cow | MobKind::Pig => 10.0,
             MobKind::Sheep => 8.0,
             MobKind::Chicken => 4.0,
+            MobKind::Wolf => 8.0,
             MobKind::Zombie | MobKind::Creeper | MobKind::Skeleton => 20.0,
             MobKind::Husk | MobKind::Stray => 20.0,
             MobKind::ZombifiedPiglin => 20.0,
@@ -379,6 +386,7 @@ impl MobKind {
             MobKind::Pig => (0.9, 0.9),
             MobKind::Sheep => (0.9, 1.3),
             MobKind::Chicken => (0.4, 0.7),
+            MobKind::Wolf => (0.6, 0.85),
             MobKind::Zombie | MobKind::Husk => (0.6, 1.95),
             MobKind::Spider => (1.4, 0.9),
             MobKind::CaveSpider => (0.7, 0.5),
@@ -405,6 +413,7 @@ impl MobKind {
     fn speed(self) -> f64 {
         match self {
             MobKind::Chicken => 0.08,
+            MobKind::Wolf => 0.15,
             MobKind::Zombie | MobKind::Husk => 0.12,
             MobKind::Spider | MobKind::CaveSpider => 0.15,
             MobKind::Creeper => 0.11,
@@ -456,6 +465,7 @@ impl MobKind {
             MobKind::Stray => "stray",
             MobKind::CaveSpider => "cave_spider",
             MobKind::Slime => "slime",
+            MobKind::Wolf => "wolf",
         }
     }
 }
@@ -538,6 +548,11 @@ pub struct Mob {
     /// The player who fed this animal into love, or started curing this zombie villager:
     /// they get the advancement when it pays off. Not saved.
     pub helped_by: Option<i32>,
+    /// Wolves: the owner's UUID once tamed, whether it sits, its collar colour (dye
+    /// index, red by default).
+    pub owner: Option<u128>,
+    pub sitting: bool,
+    pub collar: u8,
     /// Wandering trader despawn countdown in ticks.
     pub despawn_timer: Option<u32>,
     /// Entity ID of the leader mob (e.g. wandering trader for trader llamas).
@@ -623,6 +638,18 @@ impl Mob {
             despawn_timer: None,
             leader: None,
             panic_ticks: 0,
+            owner: None,
+            sitting: false,
+            collar: super::wolves::DEFAULT_COLLAR,
+        }
+    }
+
+    /// Full health: tamed wolves have far more than wild ones.
+    pub fn max_health(&self) -> f32 {
+        if self.kind == MobKind::Wolf && self.owner.is_some() {
+            super::wolves::TAMED_HEALTH
+        } else {
+            self.kind.max_health()
         }
     }
 
@@ -716,6 +743,9 @@ impl Mob {
         if self.kind == MobKind::IronGolem {
             packets.push(super::golems::golem_data(id, self.player_created));
         }
+        if self.kind == MobKind::Wolf {
+            packets.push(super::wolves::wolf_data(self, id));
+        }
         if let Some(name) = self.name {
             packets.push(name_data(id, name));
         }
@@ -805,7 +835,7 @@ impl Mob {
     }
 
     /// The mob as vanilla saves it in `entities/` region files.
-    fn to_nbt(&self) -> Compound {
+    pub(super) fn to_nbt(&self) -> Compound {
         let uuid = [
             (self.uuid >> 96) as i32,
             (self.uuid >> 64) as i32,
@@ -839,6 +869,19 @@ impl Mob {
                 nbt.insert("Size", i32::from(self.slime_size) - 1);
             }
             MobKind::ZombifiedPiglin => nbt.insert("AngerTime", self.anger as i32),
+            MobKind::Wolf => {
+                nbt.insert("Sitting", self.sitting);
+                nbt.insert("CollarColor", self.collar as i8);
+                if let Some(owner) = self.owner {
+                    let owner = [
+                        (owner >> 96) as i32,
+                        (owner >> 64) as i32,
+                        (owner >> 32) as i32,
+                        owner as i32,
+                    ];
+                    nbt.insert("Owner", owner.to_vec());
+                }
+            }
             _ => {}
         }
         if let Some(v) = &self.villager {
@@ -899,7 +942,21 @@ impl Mob {
             mob.slime_size = (size.clamp(0, 3) as u8 + 1).next_power_of_two().min(4);
         }
         mob.anger = nbt.int("AngerTime").unwrap_or(0).max(0) as u32;
-        mob.health = nbt.float("Health").map_or(kind.max_health(), |h| h as f32);
+        if kind == MobKind::Wolf {
+            mob.sitting = nbt.int("Sitting").unwrap_or(0) != 0;
+            mob.collar = nbt
+                .int("CollarColor")
+                .map_or(super::wolves::DEFAULT_COLLAR, |c| c.clamp(0, 15) as u8);
+            if let Some(&[a, b, c, d]) = nbt.int_array("Owner") {
+                mob.owner = Some(
+                    (u128::from(a as u32) << 96)
+                        | (u128::from(b as u32) << 64)
+                        | (u128::from(c as u32) << 32)
+                        | u128::from(d as u32),
+                );
+            }
+        }
+        mob.health = nbt.float("Health").map_or(mob.max_health(), |h| h as f32);
         if mob.health <= 0.0 {
             return None;
         }
@@ -977,7 +1034,7 @@ struct SpawnList {
 }
 
 /// Mobs `/summon` knows.
-pub const SUMMONABLE: [&str; 27] = [
+pub const SUMMONABLE: [&str; 28] = [
     "cow",
     "pig",
     "sheep",
@@ -1005,6 +1062,7 @@ pub const SUMMONABLE: [&str; 27] = [
     "stray",
     "cave_spider",
     "slime",
+    "wolf",
 ];
 
 fn spawners(list: &Value) -> Vec<Spawner> {
@@ -1248,6 +1306,9 @@ impl World {
             } else if !mob.kind.is_monster() {
                 self.tick_breeding(id, &mut mob);
             }
+            if mob.kind == MobKind::Wolf {
+                self.tick_wolf(id, &mut mob);
+            }
             if mob.kind.is_monster() && self.hunt(id, &mut mob) {
                 continue; // exploded
             }
@@ -1312,7 +1373,7 @@ impl World {
         }
 
         if heal > 0.0 {
-            mob.health = (mob.health + heal).min(mob.kind.max_health());
+            mob.health = (mob.health + heal).min(mob.max_health());
         }
 
         if poison_damage > 0.0 && mob.health > 1.0 {
@@ -1920,7 +1981,7 @@ impl World {
                 World::golem_hit_by(&mut mob, attacker);
             }
         } else {
-            if !mob.kind.is_monster() {
+            if !mob.kind.is_monster() && mob.kind != MobKind::Wolf {
                 mob.panic = PANIC_TICKS;
                 mob.target = None;
             }
@@ -1965,6 +2026,12 @@ impl World {
         }
         if let Some(attacker) = anger_piglins {
             self.anger_piglins(at, attacker);
+        }
+        if let Some(attacker) = by_player.filter(|_| !killed) {
+            self.rally_wolves(attacker, target);
+            if kind == entity_type::WOLF {
+                self.wolf_hurt_by(target, attacker);
+            }
         }
         true
     }
@@ -2061,6 +2128,10 @@ impl World {
         let held = ItemInfo::get(p.inventory.slots[slot].item).map_or("", |i| i.name);
         if held == "minecraft:name_tag" {
             self.name_mob(id, target, slot);
+            return;
+        }
+        if mob.kind == MobKind::Wolf {
+            self.use_on_wolf(id, target, slot, held);
             return;
         }
         if mob.kind == MobKind::Villager || mob.kind == MobKind::WanderingTrader {

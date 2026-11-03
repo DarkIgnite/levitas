@@ -257,6 +257,13 @@ Known gaps are listed under each phase instead of being hidden.
       by eating grass), chickens (eggs, slow falling). They wander, panic when hit,
       swim, look at players and make their sounds. Missing: breeding, babies, temptation
       by food, dyeing, biome variants (all are temperate), and every other animal.
+      Wolves (`world/wolves.rs`): wild ones are neutral until hit, then the pack bites
+      the player for 20 to 39 seconds; a bone tames one in three tries (sits, 40
+      health, red collar, dye changes it, meat mends it); tamed wolves sit or stand on
+      right-click, follow and teleport to their owner, and join the owner's fights.
+      Pups of tamed wolves are tamed. Missing: biome wolf variants and sound variants
+      (all pale and classic), wolves hunting sheep, skeletons and rabbits, armour,
+      shaking dry, wagging tails and health-based growls, cats, parrots and horses.
 - [ ] Hostile mobs: zombie variants, skeleton variants, creeper, spider, enderman,
       slime, witch, phantom, drowned, pillager, silverfish, ...
       Variants share their base mob's behaviour (`MobKind::family`): husks (zombies
@@ -293,7 +300,8 @@ Known gaps are listed under each phase instead of being hidden.
 - [ ] Breeding, taming, leashes, name tags. Breeding works (`world/breeding.rs`): food
       puts adults in love, partners meet and make a baby that grows up in 20 minutes
       (faster when fed), parents rest 5 minutes, breeding drops experience, and animals
-      follow players holding their food. Taming, leashes and name tags are missing.
+      follow players holding their food. Wolves can be tamed; name tags work. Taming of
+      cats, horses and parrots, and leashes, are missing.
 
 ## Phase 6: Farming, nature and time
 

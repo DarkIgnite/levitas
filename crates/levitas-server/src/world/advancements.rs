@@ -36,6 +36,8 @@ pub enum Trigger {
     ConsumeItem(Stack),
     /// Animals the player fed had a baby of this type.
     BredAnimals(i32),
+    /// The player tamed an animal of this type.
+    TamedAnimal(i32),
     ChangedDimension {
         from: &'static str,
         to: &'static str,
@@ -62,6 +64,7 @@ impl Trigger {
             Trigger::KilledEntity(_) => "minecraft:player_killed_entity",
             Trigger::ConsumeItem(_) => "minecraft:consume_item",
             Trigger::BredAnimals(_) => "minecraft:bred_animals",
+            Trigger::TamedAnimal(_) => "minecraft:tame_animal",
             Trigger::ChangedDimension { .. } => "minecraft:changed_dimension",
             Trigger::EnchantedItem { .. } => "minecraft:enchanted_item",
             Trigger::SleptInBed => "minecraft:slept_in_bed",
@@ -680,6 +683,7 @@ impl World {
                 }
                 ("entity", Trigger::KilledEntity(kind))
                 | ("entity", Trigger::SummonedEntity(kind))
+                | ("entity", Trigger::TamedAnimal(kind))
                 | ("child" | "parent" | "partner", Trigger::BredAnimals(kind)) => {
                     matches_entity_condition(value, kind, None)
                 }

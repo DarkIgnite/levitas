@@ -129,6 +129,12 @@ impl World {
         ];
         let mut baby = Mob::new(mob.kind, at, &mut self.rng);
         baby.age = BABY_AGE;
+        if mob.kind == MobKind::Wolf {
+            // A tamed wolf's pup is tamed to the same owner.
+            baby.owner = mob.owner.or(self.mobs[&pid].owner);
+            baby.sitting = false;
+            baby.health = baby.max_health();
+        }
         if mob.kind == MobKind::Sheep {
             baby.color = if self.rng.below(2) == 0 {
                 mob.color

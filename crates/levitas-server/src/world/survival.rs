@@ -233,6 +233,9 @@ impl World {
         if !rule.is_empty() && !crate::rules::bool(rule) {
             return false;
         }
+        if let Some(attacker) = source.filter(|s| self.mobs.contains_key(s)) {
+            self.rally_wolves(id, attacker);
+        }
         // Monsters hit harder or softer with the difficulty.
         let by_mob = source.is_some_and(|s| self.mobs.contains_key(&s))
             || matches!(kind, Damage::Explosion("Creeper"));
