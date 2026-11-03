@@ -1660,6 +1660,91 @@ async fn joining_players_get_the_command_tree() {
     );
 }
 
+/// The players a tab list update names, by UUID.
+fn tab_uuids(body: &[u8]) -> Vec<u128> {
+    let mut r = Reader::new(body);
+    r.u8().unwrap(); // the actions
+    (0..r.varint().unwrap())
+        .map(|_| {
+            let uuid = r.uuid().unwrap();
+            r.string(16).unwrap();
+            for _ in 0..r.varint().unwrap() {
+                r.string(64).unwrap();
+                r.string(32767).unwrap();
+                if r.bool().unwrap() {
+                    r.string(32767).unwrap();
+                }
+            }
+            r.varint().unwrap(); // game mode
+            r.bool().unwrap(); // listed
+            r.varint().unwrap(); // latency
+            uuid
+        })
+        .collect()
+}
+
+#[tokio::test]
+async fn the_tab_list_spans_dimensions() {
+    let timeout = std::time::Duration::from_secs(20);
+    let addr = server().await;
+    let mut alice = join(addr, "Alice", 0xA1).await;
+    read_until(&mut alice, play::clientbound::PLAYER_POSITION).await;
+    let mut bob = join(addr, "Bob", 0xB2).await;
+    // Alice goes to the Nether, where Bob cannot see her.
+    command(&mut alice, "execute in minecraft:the_nether run tp 0 80 0").await;
+    tokio::time::timeout(timeout, read_until(&mut alice, play::clientbound::RESPAWN))
+        .await
+        .expect("Alice reached the Nether");
+    // Carol logs in to the overworld: her list has Alice, who is elsewhere, as well as Bob.
+    let mut carol = join(addr, "Carol", 0xC3).await;
+    let body = tokio::time::timeout(
+        timeout,
+        read_until(&mut carol, play::clientbound::PLAYER_INFO_UPDATE),
+    )
+    .await
+    .expect("Carol's tab list");
+    let mut listed = tab_uuids(&body);
+    listed.sort_unstable();
+    assert_eq!(listed, [0xA1, 0xB2, 0xC3]);
+    // Alice leaving the game from the Nether takes her off Bob's list in the overworld.
+    drop(alice);
+    let removed = tokio::time::timeout(
+        timeout,
+        read_until(&mut bob, play::clientbound::PLAYER_INFO_REMOVE),
+    )
+    .await
+    .expect("Bob was told Alice left");
+    let mut r = Reader::new(&removed);
+    assert_eq!(r.varint().unwrap(), 1);
+    assert_eq!(r.uuid().unwrap(), 0xA1);
+}
+
+#[tokio::test]
+async fn whispers_reach_players_in_other_dimensions() {
+    let timeout = std::time::Duration::from_secs(20);
+    let addr = server().await;
+    let mut alice = join(addr, "Alice", 0xA1).await;
+    read_until(&mut alice, play::clientbound::PLAYER_POSITION).await;
+    let mut bob = join(addr, "Bob", 0xB2).await;
+    read_until(&mut bob, play::clientbound::PLAYER_POSITION).await;
+    command(&mut bob, "execute in minecraft:the_nether run tp 0 80 0").await;
+    tokio::time::timeout(timeout, read_until(&mut bob, play::clientbound::RESPAWN))
+        .await
+        .expect("Bob reached the Nether");
+    command(&mut alice, "msg Bob psst from the overworld").await;
+    // Bob hears it: a chat message that carries the text.
+    tokio::time::timeout(timeout, async {
+        loop {
+            let body = read_until(&mut bob, play::clientbound::SYSTEM_CHAT).await;
+            if String::from_utf8_lossy(&body).contains("psst from the overworld") {
+                break;
+            }
+        }
+    })
+    .await
+    .expect("the whisper arrived");
+}
+
 /// Reads entity spawns until a mob of type `kind` appears; returns its entity ID.
 async fn spawned(client: &mut TcpStream, kind: i32) -> i32 {
     loop {

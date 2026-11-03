@@ -434,8 +434,12 @@ Known gaps are listed under each phase instead of being hidden.
       respawns in the overworld. `/execute in <dimension> run tp` and `/tp` move
       players. In the Nether water boils away when poured, beds blow up (power 5,
       with fire), and lava runs as far as water, three times as often. The End is a
-      third dimension (see below). Missing: players in other dimensions in the tab
-      list.
+      third dimension (see below). The player list is one for the whole server
+      (`world/tablist.rs`, shared by the dimensions): everyone is listed wherever they
+      are, a player who traveled can be seen in the new dimension, leaving the game
+      takes them off every list, game mode changes reach all, and `/msg` reaches
+      players in other dimensions. Missing: selectors and other commands across
+      dimensions.
 - [x] Nether portals (lighting, linking, travelling). `blocks/portal.rs` finds obsidian
       frames (2 to 21 wide, 3 to 21 high, corners optional) and fire in one lights it;
       portals go out when their frame breaks. `world/portal.rs`: standing in a portal
@@ -545,7 +549,7 @@ Known gaps are listed under each phase instead of being hidden.
       /seed, /save-all, and the console commands (op, ban, whitelist, ...). Players are
       picked by name or `@s`, `@a`, `@p`, `@r`, and all of it is offered for
       tab-completion. Missing: other selectors (`@e`, arguments like `[distance=..5]`),
-      targets in other dimensions, /spawnpoint, /title, /tellraw, /data, /execute
+      targets in other dimensions (but /msg), /spawnpoint, /title, /tellraw, /data, /execute
       (beyond `in <dimension> run tp`), /locate, /fillbiome, /clone, /scoreboard.
 - [x] Game rules and difficulty. Every 26.3 game rule is kept and saved in
       `data/minecraft/game_rules.dat` as vanilla saves it (`rules.rs`), set with

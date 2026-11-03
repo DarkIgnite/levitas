@@ -53,6 +53,7 @@ mod stats;
 mod storage;
 mod sulfur;
 mod survival;
+mod tablist;
 mod thrown;
 mod time;
 mod tnt;
@@ -160,6 +161,11 @@ pub enum Event {
     Arrive(Box<travel::Arrival>),
     /// A message for every player here, sent from another dimension.
     Announce {
+        frame: Frame,
+    },
+    /// A private message for the player of this name here, sent from another dimension.
+    Direct {
+        name: String,
         frame: Frame,
     },
     /// A line typed into the server console.
@@ -349,7 +355,9 @@ pub fn spawn(dir: impl Into<PathBuf>, new: NewWorld) -> mpsc::Sender<Event> {
         .map(|((w, _), (tx, _))| (w.dimension, tx.clone()))
         .collect();
     let overworld_tx = senders[&Dimension::Overworld].clone();
+    let tab = tablist::TabList::default();
     for ((mut world, generated), (_, rx)) in worlds.into_iter().zip(channels) {
+        world.tab = tab.clone();
         world.links = senders
             .iter()
             .filter(|(&d, _)| d != world.dimension)
@@ -578,6 +586,8 @@ struct World {
     dimension: Dimension,
     /// The other dimensions' world tasks.
     links: HashMap<Dimension, mpsc::Sender<Event>>,
+    /// The player list of the whole server, shared with the other dimensions.
+    tab: tablist::TabList,
     /// Nether portals in this dimension, for travellers to come out of.
     portals: Vec<portal::KnownPortal>,
     /// The world folder: level.dat, data/, dimensions/ and players/.
@@ -698,6 +708,7 @@ impl World {
         let world = Self {
             dimension,
             links: HashMap::new(),
+            tab: tablist::TabList::default(),
             portals: Self::load_portals(&folder),
             storage: RegionStorage::new(folder.join("region")),
             entity_storage: RegionStorage::new(folder.join("entities")),
@@ -793,6 +804,15 @@ impl World {
             Event::Arrive(arrival) => self.arrive(*arrival),
             Event::Announce { frame } => {
                 for p in self.players.values_mut() {
+                    p.deliver(&frame);
+                }
+            }
+            Event::Direct { name, frame } => {
+                for p in self
+                    .players
+                    .values_mut()
+                    .filter(|p| p.profile.name.eq_ignore_ascii_case(&name))
+                {
                     p.deliver(&frame);
                 }
             }
@@ -996,12 +1016,18 @@ impl World {
                 .f32(0.0),
         );
 
-        // Everyone's tab list entry to the newcomer, the newcomer's to everyone else.
-        let all: Vec<&Player> = self.players.values().collect();
-        let everyone = player_info(&all);
-        let newcomer = player_info(&[&self.players[&id]]);
-        self.send(id, everyone);
-        self.broadcast(newcomer, Some(id));
+        // The whole server's tab list to the newcomer, the newcomer's entry to everyone
+        // else, in every dimension.
+        let p = &self.players[&id];
+        self.tab.add(
+            p.profile.uuid,
+            &p.profile.name,
+            &p.profile.properties,
+            p.mode,
+        );
+        let uuid = p.profile.uuid;
+        self.send(id, self.tab.packet(None));
+        self.announce_except(self.tab.packet(Some(uuid)), id);
         for packet in spawn_player(id, &self.players[&id]) {
             self.broadcast(packet, Some(id));
         }
@@ -1049,11 +1075,11 @@ impl World {
                 .varint(id),
             None,
         );
-        self.broadcast(
+        self.tab.remove(player.profile.uuid);
+        self.announce(
             Writer::packet(clientbound::PLAYER_INFO_REMOVE)
                 .varint(1)
                 .uuid(player.profile.uuid),
-            None,
         );
         let name = player.profile.name.clone();
         self.announce(system_chat(&format!("{name} left the game")));
@@ -1920,20 +1946,6 @@ fn block_update(pos: BlockPos, state: u16) -> Writer {
 
 fn entity_event(id: i32, event: i8) -> Writer {
     Writer::packet(clientbound::ENTITY_EVENT).i32(id).i8(event)
-}
-
-fn player_info(players: &[&Player]) -> Writer {
-    let mut packet = Writer::packet(clientbound::PLAYER_INFO_UPDATE)
-        .u8(PLAYER_INFO_ACTIONS)
-        .varint(players.len() as i32);
-    for p in players {
-        packet = packet.uuid(p.profile.uuid).string(&p.profile.name);
-        packet = crate::connection::write_properties(packet, &p.profile.properties)
-            .varint(i32::from(p.mode)) // update game mode
-            .bool(true) // update listed
-            .varint(0); // update latency
-    }
-    packet
 }
 
 /// Packets that make a player's entity appear for others.

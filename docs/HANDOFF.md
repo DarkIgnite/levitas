@@ -170,6 +170,10 @@ Workspace crates in `crates/`:
 - `world/commands_extra.rs` – player selectors (`World::targets`) and the commands that
   use them (give, clear, tp, msg, setblock, fill, enchant, ...); `commands.rs` keeps the
   older forms and the Brigadier tree sent for tab completion (add new commands to both).
+- `world/tablist.rs` – the server-wide player list (one `TabList` shared by the three
+  dimension worlds): add on login, remove on leaving the game, never on changing
+  dimension. Cross-dimension messages go through `Event::Announce` (everyone) and
+  `Event::Direct` (one player by name).
 - `world/maps.rs` – filled maps: grid squares, drawing while held, `map_<id>.dat`, the
   shared map ID counter, cartography locking and zooming.
 - `world/commands.rs` – `/gamemode`, `/give`, `/kill`, `/time`, `/weather`, and the

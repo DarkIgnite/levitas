@@ -193,7 +193,17 @@ impl World {
                         }
                         format!("You whisper to {}: {text}", self.names_of(&ids))
                     }
-                    Err(e) => e,
+                    // Not in this dimension: a player somewhere else on the server.
+                    Err(e) => match self.tab.name_of(who).filter(|_| !who.starts_with('@')) {
+                        Some(name) => {
+                            self.direct_elsewhere(
+                                &name,
+                                system_chat(&format!("{from} whispers to you: {text}")),
+                            );
+                            format!("You whisper to {name}: {text}")
+                        }
+                        None => e,
+                    },
                 }
             }
             "me" => {

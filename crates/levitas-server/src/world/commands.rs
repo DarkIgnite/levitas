@@ -210,13 +210,13 @@ impl World {
                 .u8(GAME_EVENT_CHANGE_GAME_MODE)
                 .f32(f32::from(mode)),
         );
-        self.broadcast(
+        self.tab.set_mode(uuid, mode);
+        self.announce(
             Writer::packet(clientbound::PLAYER_INFO_UPDATE)
                 .u8(PLAYER_INFO_UPDATE_GAME_MODE)
                 .varint(1)
                 .uuid(uuid)
                 .varint(i32::from(mode)),
-            None,
         );
         let name = if mode == GAME_MODE_CREATIVE {
             "Creative"

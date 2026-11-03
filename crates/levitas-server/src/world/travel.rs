@@ -191,6 +191,17 @@ impl World {
         self.forward(f);
     }
 
+    /// Sends a private message to the player of this name in another dimension.
+    pub(super) fn direct_elsewhere(&mut self, name: &str, packet: Writer) {
+        let f = frame(packet);
+        for link in self.links.values() {
+            let (link, f, name) = (link.clone(), f.clone(), name.to_owned());
+            tokio::spawn(async move {
+                let _ = link.send(Event::Direct { name, frame: f }).await;
+            });
+        }
+    }
+
     fn forward(&mut self, f: Frame) {
         for link in self.links.values() {
             let link = link.clone();
