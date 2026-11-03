@@ -1612,6 +1612,11 @@ async fn joining_players_get_the_command_tree() {
                     for _ in 0..(limits & 1) + (limits >> 1 & 1) {
                         r.i32().unwrap();
                     }
+                } else if parser == levitas_registry::command_argument::BRIGADIER_FLOAT {
+                    let limits = r.u8().unwrap();
+                    for _ in 0..(limits & 1) + (limits >> 1 & 1) {
+                        r.f32().unwrap();
+                    }
                 } else if parser == levitas_registry::command_argument::RESOURCE {
                     r.string(32767).unwrap(); // the registry
                 } else if parser == levitas_registry::command_argument::BRIGADIER_STRING {
@@ -1650,6 +1655,7 @@ async fn joining_players_get_the_command_tree() {
             "msg",
             "op",
             "pardon",
+            "playsound",
             "save-all",
             "say",
             "seed",
@@ -2340,4 +2346,15 @@ async fn ender_pearls_carry_their_thrower_for_five_damage() {
     spawned(&mut alice, entity_type::ENDER_PEARL).await;
     read_until(&mut alice, play::clientbound::PLAYER_POSITION).await;
     assert_eq!(health_below(&mut alice, 20.0).await, 15.0);
+}
+
+#[tokio::test]
+async fn the_playsound_command_plays_a_sound() {
+    let mut alice = join(server().await, "Alice", 1).await;
+    command(
+        &mut alice,
+        "playsound minecraft:entity.experience_orb.pickup master Alice",
+    )
+    .await;
+    read_until(&mut alice, play::clientbound::SOUND).await;
 }

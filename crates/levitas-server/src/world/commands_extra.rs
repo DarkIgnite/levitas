@@ -107,6 +107,43 @@ impl World {
         )
     }
 
+    /// `/playsound <sound> <source> <targets> [x y z] [volume] [pitch]`: plays the sound
+    /// at each target (or the given spot); every sound is heard as a block sound.
+    fn playsound_command(&mut self, id: i32, args: &[&str]) -> String {
+        const USAGE: &str = "Usage: /playsound <sound> <source> <targets> [x y z] [volume] [pitch]";
+        let (Some(&sound), Some(_), Some(&who)) = (args.first(), args.get(1), args.get(2)) else {
+            return USAGE.to_owned();
+        };
+        let name = if sound.contains(':') {
+            sound.to_owned()
+        } else {
+            format!("minecraft:{sound}")
+        };
+        if levitas_registry::sound_id(&name).is_none() {
+            return format!("Unknown sound: {name}");
+        }
+        let ids = match self.targets(id, who) {
+            Ok(ids) => ids,
+            Err(e) => return e,
+        };
+        let rest = &args[3..];
+        let spot = (rest.len() >= 3 && rest[..3].iter().all(|a| looks_like_coordinate(a)))
+            .then(|| self.block_pos(id, &rest[..3]))
+            .flatten();
+        let numbers = &rest[if spot.is_some() { 3 } else { 0 }..];
+        let volume: f32 = numbers.first().and_then(|v| v.parse().ok()).unwrap_or(1.0);
+        let pitch: f32 = numbers.get(1).and_then(|v| v.parse().ok()).unwrap_or(1.0);
+        let pitch = pitch.clamp(0.5, 2.0);
+        for &target in &ids {
+            let at = match spot {
+                Some(p) => [f64::from(p.x) + 0.5, f64::from(p.y), f64::from(p.z) + 0.5],
+                None => self.players[&target].pos,
+            };
+            self.play_sound_at(&name, at, volume, pitch, None);
+        }
+        format!("Played sound {name} to {}", self.names_of(&ids))
+    }
+
     /// `/title <targets> title|subtitle|actionbar <text>`, `clear`, `reset` and
     /// `times <fade in> <stay> <fade out>` (ticks).
     fn title_command(&mut self, id: i32, args: &[&str]) -> String {
@@ -329,6 +366,7 @@ impl World {
                 ];
                 format!("Set the world spawn point to {}, {}, {}", at.x, at.y, at.z)
             }
+            "playsound" => self.playsound_command(id, args),
             "tellraw" => {
                 let (&who, text) = args.split_first()?;
                 if text.is_empty() {

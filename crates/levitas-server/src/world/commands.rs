@@ -444,6 +444,13 @@ pub(super) fn command_tree(op: bool) -> Writer {
     let spawnpoint = t.literal(root, "spawnpoint", true);
     let who = player(&mut t, spawnpoint);
     pos(&mut t, who, "pos");
+    let playsound = t.literal(root, "playsound", false);
+    let sound = t.argument(playsound, "sound", word, vec![0]);
+    let source = t.argument(sound, "source", word, vec![0]);
+    let who = player(&mut t, source);
+    let at = pos(&mut t, who, "pos");
+    let volume = t.argument(at, "volume", command_argument::BRIGADIER_FLOAT, vec![0]);
+    t.argument(volume, "pitch", command_argument::BRIGADIER_FLOAT, vec![0]);
     let tellraw = t.literal(root, "tellraw", false);
     let who = player(&mut t, tellraw);
     t.argument(who, "message", command_argument::MESSAGE, Vec::new());
