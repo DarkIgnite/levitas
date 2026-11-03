@@ -311,6 +311,34 @@ impl Progress {
         self.is_done(parent) || t.list[parent].parent.is_some_and(|g| self.is_done(g))
     }
 
+    /// The advancements to send that the client lacks: the visible ones, each after its
+    /// ancestors (the client drops the whole tree when a parent is missing, as when a
+    /// breeding advancement is done before its tab's root).
+    fn to_send(&self) -> Vec<usize> {
+        let t = tree();
+        let mut out: Vec<usize> = Vec::new();
+        for a in 0..t.list.len() {
+            if self.sent.contains(&a) || !self.visible(a) {
+                continue;
+            }
+            let mut chain = vec![a];
+            let mut top = a;
+            while let Some(parent) = t.list[top].parent {
+                if self.sent.contains(&parent) {
+                    break;
+                }
+                chain.push(parent);
+                top = parent;
+            }
+            for x in chain.into_iter().rev() {
+                if !out.contains(&x) {
+                    out.push(x);
+                }
+            }
+        }
+        out
+    }
+
     /// The vanilla saved form.
     pub fn to_json(&self) -> Value {
         let t = tree();
@@ -781,9 +809,7 @@ impl World {
             p.advancements.sent.clear();
         }
         let progress = &p.advancements;
-        let added: Vec<usize> = (0..tree().list.len())
-            .filter(|&a| !progress.sent.contains(&a) && progress.visible(a))
-            .collect();
+        let added = progress.to_send();
         let mut update: Vec<usize> = changed
             .iter()
             .copied()
@@ -911,6 +937,25 @@ mod tests {
     fn done(w: &World, id: i32, name: &str) -> bool {
         let a = tree().index(name).expect(name);
         w.players[&id].advancements.is_done(a)
+    }
+
+    #[test]
+    fn a_done_advancement_is_sent_after_its_undone_ancestors() {
+        let t = tree();
+        let child = t.index("minecraft:husbandry/breed_an_animal").unwrap();
+        let root = t.index("minecraft:husbandry/root").unwrap();
+        let mut progress = Progress::default();
+        progress.met.insert((child, 0), 1);
+        let send = progress.to_send();
+        let (at_root, at_child) = (
+            send.iter().position(|&a| a == root),
+            send.iter().position(|&a| a == child),
+        );
+        assert!(at_root.is_some() && at_child.is_some(), "{send:?}");
+        assert!(at_root < at_child, "the parent goes first");
+        // Once sent, they are not sent again.
+        progress.sent.extend(send);
+        assert!(progress.to_send().is_empty());
     }
 
     #[test]

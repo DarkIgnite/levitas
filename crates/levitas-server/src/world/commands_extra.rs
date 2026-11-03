@@ -329,6 +329,22 @@ impl World {
                 ];
                 format!("Set the world spawn point to {}, {}, {}", at.x, at.y, at.z)
             }
+            "tellraw" => {
+                let (&who, text) = args.split_first()?;
+                if text.is_empty() {
+                    return Some("Usage: /tellraw <targets> <message>".to_owned());
+                }
+                let text = title_text(text);
+                match self.targets(id, who) {
+                    Ok(ids) => {
+                        for &target in &ids {
+                            self.send(target, system_chat(&text));
+                        }
+                        String::new()
+                    }
+                    Err(e) => e,
+                }
+            }
             "title" => self.title_command(id, args),
             "spawnpoint" => self.spawnpoint_command(id, args),
             "setblock" => self.setblock_command(id, args),

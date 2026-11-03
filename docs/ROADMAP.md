@@ -570,7 +570,7 @@ Known gaps are listed under each phase instead of being hidden.
       /seed, /save-all, and the console commands (op, ban, whitelist, ...). Players are
       picked by name or `@s`, `@a`, `@p`, `@r`, and all of it is offered for
       tab-completion. Missing: other selectors (`@e`, arguments like `[distance=..5]`),
-      targets in other dimensions (but /msg), /tellraw (/title works with plain text, quoted strings and {"text":..} only), /data, /execute
+      targets in other dimensions (but /msg), colour and format in /tellraw and /title (text only) (/title works with plain text, quoted strings and {"text":..} only), /data, /execute
       (beyond `in <dimension> run tp`), /locate, /fillbiome, /clone, /scoreboard.
 - [x] Game rules and difficulty. Every 26.3 game rule is kept and saved in
       `data/minecraft/game_rules.dat` as vanilla saves it (`rules.rs`), set with

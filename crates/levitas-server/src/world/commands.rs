@@ -444,6 +444,9 @@ pub(super) fn command_tree(op: bool) -> Writer {
     let spawnpoint = t.literal(root, "spawnpoint", true);
     let who = player(&mut t, spawnpoint);
     pos(&mut t, who, "pos");
+    let tellraw = t.literal(root, "tellraw", false);
+    let who = player(&mut t, tellraw);
+    t.argument(who, "message", command_argument::MESSAGE, Vec::new());
     let title = t.literal(root, "title", false);
     let who = player(&mut t, title);
     for name in ["title", "subtitle", "actionbar"] {

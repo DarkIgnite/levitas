@@ -1483,6 +1483,14 @@ async fn rain_starts_on_command() {
 }
 
 #[tokio::test]
+async fn the_title_command_shows_a_title() {
+    let mut alice = join(server().await, "Alice", 1).await;
+    command(&mut alice, "title Alice title Hello there").await;
+    let body = read_until(&mut alice, play::clientbound::SET_TITLE_TEXT).await;
+    assert!(String::from_utf8_lossy(&body).contains("Hello there"));
+}
+
+#[tokio::test]
 async fn sleeping_through_the_night_and_respawning_at_the_bed() {
     let mut alice = join(server().await, "Alice", 1).await;
     read_until(&mut alice, play::clientbound::PLAYER_POSITION).await;
@@ -1651,6 +1659,7 @@ async fn joining_players_get_the_command_tree() {
             "summon",
             "teleport",
             "tell",
+            "tellraw",
             "time",
             "title",
             "tp",
