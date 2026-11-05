@@ -710,7 +710,17 @@ impl World {
         dimension: Dimension,
     ) -> (Self, tokio::sync::mpsc::UnboundedReceiver<Vec<Generated>>) {
         if dimension == Dimension::Overworld {
-            storage::upgrade_layout(&dir);
+            let problems = storage::upgrade_layout(&dir);
+            if !problems.is_empty() {
+                for problem in &problems {
+                    tracing::error!("{problem}");
+                }
+                // Starting would hide the old data behind the new folders for good.
+                eprintln!(
+                    "Levitas did not start: the world could not be moved into the 26.3 layout."
+                );
+                std::process::exit(1);
+            }
         }
         let existing = LevelData::load(&dir);
         let created = existing.is_none();

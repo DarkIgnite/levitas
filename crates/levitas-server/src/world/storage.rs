@@ -349,8 +349,10 @@ fn old_saved_data(dir: &Path, name: &str) -> Option<Compound> {
 
 /// Moves a world saved by 1.21.8 into 26.3's layout: each dimension's regions, entities
 /// and Levitas files under `dimensions/minecraft/`, and player data under
-/// `players/data/`. Anything already in the new place is left alone.
-pub fn upgrade_layout(dir: &Path) {
+/// `players/data/`. Returns what could not be moved: an old folder whose new place
+/// already exists (both would hold part of the world), or a move that failed. The
+/// server must not start then, or the old data would be hidden for good.
+pub fn upgrade_layout(dir: &Path) -> Vec<String> {
     use super::dimension::Dimension;
     let players = dir.join("players");
     let mut moves = vec![
@@ -384,8 +386,22 @@ pub fn upgrade_layout(dir: &Path) {
             moves.push((old.join(name), new.join(name)));
         }
     }
+    let mut problems = Vec::new();
     for (from, to) in moves {
-        if !from.exists() || to.exists() {
+        if !from.exists() {
+            continue;
+        }
+        if to.exists() {
+            // An empty old folder holds nothing to lose.
+            if from.is_dir() && fs::read_dir(&from).is_ok_and(|mut d| d.next().is_none()) {
+                let _ = fs::remove_dir(&from);
+                continue;
+            }
+            problems.push(format!(
+                "{} and {} both exist: keep the one you want and move the other away",
+                from.display(),
+                to.display()
+            ));
             continue;
         }
         let moved = to
@@ -394,13 +410,14 @@ pub fn upgrade_layout(dir: &Path) {
             .and_then(|()| fs::rename(&from, &to));
         match moved {
             Ok(()) => info!("moved {} to {}", from.display(), to.display()),
-            Err(e) => error!("could not move {}: {e}", from.display()),
+            Err(e) => problems.push(format!("could not move {}: {e}", from.display())),
         }
     }
     // The old dimension folders are empty now.
     for old in ["DIM-1", "DIM1"] {
         let _ = fs::remove_dir(dir.join(old));
     }
+    problems
 }
 
 /// A player's JSON file (statistics, advancements). One that exists but cannot be read
@@ -1087,6 +1104,26 @@ mod tests {
     }
 
     #[test]
+    fn an_upgrade_that_would_hide_data_is_refused() {
+        let dir = std::env::temp_dir().join(format!("levitas-clash-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        // A 1.21.8 region folder, and a 26.3 one made by an earlier run.
+        fs::create_dir_all(dir.join("region")).unwrap();
+        fs::write(dir.join("region").join("r.0.0.mca"), b"old").unwrap();
+        let new = super::super::dimension::Dimension::Overworld
+            .folder(&dir)
+            .join("region");
+        fs::create_dir_all(&new).unwrap();
+        let problems = upgrade_layout(&dir);
+        assert_eq!(problems.len(), 1, "{problems:?}");
+        assert!(
+            dir.join("region").join("r.0.0.mca").is_file(),
+            "nothing is lost"
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn level_data_in_a_new_folder() {
         let dir = std::env::temp_dir().join(format!("levitas-level-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
@@ -1146,7 +1183,7 @@ mod tests {
         fs::write(dir.join("stats/alice.json"), b"{}").unwrap();
         fs::write(dir.join("advancements/alice.json"), b"{}").unwrap();
 
-        upgrade_layout(&dir);
+        assert!(upgrade_layout(&dir).is_empty());
         let world = dir.join("dimensions/minecraft");
         assert_eq!(
             fs::read(world.join("the_nether/region/r.0.0.mca")).unwrap(),
@@ -1191,7 +1228,7 @@ mod tests {
         let root = Compound::new().with("Data", data);
         fs::write(dir.join("level.dat"), levitas_nbt::to_gzip("", &root)).unwrap();
 
-        upgrade_layout(&dir);
+        assert!(upgrade_layout(&dir).is_empty());
         let world = dir.join("dimensions/minecraft");
         let read = |path: &str| fs::read(world.join(path)).unwrap();
         assert_eq!(read("overworld/region/r.0.0.mca"), b"overworld");
