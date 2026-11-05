@@ -159,6 +159,7 @@ impl World {
         for packet in spawn_player(id, &self.players[&id]) {
             self.broadcast(packet, Some(id));
         }
+        self.send(id, super::player_data(id, &self.players[&id]));
         if matches!(via, Via::NetherPortal | Via::EndPortal) {
             self.after_portal_arrival(id);
         }

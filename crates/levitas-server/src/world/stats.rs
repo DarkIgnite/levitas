@@ -115,7 +115,8 @@ fn id(category: i32, name: &str) -> Option<i32> {
 pub fn opened(block: &str) -> Option<i32> {
     let short = block.strip_prefix("minecraft:")?;
     Some(match short {
-        "chest" | "trapped_chest" => custom_stat::OPEN_CHEST,
+        "chest" => custom_stat::OPEN_CHEST,
+        "trapped_chest" => custom_stat::TRIGGER_TRAPPED_CHEST,
         "barrel" => custom_stat::OPEN_BARREL,
         "ender_chest" => custom_stat::OPEN_ENDERCHEST,
         "crafting_table" => custom_stat::INTERACT_WITH_CRAFTING_TABLE,
@@ -151,6 +152,8 @@ pub struct Movement {
     pub on_ground: bool,
     pub was_on_ground: bool,
     pub in_water: bool,
+    /// The eyes are in water too.
+    pub head_in_water: bool,
     pub climbing: bool,
     pub flying: bool,
 }
@@ -160,7 +163,15 @@ impl Stats {
     pub fn moved(&mut self, m: &Movement, sneaking: bool, sprinting: bool) {
         let total = m.horizontal.hypot(m.vertical);
         if m.in_water {
-            self.custom(custom_stat::SWIM_ONE_CM, cm(total));
+            // Swimming is sprinting in water; otherwise it is walking in or under it.
+            let stat = if sprinting {
+                custom_stat::SWIM_ONE_CM
+            } else if m.head_in_water {
+                custom_stat::WALK_UNDER_WATER_ONE_CM
+            } else {
+                custom_stat::WALK_ON_WATER_ONE_CM
+            };
+            self.custom(stat, cm(total));
         } else if m.climbing && m.vertical > 0.0 {
             self.custom(custom_stat::CLIMB_ONE_CM, cm(m.vertical));
         } else if m.on_ground {
@@ -350,6 +361,7 @@ mod tests {
             on_ground: true,
             was_on_ground: true,
             in_water: false,
+            head_in_water: false,
             climbing: false,
             flying: false,
         };

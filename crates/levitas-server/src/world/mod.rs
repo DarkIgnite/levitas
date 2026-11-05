@@ -490,7 +490,8 @@ struct Player {
     pub advancements: advancements::Progress,
     pub stats: stats::Stats,
     /// The type of the last mob that hurt the player, for the killed-by statistics.
-    pub hurt_by: Option<i32>,
+    /// The type of mob that last hurt the player, and when (for killed_by).
+    pub hurt_by: Option<(i32, u64)>,
 }
 
 impl Player {
@@ -991,8 +992,9 @@ impl World {
                 if (p.skin_parts, p.main_hand) != (skin_parts, main_hand) {
                     p.skin_parts = skin_parts;
                     p.main_hand = main_hand;
+                    // Everyone, the player included: their own model reads it too.
                     let data = player_data(id, p);
-                    self.broadcast(data, Some(id));
+                    self.broadcast(data, None);
                 }
             }
             Event::RequestStats { id } => self.send_stats(id),
@@ -1114,6 +1116,7 @@ impl World {
         for packet in spawn_player(id, &self.players[&id]) {
             self.broadcast(packet, Some(id));
         }
+        self.send(id, player_data(id, &self.players[&id]));
         self.send_entities_to(id);
 
         self.update_view(id);
@@ -1272,6 +1275,17 @@ impl World {
             .map_or(block::AIR, |c| {
                 c.get((feet.x & 15) as usize, feet.y, (feet.z & 15) as usize)
             });
+        let head_in_water = {
+            let p = &self.players[&id];
+            let eyes = BlockPos::new(
+                p.pos[0].floor() as i32,
+                (p.pos[1] + 1.62).floor() as i32,
+                p.pos[2].floor() as i32,
+            );
+            self.loaded_block(eyes)
+                .and_then(crate::blocks::fluid::fluid_at)
+                .is_some_and(|f| f.fluid == crate::blocks::fluid::Fluid::Water)
+        };
         let p = self.players.get_mut(&id).expect("player exists");
         if crate::blocks::fluid::fluid_at(at_feet)
             .is_some_and(|f| f.fluid == crate::blocks::fluid::Fluid::Water)
@@ -1287,13 +1301,14 @@ impl World {
                 was_on_ground: p.on_ground,
                 in_water: crate::blocks::fluid::fluid_at(at_feet)
                     .is_some_and(|f| f.fluid == crate::blocks::fluid::Fluid::Water),
+                head_in_water,
                 climbing: block_has_tag(at_feet, "minecraft:climbable"),
                 // Creative and spectator players in the air are flying.
                 flying: !p.survival(),
             };
             let (sneaking, sprinting) = (p.sneaking, p.sprinting);
-            // Big jumps are teleports, not movement.
-            if horizontal.hypot(vertical) < 10.0 {
+            // Big jumps are teleports, not movement; rides count for the vehicle.
+            if horizontal.hypot(vertical) < 10.0 && p.riding.is_none() {
                 p.stats.moved(&movement, sneaking, sprinting);
             }
         }

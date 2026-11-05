@@ -210,6 +210,9 @@ pub fn health_packet(p: &Player) -> Writer {
 
 use crate::rules::Difficulty;
 
+/// How long after a mob's hit a death still counts as killed by it (killed_by).
+const KILL_CREDIT_TICKS: u64 = 100;
+
 impl World {
     pub(super) fn damage(&mut self, id: i32, amount: f32, kind: Damage) {
         self.damage_from(id, amount, kind, None);
@@ -256,6 +259,7 @@ impl World {
                 return false;
             }
         }
+        let now = self.tick;
         let hurt_by = source
             .and_then(|s| self.mobs.get(&s))
             .map(|m| m.kind.entity_type());
@@ -302,8 +306,8 @@ impl World {
             levitas_registry::custom_stat::DAMAGE_TAKEN,
             (amount * 10.0).round() as i32,
         );
-        if hurt_by.is_some() {
-            p.hurt_by = hurt_by;
+        if let Some(kind) = hurt_by {
+            p.hurt_by = Some((kind, now));
         }
         p.stats.custom(
             levitas_registry::custom_stat::DAMAGE_ABSORBED,
@@ -388,6 +392,7 @@ impl World {
     }
 
     fn die(&mut self, id: i32, kind: Damage) {
+        let now = self.tick;
         self.get_off(id);
         self.wake_up(id);
         self.clear_effects(id);
@@ -411,7 +416,12 @@ impl World {
         // Killed by a mob, or by another player: both sides count it.
         let killer_kind = match kind {
             Damage::Player(_) => Some(entity_type::PLAYER),
-            _ => p.hurt_by.take(),
+            // Only a mob that hit them in the last five seconds killed them.
+            _ => p
+                .hurt_by
+                .take()
+                .filter(|&(_, at)| now.saturating_sub(at) <= KILL_CREDIT_TICKS)
+                .map(|(kind, _)| kind),
         };
         if let Some(kind) = killer_kind {
             p.stats.add(levitas_registry::stat_type::KILLED_BY, kind, 1);
@@ -547,6 +557,7 @@ impl World {
         for packet in spawn {
             self.broadcast(packet, Some(id));
         }
+        self.send(id, super::player_data(id, &self.players[&id]));
     }
 
     pub(super) fn use_spyglass(&mut self, id: i32, hand: i32) -> bool {
