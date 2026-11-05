@@ -1135,12 +1135,14 @@ impl World {
                 .varint(id),
             None,
         );
-        self.tab.remove(player.profile.uuid);
-        self.announce(
-            Writer::packet(clientbound::PLAYER_INFO_REMOVE)
-                .varint(1)
-                .uuid(player.profile.uuid),
-        );
+        // Another login with the same UUID keeps the entry.
+        if self.tab.remove(player.profile.uuid) {
+            self.announce(
+                Writer::packet(clientbound::PLAYER_INFO_REMOVE)
+                    .varint(1)
+                    .uuid(player.profile.uuid),
+            );
+        }
         let name = player.profile.name.clone();
         self.announce(system_chat(&format!("{name} left the game")));
         info!(name, "left the game ({} online)", self.players.len());

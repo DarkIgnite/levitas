@@ -1013,12 +1013,13 @@ impl Mob {
         if let Some(t) = nbt.int("EggLayTime") {
             mob.egg_ticks = t.max(0) as u32;
         }
-        if let Some(t) = nbt.int("ConversionTime") {
-            mob.converting = Some(t.max(0) as u32);
-        }
-        if let Some(d) = nbt.int("DespawnDelay") {
-            mob.despawn_timer = Some(d.max(0) as u32);
-        }
+        // Vanilla saves -1 for a zombie villager no one is curing.
+        mob.converting = nbt
+            .int("ConversionTime")
+            .filter(|&t| t > 0 && kind == MobKind::ZombieVillager)
+            .map(|t| t as u32);
+        // A wandering trader with no countdown (0) stays.
+        mob.despawn_timer = nbt.int("DespawnDelay").filter(|&d| d > 0).map(|d| d as u32);
         if kind == MobKind::Villager
             || kind == MobKind::ZombieVillager
             || kind == MobKind::WanderingTrader
@@ -2492,10 +2493,9 @@ impl World {
                 mob.head_yaw = super::monsters::yaw_towards(mob.pos, target_pos);
                 self.play_sound_at("minecraft:entity.llama.spit", mob.pos, 1.0, 1.0, None);
                 if let Some(mut target_mob) = self.mobs.remove(&mid) {
-                    self.hurt_mob(mid, &mut target_mob, 1.0, "mob");
-                    if target_mob.alive() {
-                        self.mobs.insert(mid, target_mob);
-                    }
+                    self.hurt_mob(mid, &mut target_mob, 1.0, "minecraft:mob_projectile");
+                    // Dead ones too: their death plays out and clients drop them.
+                    self.mobs.insert(mid, target_mob);
                 }
             }
         }
@@ -3080,6 +3080,37 @@ mod path_tests {
         world.tick = 20;
         world.hurt_mob(id, &mut fish, 1.0, "minecraft:dry_out");
         assert_eq!(fish.health, 2.0);
+    }
+
+    #[test]
+    fn vanilla_zombie_villagers_and_traders_load_as_saved() {
+        let mut world = flat_world();
+        let base = |id: &str| {
+            Compound::new().with("id", id).with(
+                "Pos",
+                vec![Tag::Double(0.5), Tag::Double(-60.0), Tag::Double(0.5)],
+            )
+        };
+        // Vanilla writes -1 for a zombie villager no one is curing.
+        let zv = Mob::read(
+            &base("minecraft:zombie_villager").with("ConversionTime", -1i32),
+            &mut world.rng,
+        )
+        .unwrap();
+        assert!(zv.converting.is_none());
+        let curing = Mob::read(
+            &base("minecraft:zombie_villager").with("ConversionTime", 300i32),
+            &mut world.rng,
+        )
+        .unwrap();
+        assert_eq!(curing.converting, Some(300));
+        // A summoned wandering trader (0) never despawns.
+        let trader = Mob::read(
+            &base("minecraft:wandering_trader").with("DespawnDelay", 0i32),
+            &mut world.rng,
+        )
+        .unwrap();
+        assert!(trader.despawn_timer.is_none());
     }
 
     #[test]

@@ -213,6 +213,11 @@ pub fn wave_composition(wave: u32, bad_omen: u32) -> Vec<MobKind> {
     mobs
 }
 
+/// Raids happen only when the `raids` rule allows them and not in Peaceful.
+fn raids_allowed() -> bool {
+    crate::rules::bool("raids") && crate::rules::difficulty() != crate::rules::Difficulty::Peaceful
+}
+
 impl World {
     fn find_ground_y(&mut self, x: f64, default_y: f64, z: f64) -> f64 {
         let bx = x.floor() as i32;
@@ -232,9 +237,9 @@ impl World {
         let raid_id = self.next_raid_id;
         self.next_raid_id += 1;
         let boss_bar = (u128::from(self.rng.next_u64()) << 64) | u128::from(self.rng.next_u64());
-        let total_waves = match crate::config::get().difficulty.as_str() {
-            "easy" => 3,
-            "hard" => 7,
+        let total_waves = match crate::rules::difficulty() {
+            crate::rules::Difficulty::Easy => 3,
+            crate::rules::Difficulty::Hard => 7,
             _ => 5,
         };
         let mut raid = Raid {
@@ -360,7 +365,7 @@ impl World {
 
     /// Called when Raid Omen effect on a player expires.
     pub(super) fn raid_omen_expired(&mut self, player_id: i32) {
-        if self.dimension != Dimension::Overworld {
+        if self.dimension != Dimension::Overworld || !raids_allowed() {
             return;
         }
         let Some(p) = self.players.get(&player_id) else {
@@ -388,8 +393,8 @@ impl World {
 
     /// Ticks raids, converting Bad Omen to Raid Omen near villagers, and advancing active raids.
     pub(super) fn tick_raids(&mut self) {
-        if self.dimension != Dimension::Overworld {
-            return;
+        if self.dimension != Dimension::Overworld || !raids_allowed() {
+            return; // and raids under way wait
         }
 
         // 1. Bad Omen -> Raid Omen when near a villager
@@ -732,10 +737,9 @@ impl World {
             }
             for mid in hurt_mobs {
                 if let Some(mut mob) = self.mobs.remove(&mid) {
-                    self.hurt_mob(mid, &mut mob, 6.0, "magic");
-                    if mob.alive() {
-                        self.mobs.insert(mid, mob);
-                    }
+                    self.hurt_mob(mid, &mut mob, 6.0, "minecraft:magic");
+                    // Dead ones too: their death plays out and clients drop them.
+                    self.mobs.insert(mid, mob);
                 }
             }
         }

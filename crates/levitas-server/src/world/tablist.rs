@@ -16,6 +16,9 @@ struct Entry {
     name: String,
     properties: Vec<Property>,
     mode: u8,
+    /// Logins with this UUID that have not left yet: a second login does not end the
+    /// first one, and the entry stays until both are gone.
+    sessions: u32,
 }
 
 /// The server's player list; clones share it.
@@ -29,21 +32,36 @@ impl TabList {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
-    /// Adds a player who logged in (or replaces their entry).
+    /// Adds a player who logged in (or updates their entry).
     pub fn add(&self, uuid: u128, name: &str, properties: &[Property], mode: u8) {
         let mut list = self.list();
+        let sessions = list
+            .iter()
+            .find(|e| e.uuid == uuid)
+            .map_or(0, |e| e.sessions);
         list.retain(|e| e.uuid != uuid);
         list.push(Entry {
             uuid,
             name: name.to_owned(),
             properties: properties.to_vec(),
             mode,
+            sessions: sessions + 1,
         });
     }
 
-    /// Takes a player who left the game out.
-    pub fn remove(&self, uuid: u128) {
-        self.list().retain(|e| e.uuid != uuid);
+    /// A login of this player left the game. Returns whether that was their last one,
+    /// so their entry is gone.
+    pub fn remove(&self, uuid: u128) -> bool {
+        let mut list = self.list();
+        let Some(e) = list.iter_mut().find(|e| e.uuid == uuid) else {
+            return false;
+        };
+        e.sessions = e.sessions.saturating_sub(1);
+        if e.sessions > 0 {
+            return false;
+        }
+        list.retain(|e| e.uuid != uuid);
+        true
     }
 
     pub fn set_mode(&self, uuid: u128, mode: u8) {
@@ -106,8 +124,12 @@ mod tests {
         assert_eq!(r.varint().unwrap(), 1);
         assert_eq!(r.uuid().unwrap(), b);
         assert_eq!(r.string(16).unwrap(), "TabBob");
-        tabs.remove(a);
-        tabs.remove(b);
+        // A second login of Alice: her entry stays until both have left.
+        tabs.add(a, "TabAlice", &[], 0);
+        assert!(!tabs.remove(a));
+        assert!(tabs.name_of("TabAlice").is_some());
+        assert!(tabs.remove(a));
+        assert!(tabs.remove(b));
         assert!(tabs.name_of("TabAlice").is_none());
     }
 }

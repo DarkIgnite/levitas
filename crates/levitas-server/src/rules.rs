@@ -107,7 +107,17 @@ const DEFAULTS: [(&str, Value); 59] = [
 
 /// 1.21.8 rule names and what they became, for worlds saved before 26.3. `true` marks
 /// a rule whose meaning flipped (`disableRaids` became `raids`).
-const RENAMED: [(&str, &str, bool); 48] = [
+const RENAMED: [(&str, &str, bool); 54] = [
+    (
+        "allowEnteringNetherUsingPortals",
+        "allow_entering_nether_using_portals",
+        false,
+    ),
+    ("locatorBar", "locator_bar", false),
+    ("tntExplodes", "tnt_explodes", false),
+    ("tntExplosionDropDecay", "tnt_explosion_drop_decay", false),
+    ("universalAnger", "universal_anger", false),
+    ("waterSourceConversion", "water_source_conversion", false),
     ("announceAdvancements", "show_advancement_messages", false),
     (
         "blockExplosionDropDecay",
@@ -358,6 +368,14 @@ pub fn to_nbt() -> Compound {
 /// and the `GameRules` text values of 1.21.8's `level.dat`, under either set of names.
 pub fn load_nbt(nbt: &Compound) {
     for (name, tag) in nbt.iter() {
+        // 26.3 replaced doFireTick with a radius around players, where 0 stops fire.
+        if name == "doFireTick" {
+            let off = tag.as_str() == Some("false") || tag.as_i64() == Some(0);
+            if let (true, Some(i)) = (off, index("fire_spread_radius_around_player")) {
+                write(|r| r.values[i] = Int(0));
+            }
+            continue;
+        }
         let (name, flip) = match RENAMED.iter().find(|&&(old, _, _)| old == name) {
             Some(&(_, new, flip)) => (new, flip),
             None => (name, false),
@@ -416,12 +434,15 @@ mod tests {
     fn rules_saved_by_1_21_8_carry_over() {
         let old = Compound::new()
             .with("keepInventory", "true")
-            .with("disableRaids", "true")
+            // Rules are shared by every test: flip ones the game does not read.
+            .with("disableElytraMovementCheck", "true")
+            .with("universalAnger", "true")
             .with("randomTickSpeed", "5")
             .with("spawnChunkRadius", "2");
         load_nbt(&old);
         assert!(bool("keep_inventory"));
-        assert!(!bool("raids"));
+        assert!(!bool("elytra_movement_check"));
+        assert!(bool("universal_anger"));
         assert_eq!(int("random_tick_speed"), 5);
         for (_, new, _) in RENAMED {
             assert!(index(new).is_some(), "{new}");

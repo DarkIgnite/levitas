@@ -295,9 +295,8 @@ impl World {
                             self.mobs.insert(mid, zv);
                         } else {
                             self.hurt_mob(mid, &mut target_mob, damage, "mob");
-                            if target_mob.alive() {
-                                self.mobs.insert(mid, target_mob);
-                            }
+                            // Dead ones too: their death plays out and clients drop them.
+                            self.mobs.insert(mid, target_mob);
                         }
                     }
                 }
@@ -680,8 +679,8 @@ impl World {
     /// Whether a monster is too far from every player to stay: always beyond 128
     /// blocks, now and then beyond 32.
     pub(super) fn despawns(&mut self, mob: &Mob) -> bool {
-        // Named mobs stay.
-        if !mob.kind.is_monster() || mob.name.is_some() {
+        // Named mobs stay, and so do raiders: a raid is won by fighting them.
+        if !mob.kind.is_monster() || mob.name.is_some() || mob.raid_id.is_some() {
             return false;
         }
         let nearest = self

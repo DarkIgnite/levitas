@@ -69,7 +69,8 @@ impl World {
         }
         if blocks::name(below) == "minecraft:magma_block" {
             // Each geyser keeps its own rhythm.
-            let phase = (self.tick + (pos.x.wrapping_mul(31) ^ pos.z) as u64) % GEYSER_CYCLE;
+            let rhythm = u64::from((pos.x.wrapping_mul(31) ^ pos.z) as u32);
+            let phase = self.tick.wrapping_add(rhythm) % GEYSER_CYCLE;
             return if phase < ERUPT_TICKS {
                 "erupting"
             } else {
