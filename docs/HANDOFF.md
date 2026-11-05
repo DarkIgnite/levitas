@@ -354,8 +354,12 @@ their server.
   (per-player cure reputation as Gossips, the vanilla Hero formula, none at wandering traders); cartography
   table as in Java; skin settings when logging in to another dimension; villager conversion by difficulty;
   beacon beams through bedrock; the armor stand swap losing an item.
-  The auditors for commands, farming, new mobs, monster variants and loot, entity metadata, persistence, packets
-  after the migration and hot paths never ran. These 26 findings are still UNVERIFIED and unfixed (some may be
+  The eight areas whose auditors never ran were then checked by hand (2026-11-05): every entity data index
+  and serializer matches the 26.3 wiki (slime size really is 18: cube mobs are ageable in 26.3); particle,
+  map data, boss bar, mob effect and sound packets match; commands are op-gated and parse safely, and /clone
+  now copies block entities; farming matches vanilla; tamed wolves no longer go after creepers or ghasts;
+  villagers look for monsters every tenth tick instead of every tick. Left as is: beacons and conduits find
+  themselves by walking all block entities every tick (cheap, but could keep a list). These 26 findings are still UNVERIFIED and unfixed (some may be
   wrong):
   - Tipped arrows are spawned without the Arrow colour metadata, so they show no potion particle trail (`world/arrows.rs:465`, minor)
   - Tipped-arrow and stray-slowness effects land on mobs even when the hit was dodged or blocked (`world/arrows.rs:288`, wrong_behavior)

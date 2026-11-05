@@ -308,7 +308,12 @@ impl World {
         let Some(foe) = self.mobs.get(&enemy) else {
             return;
         };
-        if !foe.alive() || foe.owner == Some(uuid) {
+        // Wolves leave the owner's own pets alone, and keep away from creepers and
+        // ghasts as vanilla's do.
+        if !foe.alive()
+            || foe.owner == Some(uuid)
+            || matches!(foe.kind, MobKind::Creeper | MobKind::Ghast)
+        {
             return;
         }
         for (&id, wolf) in &mut self.mobs {

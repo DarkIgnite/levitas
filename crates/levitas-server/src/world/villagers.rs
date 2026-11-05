@@ -1000,9 +1000,15 @@ impl World {
         let Some(v) = mob.villager.as_mut() else {
             return;
         };
-        let monster_near = self.mobs.values().any(|m| {
-            m.alive() && m.kind.is_monster() && (m.pos[0] - pos[0]).hypot(m.pos[2] - pos[2]) <= 16.0
-        });
+        // Looking for monsters takes a pass over every mob, so each villager does it
+        // every tenth tick (spread by ID); its panic lasts far longer than that.
+        let looks = (tick + u64::from(id.unsigned_abs())).is_multiple_of(10);
+        let monster_near = looks
+            && self.mobs.values().any(|m| {
+                m.alive()
+                    && m.kind.is_monster()
+                    && (m.pos[0] - pos[0]).hypot(m.pos[2] - pos[2]) <= 16.0
+            });
         if monster_near {
             mob.panic_ticks = 100;
         } else {
