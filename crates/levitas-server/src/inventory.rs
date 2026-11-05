@@ -281,8 +281,12 @@ impl Stack {
             trim: components
                 .and_then(|c| c.compound("minecraft:trim"))
                 .and_then(|t| Trim::named(t.str("material")?, t.str("pattern")?)),
+            // Before 1.21.5 the colour was saved as {rgb: N}.
             color: components
-                .and_then(|c| c.int("minecraft:dyed_color"))
+                .and_then(|c| {
+                    c.int("minecraft:dyed_color")
+                        .or_else(|| c.compound("minecraft:dyed_color")?.int("rgb"))
+                })
                 .map(|c| c as i32 & 0xFF_FFFF),
             lodestone,
             map_id,

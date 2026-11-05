@@ -1028,7 +1028,9 @@ impl Mob {
         }
         mob.player_created = nbt.int("PlayerCreated").unwrap_or(0) != 0;
         mob.is_patrol_leader = nbt.int("PatrolLeader").unwrap_or(0) != 0;
-        mob.raid_id = nbt.int("RaidId").map(|r| r as u32);
+        // Raids are not saved yet, so the raid a raider belonged to is gone after a
+        // restart: it comes back as an ordinary monster.
+        mob.raid_id = None;
         mob.name = nbt
             .get("CustomName")
             .map(crate::names::plain_text)
@@ -1463,6 +1465,11 @@ impl World {
             }
             if mob.kind == MobKind::TraderLlama {
                 self.tick_trader_llama(id, &mut mob);
+                let led = mob.leader.is_some_and(|l| self.mobs.contains_key(&l));
+                if !led && mob.name.is_none() {
+                    self.send_to_viewers(&mob, items::remove_entity(id));
+                    continue;
+                }
             }
             if mob.kind == MobKind::IronGolem {
                 self.tick_golem(id, &mut mob);

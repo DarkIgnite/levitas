@@ -403,8 +403,27 @@ pub fn upgrade_layout(dir: &Path) {
     }
 }
 
+/// A player's JSON file (statistics, advancements). One that exists but cannot be read
+/// is kept aside as `<name>.corrupt`, so starting afresh does not write over it.
+pub(super) fn read_json(path: &Path) -> Option<serde_json::Value> {
+    let text = fs::read_to_string(path).ok()?;
+    match serde_json::from_str(&text) {
+        Ok(json) => Some(json),
+        Err(e) => {
+            let aside = path.with_extension("json.corrupt");
+            error!(
+                "{} is unreadable ({e}); kept as {}",
+                path.display(),
+                aside.display()
+            );
+            let _ = fs::rename(path, aside);
+            None
+        }
+    }
+}
+
 /// Writes through a temporary file so a crash never leaves a half-written file.
-fn write_atomic(path: &Path, bytes: &[u8]) -> io::Result<()> {
+pub(super) fn write_atomic(path: &Path, bytes: &[u8]) -> io::Result<()> {
     let tmp = path.with_extension("tmp");
     fs::write(&tmp, bytes)?;
     fs::rename(&tmp, path)
@@ -1029,6 +1048,42 @@ mod tests {
             .unwrap()
             .compound("head")
             .is_some());
+    }
+
+    #[test]
+    fn old_forms_and_damaged_files_load_safely() {
+        // Dyed leather from 1.20.5-1.21.4 saved its colour as {rgb: N}.
+        let boots = Compound::new()
+            .with("id", "minecraft:leather_boots")
+            .with("count", 1i32)
+            .with(
+                "components",
+                Compound::new().with(
+                    "minecraft:dyed_color",
+                    Compound::new().with("rgb", 0x12_3456i32),
+                ),
+            );
+        assert_eq!(Stack::from_nbt(&boots).color, Some(0x12_3456));
+        // Amplifiers above 127 survive saving (the byte is unsigned).
+        let strong = vec![super::super::effects::ActiveEffect {
+            id: levitas_registry::mob_effect::STRENGTH,
+            amplifier: 200,
+            duration: 100,
+        }];
+        let tag = super::super::effects::effects_to_nbt(&strong);
+        assert_eq!(
+            super::super::effects::effects_from_nbt(Some(&tag))[0].amplifier,
+            200
+        );
+        // A damaged JSON file is kept aside instead of being written over.
+        let dir = std::env::temp_dir().join(format!("levitas-json-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("stats.json");
+        fs::write(&path, "{ broken").unwrap();
+        assert!(read_json(&path).is_none());
+        assert!(dir.join("stats.json.corrupt").is_file());
+        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]

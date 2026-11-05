@@ -32,7 +32,8 @@ impl Conduit {
     }
 
     pub fn read_nbt(&mut self, nbt: &Compound) {
-        self.active = nbt.int("active") != Some(0);
+        // Vanilla saves no such key: a conduit starts inactive until its frame is checked.
+        self.active = nbt.int("active").is_some_and(|v| v != 0);
     }
 
     pub fn network_data(&self) -> Compound {

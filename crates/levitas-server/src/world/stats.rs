@@ -229,9 +229,8 @@ impl World {
         let Some(p) = self.players.get(&id) else {
             return;
         };
-        let stats = fs::read_to_string(self.stats_path(p.profile.uuid))
-            .ok()
-            .and_then(|text| serde_json::from_str::<Value>(&text).ok())
+        let path = self.stats_path(p.profile.uuid);
+        let stats = super::storage::read_json(&path)
             .map(|json| Stats::from_json(&json))
             .unwrap_or_default();
         if let Some(p) = self.players.get_mut(&id) {
@@ -247,7 +246,9 @@ impl World {
         let saved = path
             .parent()
             .map_or(Ok(()), fs::create_dir_all)
-            .and_then(|()| fs::write(&path, p.stats.to_json().to_string()));
+            .and_then(|()| {
+                super::storage::write_atomic(&path, p.stats.to_json().to_string().as_bytes())
+            });
         if let Err(e) = saved {
             error!("could not save statistics to {}: {e}", path.display());
         }

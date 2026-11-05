@@ -455,7 +455,8 @@ pub fn effects_from_nbt(tag: Option<&Tag>) -> Vec<ActiveEffect> {
         .filter_map(|t| match t {
             Tag::Compound(c) => Some(ActiveEffect {
                 id: effect_id(c.str("id")?)?,
-                amplifier: c.int("amplifier").unwrap_or(0).clamp(0, 255) as u8,
+                // Saved as a byte that vanilla reads unsigned (0-255).
+                amplifier: (c.int("amplifier").unwrap_or(0) & 0xFF) as u8,
                 duration: c.int("duration").unwrap_or(0) as i32,
             }),
             _ => None,

@@ -680,7 +680,12 @@ impl World {
     /// blocks, now and then beyond 32.
     pub(super) fn despawns(&mut self, mob: &Mob) -> bool {
         // Named mobs stay, and so do raiders: a raid is won by fighting them.
-        if !mob.kind.is_monster() || mob.name.is_some() || mob.raid_id.is_some() {
+        // A zombie villager being cured stays too.
+        if !mob.kind.is_monster()
+            || mob.name.is_some()
+            || mob.raid_id.is_some()
+            || mob.converting.is_some()
+        {
             return false;
         }
         let nearest = self

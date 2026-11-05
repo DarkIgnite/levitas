@@ -868,9 +868,7 @@ impl World {
             return;
         };
         let path = self.advancements_path(p.profile.uuid);
-        let progress = fs::read_to_string(&path)
-            .ok()
-            .and_then(|text| serde_json::from_str::<Value>(&text).ok())
+        let progress = super::storage::read_json(&path)
             .map(|json| Progress::from_json(&json))
             .unwrap_or_default();
         if let Some(p) = self.players.get_mut(&id) {
@@ -887,7 +885,7 @@ impl World {
         let saved = path
             .parent()
             .map_or(Ok(()), fs::create_dir_all)
-            .and_then(|()| fs::write(&path, json.to_string()));
+            .and_then(|()| super::storage::write_atomic(&path, json.to_string().as_bytes()));
         if let Err(e) = saved {
             error!("could not save advancements to {}: {e}", path.display());
         }
