@@ -340,6 +340,68 @@ their server.
   `generated_world_streams_real_terrain` lose its connection (the 4096-frame outgoing queue overflowed). If
   that test starts failing again, look at movement packet volume first.
 
+- Audit of the work since 2026-10-29 (2026-11-05): 21 auditors were run; 77 candidate bugs came back from 13
+  areas, but the session limit stopped the verifiers, so each fix below was checked by hand against the code
+  and the 26.3 wiki before it went in (commits c2988d9, 4f30b26, eabf846, a61559b and the one after). Fixed: chunks,
+  entity chunks and player files keep what Levitas does not handle (unknown block entities and entities,
+  structures, InhabitedTime, EnderItems), unreadable chunks are never saved over, old armour slots, players in the
+  Nether/End keep their position, swing_animation and 26.3 ANIMATE ids, sign front/back, creative stack
+  validation, mob tracking every third tick, ghost corpses, vanilla zombie villagers and traders, missing 1.21.8
+  game rules, raids (rule, Peaceful, despawning, live difficulty), duplicate-UUID tab list, item frame/armor stand
+  data, reach checks, advancement recipe entries, renamed statistics, the armor stand swap losing an item.
+  The auditors for commands, farming, new mobs, monster variants and loot, entity metadata, persistence, packets
+  after the migration and hot paths did not run at all. These 49 findings are still UNVERIFIED and unfixed
+  (some may be wrong):
+  - Dyed leather armour from 1.20.5-1.21.4 worlds loses its colour on load (old {rgb:N} form of dyed_color not read) (`inventory.rs:285`, data_loss)
+  - Tipped arrows are spawned without the Arrow colour metadata, so they show no potion particle trail (`world/arrows.rs:465`, minor)
+  - Effect amplifiers 128-255 are reset to 0 on save/load (players and mobs) (`world/effects.rs:458`, data_loss)
+  - Tipped-arrow and stray-slowness effects land on mobs even when the hit was dodged or blocked (`world/arrows.rs:288`, wrong_behavior)
+  - Lingering water (and other effect-less) potions spawn an area effect cloud that does nothing (`world/thrown.rs:313`, wrong_behavior)
+  - Dragon's breath cloud hurts undead mobs instead of healing them (`world/clouds.rs:297`, minor)
+  - Bedrock blocks the beacon beam, so beacons under the Nether roof never activate (`world/beacon.rs:115`, wrong_behavior)
+  - Conduits loaded from vanilla worlds start out 'active' because vanilla saves no 'active' key (`world/conduit.rs:35`, minor)
+  - Beacon and conduit effects are sent as non-ambient (grey HUD border, full particles) (`world/effects.rs:96`, minor)
+  - Raids are not saved: a restart mid-raid drops the raid, and raid IDs restart at 1 and collide with saved raiders (`world/mod.rs:752`, data_loss)
+  - A second raid can start on a village that already has one, with duplicate boss bars and double waves (`world/raids.rs:384`, wrong_behavior)
+  - Evoker fangs never get entity event 4, so clients never show the bite (`world/raids.rs:698`, wrong_behavior)
+  - Raiders spawn inside hills when the ground is more than 10 blocks above the raid center, and the wave cannot finish (`world/raids.rs:220`, wrong_behavior)
+  - Hero of the Village goes to every player who was ever within 96 blocks, including spectators and idle players (`world/raids.rs:570`, wrong_behavior)
+  - Armor stands can be placed inside other entities, so any number can stack in one block (`world/armor_stands.rs:211`, wrong_behavior)
+  - Zombie villagers that are being cured, or that came from traded villagers, still despawn like ordinary monsters (`world/monsters.rs:684`, data_loss)
+  - Cure discount is a flat 20 items off every trade for every player, so many trades drop to 1 item (emerald farm exploit) (`world/villagers.rs:417`, exploit)
+  - Hero of the Village discount uses the wrong formula and also discounts wandering trader trades (`world/villagers.rs:1068`, wrong_behavior)
+  - Trader llamas never despawn and their leader link is not saved, so they pile up (`world/villagers.rs:1322`, wrong_behavior)
+  - Zombie-killed villagers always convert regardless of difficulty, and lose UUID, name, age and the open trade link (`world/monsters.rs:275`, wrong_behavior)
+  - Wandering trader's invisibility is server-side only; clients still see it at night (`world/mobs.rs:2415`, wrong_behavior)
+  - Every villager scans every mob in the world every tick for its panic check (`world/villagers.rs:899`, performance)
+  - Pistons push straw beds instead of breaking them, leaving lone bed halves (`blocks/piston.rs:92`, wrong_behavior)
+  - Short and tall dry grass can no longer be placed on sand or terracotta, and natural ones pop (`blocks/mod.rs:347`, wrong_behavior)
+  - Periodic geysers erupt every 10 s for 3 s instead of vanilla's 15-60 s cycle with 1-5 s eruptions (`world/sulfur.rs:22`, wrong_behavior)
+  - Sulfur spikes (like dripstone) never update thickness, so stacked spikes all stay 'tip' (`blocks/place.rs:270`, minor)
+  - A failed or skipped folder move during upgrade silently hides the old world data for good (`world/storage.rs:375`, data_loss)
+  - 1.21.8 maps and idcounts.dat in data/ are not moved, so map IDs restart at 0 and collide with existing map items (`world/storage.rs:83`, data_loss)
+  - Map files and the map ID counter use pre-26.1 paths/names, so maps do not carry between vanilla 26.3 and Levitas, and IDs get reused (`world/maps.rs:150`, data_loss)
+  - Cartography table turns a single paper into an empty map (Bedrock-only recipe), and shift-click puts paper in the map slot (`click.rs:433`, exploit)
+  - Empty map + compass in the cartography table eats the compass and gives back the same empty map (`click.rs:438`, wrong_behavior)
+  - Zooming a max-scale or locked map, or locking an already locked map, shows a result and uses up the paper or glass pane (`click.rs:423`, wrong_behavior)
+  - Stained glass panes lock maps; vanilla accepts only the plain glass pane (`click.rs:414`, wrong_behavior)
+  - A cartography result that is thrown never becomes the new locked or zoomed map (`world/containers.rs:787`, wrong_behavior)
+  - Lodestone compasses keep pointing at a lodestone that was broken (`world/nature.rs:333`, wrong_behavior)
+  - Each dimension task keeps its own map cache: maps not yet saved are missing in other dimensions and cached copies go stale (`world/maps.rs:221`, wrong_behavior)
+  - Maps held in the Nether draw the bedrock roof instead of vanilla's static (`world/maps.rs:324`, minor)
+  - Login skin/hand settings are dropped for players who log back in to the Nether or End (`play.rs:55`, wrong_behavior)
+  - Skin layers and main hand are never sent to the player themselves (`world/mod.rs:960`, wrong_behavior)
+  - Tab list add/remove/mode updates to other dimensions can arrive out of order (`world/travel.rs:209`, minor)
+  - Stats file is written non-atomically; a crash mid-write resets all statistics (`world/stats.rs:246`, data_loss)
+  - Boat and minecart rides count as walking/sprinting (or swimming) distance (`world/mod.rs:1242`, wrong_behavior)
+  - Every jump's air time is counted as flown and fallen distance; climbing down counts as falling (`world/stats.rs:173`, wrong_behavior)
+  - Wading or walking in water is counted as swim_one_cm instead of walk_on_water / walk_under_water (`world/stats.rs:158`, wrong_behavior)
+  - killed_by credits a mob that hit the player long before an unrelated death (`world/survival.rs:414`, wrong_behavior)
+  - Opening a trapped chest counts open_chest instead of trigger_trapped_chest (`world/stats.rs:114`, minor)
+  - Crafting-grid preview and grid slots count as owned items for inventory_changed advancements (`world/advancements.rs:731`, wrong_behavior)
+  - Advancement chat announcement only reaches players in the same dimension (`world/advancements.rs:795`, wrong_behavior)
+  - Advancement file written non-atomically, and an unreadable file silently resets all progress (`world/advancements.rs:881`, data_loss)
+
 
 ## 9. Testing pattern
 

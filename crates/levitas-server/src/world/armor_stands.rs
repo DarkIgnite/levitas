@@ -278,19 +278,26 @@ impl World {
         let p = self.players.get_mut(&id).expect("checked above");
         let mut updates = Vec::new();
         let put = held.with_count(held.count.min(1));
+        let mut left = 0;
         if held.count > 1 {
             p.inventory.slots[hand_slot] = held.with_count(held.count - 1);
             updates.push(p.inventory.set_slot_packet(hand_slot));
             if !worn.is_empty() {
-                let (changed, _) = p.inventory.add(worn);
+                let (changed, leftover) = p.inventory.add(worn);
+                left = leftover;
                 updates.extend(changed.into_iter().map(|s| p.inventory.set_slot_packet(s)));
             }
         } else {
             p.inventory.slots[hand_slot] = worn;
             updates.push(p.inventory.set_slot_packet(hand_slot));
         }
+        let player_pos = p.pos;
         for update in updates {
             self.send(id, update);
+        }
+        // What does not fit in a full inventory is dropped at the player.
+        if left > 0 {
+            self.scatter_item(player_pos, worn.with_count(left));
         }
         let stand = self.armor_stands.get_mut(&target).expect("checked above");
         stand.equipment[slot] = put;
