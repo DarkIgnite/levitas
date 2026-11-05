@@ -217,8 +217,47 @@ pub struct Villager {
     /// The player trading with it, who alone may.
     pub customer: Option<i32>,
     next_site_check: u64,
-    /// Permanent trade discount granted when cured from a zombie villager.
-    pub cured_discount: bool,
+    /// What players did to it: curing it is the lasting good word that lowers their
+    /// prices.
+    pub gossips: Vec<Gossip>,
+    /// A wandering trader: Hero of the Village does not lower its prices.
+    pub wandering: bool,
+}
+
+/// What players did to a villager, as vanilla keeps it (`Gossips`): a kind, a strength
+/// and the player it is about.
+#[derive(Debug, Clone)]
+pub struct Gossip {
+    pub kind: String,
+    pub value: i32,
+    pub target: u128,
+}
+
+/// How much a kind of gossip counts towards a player's reputation.
+fn gossip_weight(kind: &str) -> i32 {
+    match kind {
+        "minecraft:major_positive" | "major_positive" => 5,
+        "minecraft:minor_positive" | "minor_positive" | "minecraft:trading" | "trading" => 1,
+        "minecraft:minor_negative" | "minor_negative" => -1,
+        "minecraft:major_negative" | "major_negative" => -5,
+        _ => 0,
+    }
+}
+
+/// How many items come off a trade's first cost, as the wiki gives vanilla's price: the
+/// Hero of the Village effect takes off 30% plus 6.25% a level beyond the first (at
+/// least one item, and not at wandering traders), and good reputation takes off the
+/// price multiplier times the reputation. At least one item is always paid.
+pub fn discount(offer: &Offer, hero_amp: Option<u8>, reputation: i32, wandering: bool) -> i32 {
+    let price = offer.buy.count;
+    let hero = match hero_amp {
+        Some(amp) if !wandering => {
+            ((price as f32 * (0.3 + 0.0625 * f32::from(amp))).floor() as i32).max(1)
+        }
+        _ => 0,
+    };
+    let good_name = (offer.price_multiplier * reputation.max(0) as f32).floor() as i32;
+    (hero + good_name).clamp(0, (price - 1).max(0))
 }
 
 impl Villager {
@@ -232,13 +271,15 @@ impl Villager {
             job_site: None,
             customer: None,
             next_site_check: 0,
-            cured_discount: false,
+            gossips: Vec::new(),
+            wandering: false,
         }
     }
 
     /// A wandering trader offering 5 regular trades and 1 special trade for emeralds.
     pub fn new_wandering_trader(rng: &mut Rng) -> Self {
         let mut v = Villager::new("minecraft:plains");
+        v.wandering = true;
         let emerald = ItemInfo::id_of("minecraft:emerald").unwrap_or(0);
         let regular_trades: &[(i32, &str, i32, i32)] = &[
             (1, "minecraft:fern", 1, 12),
@@ -342,8 +383,27 @@ impl Villager {
                     .collect::<Vec<_>>(),
             ),
         );
-        if self.cured_discount {
-            nbt.insert("CuredDiscount", true);
+        if !self.gossips.is_empty() {
+            let gossips: Vec<Tag> = self
+                .gossips
+                .iter()
+                .map(|g| {
+                    let t = g.target;
+                    let target = vec![
+                        (t >> 96) as i32,
+                        (t >> 64) as i32,
+                        (t >> 32) as i32,
+                        t as i32,
+                    ];
+                    Tag::Compound(
+                        Compound::new()
+                            .with("Type", g.kind.as_str())
+                            .with("Value", g.value)
+                            .with("Target", target),
+                    )
+                })
+                .collect();
+            nbt.insert("Gossips", gossips);
         }
         if let Some(site) = self.job_site {
             nbt.insert(
@@ -375,7 +435,25 @@ impl Villager {
         v.profession = Profession::from_name(data.and_then(|d| d.str("profession")).unwrap_or(""));
         v.level = data.and_then(|d| d.int("level")).unwrap_or(1).clamp(1, 5) as i32;
         v.xp = nbt.int("Xp").unwrap_or(0) as i32;
-        v.cured_discount = nbt.int("CuredDiscount").unwrap_or(0) != 0;
+        v.gossips = nbt
+            .list("Gossips")
+            .unwrap_or_default()
+            .iter()
+            .filter_map(Tag::as_compound)
+            .filter_map(|g| {
+                let &[a, b, c, d] = g.int_array("Target")? else {
+                    return None;
+                };
+                Some(Gossip {
+                    kind: g.str("Type")?.to_owned(),
+                    value: g.int("Value")? as i32,
+                    target: (u128::from(a as u32) << 96)
+                        | (u128::from(b as u32) << 64)
+                        | (u128::from(c as u32) << 32)
+                        | u128::from(d as u32),
+                })
+            })
+            .collect();
         v.offers = nbt
             .compound("Offers")
             .and_then(|o| o.list("Recipes"))
@@ -411,21 +489,47 @@ impl Villager {
             .u8(0xFF)
     }
 
-    /// The trades as the trading screen's click handling sees them, with discounts if the
-    /// player has the Hero of the Village effect or if the villager was cured.
-    pub fn trades_for_player(&self, hero_amp: Option<u8>) -> Vec<Trade> {
-        let cured_bonus = if self.cured_discount { 20 } else { 0 };
+    /// A player's standing with it: the gossip about them, weighed.
+    pub fn reputation(&self, player: u128) -> i32 {
+        self.gossips
+            .iter()
+            .filter(|g| g.target == player)
+            .map(|g| g.value * gossip_weight(&g.kind))
+            .sum()
+    }
+
+    /// `player` cured it: as in vanilla since 1.20.2, only the first cure by a player
+    /// counts (major positive 20, minor positive 25).
+    pub fn cured_by(&mut self, player: u128) {
+        let major = "minecraft:major_positive";
+        if self
+            .gossips
+            .iter()
+            .any(|g| g.target == player && g.kind == major)
+        {
+            return;
+        }
+        self.gossips.push(Gossip {
+            kind: major.to_owned(),
+            value: 20,
+            target: player,
+        });
+        self.gossips.push(Gossip {
+            kind: "minecraft:minor_positive".to_owned(),
+            value: 25,
+            target: player,
+        });
+    }
+
+    /// The trades as `player` sees them in the trading screen, with Hero of the Village
+    /// and their reputation taken off.
+    pub fn trades_for_player(&self, hero_amp: Option<u8>, player: u128) -> Vec<Trade> {
+        let reputation = self.reputation(player);
         self.offers
             .iter()
             .map(|o| {
-                let hero_discount = hero_amp.map_or(0, |amp| {
-                    let d = (((o.buy.count as f32) * (0.05 + 0.0625 * (amp as f32 + 1.0))).round()
-                        as i32)
-                        .max(1);
-                    d.min(o.buy.count - 1)
-                });
-                let discount = (hero_discount + cured_bonus).min(o.buy.count - 1);
-                let buy = o.buy.with_count((o.buy.count - discount).max(1));
+                let off = discount(o, hero_amp, reputation, self.wandering);
+                let buy = o.buy.with_count((o.buy.count - off).max(1));
                 Trade {
                     buy,
                     buy_b: o.buy_b,
@@ -462,7 +566,7 @@ impl Villager {
     /// The trades as the trading screen's click handling sees them.
     #[allow(dead_code)]
     pub fn trades(&self) -> Vec<Trade> {
-        self.trades_for_player(None)
+        self.trades_for_player(None, 0)
     }
 }
 
@@ -1060,19 +1164,15 @@ impl World {
             .get(&id)
             .and_then(|p| p.effect(levitas_registry::mob_effect::HERO_OF_THE_VILLAGE))
             .map(|e| e.amplifier);
-        let cured_bonus = if v.cured_discount { 20 } else { 0 };
+        let reputation = self
+            .players
+            .get(&id)
+            .map_or(0, |p| v.reputation(p.profile.uuid));
         let mut packet = Writer::packet(clientbound::MERCHANT_OFFERS)
             .varint(window)
             .varint(v.offers.len() as i32);
         for o in &v.offers {
-            let hero_discount = hero_amp.map_or(0, |amp| {
-                let d = (((o.buy.count as f32) * (0.05 + 0.0625 * (amp as f32 + 1.0))).round()
-                    as i32)
-                    .max(1);
-                d.min(o.buy.count - 1)
-            });
-            let discount = (hero_discount + cured_bonus).min(o.buy.count - 1);
-            let special_price = -discount;
+            let special_price = -discount(o, hero_amp, reputation, !is_regular);
             packet = cost(packet, o.buy);
             packet = crate::inventory::write_stack(packet, o.sell);
             packet = if o.buy_b.is_empty() {
@@ -1130,22 +1230,16 @@ impl World {
                 open.grid[0] = stack.with_count(over);
             }
         }
-        let cured_bonus = self
+        let (reputation, wandering) = self
             .mobs
             .get(&target)
             .and_then(|m| m.villager.as_ref())
-            .map_or(0, |v| if v.cured_discount { 20 } else { 0 });
+            .map_or((0, false), |v| (v.reputation(p.profile.uuid), v.wandering));
         let hero_amp = p
             .effect(levitas_registry::mob_effect::HERO_OF_THE_VILLAGE)
             .map(|e| e.amplifier);
-        let hero_discount = hero_amp.map_or(0, |amp| {
-            let d = (((offer.buy.count as f32) * (0.05 + 0.0625 * (amp as f32 + 1.0))).round()
-                as i32)
-                .max(1);
-            d.min(offer.buy.count - 1)
-        });
-        let discount = (hero_discount + cured_bonus).min(offer.buy.count - 1);
-        let effective_buy = offer.buy.with_count((offer.buy.count - discount).max(1));
+        let off = discount(&offer, hero_amp, reputation, wandering);
+        let effective_buy = offer.buy.with_count((offer.buy.count - off).max(1));
         // Pull the payment out of the inventory, up to a full stack of each.
         for (slot, cost) in [(0, effective_buy), (1, offer.buy_b)] {
             if cost.is_empty() {
@@ -1523,7 +1617,7 @@ mod tests {
         let base_trades = v.trades();
         assert_eq!(base_trades[0].buy.count, 24);
 
-        let discounted_trades = v.trades_for_player(Some(0));
+        let discounted_trades = v.trades_for_player(Some(0), 0);
         assert!(discounted_trades[0].buy.count < 24);
     }
 
@@ -1541,9 +1635,15 @@ mod tests {
             xp: 2,
             price_multiplier: 0.05,
         }];
-        v.cured_discount = true;
-        let discounted = v.trades_for_player(None);
-        assert_eq!(discounted[0].buy.count, 4); // 24 - 20 = 4 emeralds
+        v.cured_by(7);
+        v.cured_by(7); // a second cure by the same player adds nothing
+                       // Reputation 20 * 5 + 25 = 125, times the 0.05 multiplier: 6 off, for the curer only.
+        assert_eq!(v.trades_for_player(None, 7)[0].buy.count, 18);
+        assert_eq!(v.trades_for_player(None, 8)[0].buy.count, 24);
+        // Hero of the Village I takes off 30% (7 of 24), but not at wandering traders.
+        assert_eq!(v.trades_for_player(Some(0), 8)[0].buy.count, 17);
+        v.wandering = true;
+        assert_eq!(v.trades_for_player(Some(0), 8)[0].buy.count, 24);
     }
 
     #[test]

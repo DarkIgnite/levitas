@@ -1024,7 +1024,9 @@ impl Mob {
             || kind == MobKind::ZombieVillager
             || kind == MobKind::WanderingTrader
         {
-            mob.villager = Some(Box::new(super::villagers::Villager::read_nbt(nbt)));
+            let mut v = super::villagers::Villager::read_nbt(nbt);
+            v.wandering = kind == MobKind::WanderingTrader;
+            mob.villager = Some(Box::new(v));
         }
         mob.player_created = nbt.int("PlayerCreated").unwrap_or(0) != 0;
         mob.is_patrol_leader = nbt.int("PatrolLeader").unwrap_or(0) != 0;
@@ -1432,8 +1434,12 @@ impl World {
                             e.id != levitas_registry::mob_effect::WEAKNESS
                                 && e.id != levitas_registry::mob_effect::STRENGTH
                         });
-                        if let Some(v) = mob.villager.as_mut() {
-                            v.cured_discount = true;
+                        let curer = mob
+                            .helped_by
+                            .and_then(|c| self.players.get(&c))
+                            .map(|p| p.profile.uuid);
+                        if let (Some(v), Some(curer)) = (mob.villager.as_mut(), curer) {
+                            v.cured_by(curer);
                         }
                         if let Some(curer) = mob.helped_by.take() {
                             self.advance(curer, super::advancements::Trigger::CuredZombieVillager);
@@ -3497,7 +3503,7 @@ mod path_tests {
         let cured = world.mobs.get(&zid).unwrap();
         assert_eq!(cured.kind, MobKind::Villager);
         assert_eq!(cured.converting, None);
-        assert!(cured.villager.as_ref().unwrap().cured_discount);
+        assert!(!cured.villager.as_ref().unwrap().gossips.is_empty());
     }
 
     #[test]

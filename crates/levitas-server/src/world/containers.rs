@@ -725,10 +725,11 @@ impl World {
                     .get(&id)
                     .and_then(|p| p.effect(levitas_registry::mob_effect::HERO_OF_THE_VILLAGE))
                     .map(|e| e.amplifier);
+                let uuid = self.players.get(&id).map_or(0, |p| p.profile.uuid);
                 self.mobs
                     .get(&target)
                     .and_then(|m| m.villager.as_ref())
-                    .map(|v| v.trades_for_player(hero_amp))
+                    .map(|v| v.trades_for_player(hero_amp, uuid))
                     .unwrap_or_default()
             }
             _ => Vec::new(),
