@@ -3,7 +3,7 @@
 //! doors and beds break, and some never move: unbreakable blocks, obsidian, blocks
 //! holding things, and extended pistons.
 
-use levitas_registry::{block_has_tag, collision_boxes, BlockInfo};
+use levitas_registry::{collision_boxes, BlockInfo};
 use levitas_world::is_air;
 
 use super::{name, prop};
@@ -89,7 +89,7 @@ pub fn reaction(state: u16) -> Reaction {
     }
     if collision_boxes(state).is_empty()
         || super::is_door(state)
-        || block_has_tag(state, "minecraft:beds")
+        || super::is_bed(state)
         || n.ends_with("shulker_box")
     {
         return Reaction::Destroy;

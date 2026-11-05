@@ -254,6 +254,8 @@ impl World {
         let id = allocate_id();
         let map = MapData::new(self.dimension.name(), x, z, scale.min(MAX_SCALE));
         self.maps.insert(id, map);
+        // On disk at once, so other dimensions find it.
+        self.save_maps();
         id
     }
 
@@ -265,6 +267,7 @@ impl World {
         copy.unsaved = true;
         let new = allocate_id();
         self.maps.insert(new, copy);
+        self.save_maps();
         Some(new)
     }
 
@@ -277,6 +280,7 @@ impl World {
         let (dimension, [x, z], scale) = (map.dimension, map.center, map.scale + 1);
         let new = allocate_id();
         self.maps.insert(new, MapData::new(dimension, x, z, scale));
+        self.save_maps();
         Some(new)
     }
 

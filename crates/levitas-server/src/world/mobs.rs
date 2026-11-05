@@ -792,6 +792,9 @@ impl Mob {
         if let Some(name) = self.name {
             packets.push(name_data(id, name));
         }
+        if self.effect_level(levitas_registry::mob_effect::INVISIBILITY) > 0 {
+            packets.push(invisible_data(id, true));
+        }
         if self.age < 0 {
             packets.push(super::breeding::baby_data(id, true));
         }
@@ -2450,6 +2453,8 @@ impl World {
             };
             mob.effects.push(effect);
             self.send_to_viewers(mob, super::effects::update_packet(id, &effect));
+            // Clients hide an entity by its invisible flag, not the effect.
+            self.send_to_viewers(mob, invisible_data(id, true));
             self.play_sound_at(
                 "minecraft:entity.wandering_trader.disappeared",
                 mob.pos,
@@ -2471,6 +2476,7 @@ impl World {
                 mob,
                 super::effects::remove_packet(id, levitas_registry::mob_effect::INVISIBILITY),
             );
+            self.send_to_viewers(mob, invisible_data(id, false));
             self.play_sound_at(
                 "minecraft:entity.wandering_trader.reappeared",
                 mob.pos,
@@ -2801,6 +2807,18 @@ fn feet(pos: [f64; 3]) -> BlockPos {
 
 /// The yaw (degrees, Minecraft's convention) that faces from `from` towards `to`.
 /// Entity data showing a mob's custom name: index 2, an optional text component.
+/// The entity flags with only `invisible` (0x20) set or clear.
+fn invisible_data(id: i32, invisible: bool) -> Writer {
+    const DATA_FLAGS: u8 = 0;
+    const INVISIBLE: u8 = 0x20;
+    Writer::packet(clientbound::SET_ENTITY_DATA)
+        .varint(id)
+        .u8(DATA_FLAGS)
+        .varint(SERIALIZER_BYTE)
+        .u8(if invisible { INVISIBLE } else { 0 })
+        .u8(0xFF)
+}
+
 fn name_data(id: i32, name: &str) -> Writer {
     const DATA_CUSTOM_NAME: u8 = 2;
     const SERIALIZER_OPTIONAL_COMPONENT: i32 = 6;

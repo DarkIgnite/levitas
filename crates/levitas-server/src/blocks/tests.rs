@@ -486,3 +486,18 @@ fn blocks_new_in_26_3_place_and_hold_on_like_their_kin() {
         "up"
     )));
 }
+
+#[test]
+fn dry_grass_grows_on_sand_and_terracotta() {
+    let grass = levitas_registry::BlockInfo::by_name("minecraft:short_dry_grass")
+        .unwrap()
+        .default_state;
+    for ground in ["minecraft:sand", "minecraft:terracotta", "minecraft:dirt"] {
+        let below = levitas_registry::BlockInfo::by_name(ground)
+            .unwrap()
+            .default_state;
+        let pos = BlockPos::new(0, 64, 0);
+        let mut get = |p: BlockPos| if p.y == 63 { below } else { block::AIR };
+        assert!(can_survive(grass, pos, &mut get), "{ground}");
+    }
+}

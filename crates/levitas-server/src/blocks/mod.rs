@@ -344,11 +344,13 @@ pub fn can_survive(state: u16, pos: BlockPos, get: &mut impl FnMut(BlockPos) -> 
                 | "minecraft:wildflowers"
                 | "minecraft:bush"
                 | "minecraft:firefly_bush"
-                | "minecraft:short_dry_grass"
-                | "minecraft:tall_dry_grass"
                 | "minecraft:leaf_litter"
                 | "minecraft:red_shrub"
         );
+    // Dry grass also grows on sand and terracotta.
+    if matches!(n, "minecraft:short_dry_grass" | "minecraft:tall_dry_grass") {
+        return block_has_tag(ground, "minecraft:supports_dry_vegetation");
+    }
     if plant {
         return is_soil(ground)
             || (n == "minecraft:wither_rose"
