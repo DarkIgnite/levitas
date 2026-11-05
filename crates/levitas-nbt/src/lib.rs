@@ -125,6 +125,12 @@ impl Compound {
         }
     }
 
+    /// Takes `key` out, returning its value.
+    pub fn remove(&mut self, key: &str) -> Option<Tag> {
+        let at = self.0.iter().position(|(k, _)| k == key)?;
+        Some(self.0.remove(at).1)
+    }
+
     /// Builder form of [`Compound::insert`].
     pub fn with(mut self, key: impl Into<String>, tag: impl Into<Tag>) -> Self {
         self.insert(key, tag);

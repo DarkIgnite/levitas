@@ -419,6 +419,18 @@ const EQUIPMENT: [(&str, usize); 5] = [
     ("offhand", OFFHAND),
 ];
 
+/// Parts of a saved chunk Levitas does not handle: kept to be written back unchanged.
+#[derive(Default)]
+pub struct KeptChunkData {
+    /// Structure starts and references (fortresses, outposts, ...).
+    structures: Option<Tag>,
+    inhabited_time: Option<Tag>,
+    /// Block entities of kinds Levitas does not know yet (shulker boxes, beehives,
+    /// lecterns, banners, ...), with the block they belong to: one is dropped once its
+    /// block is gone.
+    block_entities: Vec<(BlockPos, &'static str, Compound)>,
+}
+
 impl Player {
     /// The vanilla `players/data/<uuid>.dat` contents.
     pub(super) fn to_nbt(&self) -> Compound {
@@ -487,11 +499,21 @@ impl Player {
                     .with("pos", vec![pos.x, pos.y, pos.z]),
             );
         }
-        nbt
+        // Keep what Levitas does not manage (the ender chest, ...), minus what it
+        // decides itself.
+        let mut out = self.saved_extra.clone();
+        for key in ["respawn", "LastDeathLocation"] {
+            out.remove(key);
+        }
+        for (key, tag) in nbt.iter() {
+            out.insert(key, tag.clone());
+        }
+        out
     }
 
     /// Applies saved data. A player saved while dead comes back alive at spawn.
     pub(super) fn load_nbt(&mut self, nbt: &Compound) {
+        self.saved_extra = nbt.clone();
         if let Some(mode) = nbt.int("playerGameType").filter(|m| (0..=1).contains(m)) {
             self.mode = mode as u8;
         }
@@ -508,6 +530,22 @@ impl Player {
                 if let Some(stack) = equipment.compound(name) {
                     self.inventory.slots[slot] = Stack::from_nbt(stack);
                 }
+            }
+        } else {
+            // Before 25w03a armour and the offhand were inventory slots 100-103 and -106.
+            for item in nbt.list("Inventory").unwrap_or_default() {
+                let Some(c) = item.as_compound() else {
+                    continue;
+                };
+                let slot = match c.int("Slot").map(|s| s as i8) {
+                    Some(100) => 8,
+                    Some(101) => 7,
+                    Some(102) => 6,
+                    Some(103) => 5,
+                    Some(-106) => OFFHAND,
+                    _ => continue,
+                };
+                self.inventory.slots[slot] = Stack::from_nbt(c);
             }
         }
         self.held = nbt.int("SelectedItemSlot").unwrap_or(0).clamp(0, 8) as usize;
@@ -559,16 +597,15 @@ impl Player {
         self.saturation = nbt.float("foodSaturationLevel").unwrap_or(5.0) as f32;
         self.exhaustion = nbt.float("foodExhaustionLevel").unwrap_or(0.0) as f32;
         self.food_timer = nbt.int("foodTickTimer").unwrap_or(0).max(0) as u32;
-        let overworld = nbt
-            .str("Dimension")
-            .is_none_or(|d| d == "minecraft:overworld");
         let pos: Vec<f64> = nbt
             .list("Pos")
             .unwrap_or_default()
             .iter()
             .filter_map(Tag::as_f64)
             .collect();
-        if let (&[x, y, z], true) = (&pos[..], overworld) {
+        // The position counts in whichever dimension the player was saved in, and that is
+        // where they are handed over to.
+        if let &[x, y, z] = &pos[..] {
             if [x, y, z].iter().all(|v| v.is_finite()) {
                 self.pos = [x, y, z];
                 self.sent_pos = self.pos;
@@ -633,17 +670,41 @@ impl World {
         let nbt = match self.storage.read(x, z) {
             Ok(nbt) => nbt?,
             Err(e) => {
-                error!("chunk {x},{z} is unreadable and will be regenerated: {e}");
+                error!("chunk {x},{z} is unreadable; it is regenerated for now but not saved: {e}");
+                self.unreadable.insert((x, z));
                 return None;
             }
         };
         let loaded = match anvil::from_nbt(&nbt) {
             Ok(loaded) => loaded?,
             Err(e) => {
-                error!("chunk {x},{z} cannot be loaded and will be regenerated: {e:?}");
+                error!("chunk {x},{z} cannot be loaded; it is regenerated for now but not saved: {e:?}");
+                self.unreadable.insert((x, z));
                 return None;
             }
         };
+        let mut kept = KeptChunkData {
+            structures: nbt.get("structures").cloned(),
+            inhabited_time: nbt.get("InhabitedTime").cloned(),
+            block_entities: Vec::new(),
+        };
+        for be in &loaded.block_entities {
+            if BlockEntity::from_nbt(be).is_some() {
+                continue;
+            }
+            let (Some(bx), Some(by), Some(bz)) = (be.int("x"), be.int("y"), be.int("z")) else {
+                continue;
+            };
+            let pos = BlockPos::new(bx as i32, by as i32, bz as i32);
+            if pos.chunk() == (x, z) {
+                let block = loaded
+                    .chunk
+                    .get((pos.x & 15) as usize, pos.y, (pos.z & 15) as usize);
+                kept.block_entities
+                    .push((pos, crate::blocks::name(block), be.clone()));
+            }
+        }
+        self.kept.insert((x, z), kept);
         let mut rolled = false;
         for nbt in &loaded.block_entities {
             rolled |= self.add_block_entity(nbt, x, z);
@@ -679,15 +740,26 @@ impl World {
 
     fn save_chunk(&mut self, x: i32, z: i32) {
         self.dirty.remove(&(x, z));
+        if self.unreadable.contains(&(x, z)) {
+            return; // the original on disk stays as it was
+        }
         let Some(chunk) = self.chunks.get(&(x, z)) else {
             return;
         };
-        let entities = self
+        let mut entities: Vec<Compound> = self
             .block_entities
             .iter()
             .filter(|(pos, _)| pos.chunk() == (x, z))
             .map(|(&pos, e)| e.to_nbt(pos))
             .collect();
+        if let Some(kept) = self.kept.get_mut(&(x, z)) {
+            // Unknown block entities go back while their block is still there.
+            kept.block_entities.retain(|(pos, block, _)| {
+                let now = chunk.get((pos.x & 15) as usize, pos.y, (pos.z & 15) as usize);
+                crate::blocks::name(now) == *block
+            });
+            entities.extend(kept.block_entities.iter().map(|(_, _, nbt)| nbt.clone()));
+        }
         let ticks = self.scheduled_ticks_in(x, z);
         let fluid_ticks = self.fluid_ticks_in(x, z);
         let nbt = anvil::to_nbt(
@@ -700,6 +772,15 @@ impl World {
             self.tick as i64,
             self.dimension.span(),
         );
+        let mut nbt = nbt;
+        if let Some(kept) = self.kept.get(&(x, z)) {
+            if let Some(structures) = &kept.structures {
+                nbt.insert("structures", structures.clone());
+            }
+            if let Some(time) = &kept.inhabited_time {
+                nbt.insert("InhabitedTime", time.clone());
+            }
+        }
         if let Err(e) = self.storage.write(x, z, &nbt) {
             error!("could not save chunk {x},{z}: {e}");
         }
@@ -761,6 +842,8 @@ impl World {
             }
             self.chunks.remove(&(x, z));
             self.block_entities.retain(|pos, _| pos.chunk() != (x, z));
+            self.kept.remove(&(x, z));
+            self.unreadable.remove(&(x, z));
             self.drop_scheduled_ticks(x, z);
             self.drop_fluid_ticks(x, z);
         }
@@ -821,6 +904,118 @@ mod tests {
         let saved = w.block_entities[&pos].to_nbt(pos);
         assert!(saved.str("LootTable").is_none());
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// What a saved chunk holds that Levitas does not handle (a shulker box's block
+    /// entity, structure starts) is written back unchanged, until its block is gone.
+    #[test]
+    fn unknown_chunk_data_survives_a_save() {
+        let dir = std::env::temp_dir().join(format!("levitas-keep-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        let (mut w, _) = World::new(
+            dir.clone(),
+            NewWorld {
+                kind: WorldKind::Flat,
+                seed: Some(0),
+            },
+        );
+        w.chunk(0, 0);
+        let pos = BlockPos::new(1, -60, 1);
+        w.set_block(pos, block::BLUE_SHULKER_BOX);
+        w.save_chunk(0, 0);
+        // Put an unknown block entity and structure data into the saved chunk.
+        let mut nbt = w.storage.read(0, 0).unwrap().unwrap();
+        let shulker = Compound::new()
+            .with("id", "minecraft:shulker_box")
+            .with("x", pos.x)
+            .with("y", pos.y)
+            .with("z", pos.z)
+            .with("Lock", "secret");
+        nbt.insert("block_entities", vec![Tag::Compound(shulker)]);
+        nbt.insert("structures", Compound::new().with("marker", 1i32));
+        nbt.insert("InhabitedTime", 1234i64);
+        w.storage.write(0, 0, &nbt).unwrap();
+        // Load it again and save it after a change elsewhere in the chunk.
+        let chunk = w.load_chunk(0, 0).unwrap();
+        w.chunks.insert((0, 0), chunk);
+        w.set_block(BlockPos::new(5, -60, 5), block::STONE);
+        w.save_chunk(0, 0);
+        let saved = w.storage.read(0, 0).unwrap().unwrap();
+        let entities = saved.list("block_entities").unwrap();
+        assert!(entities
+            .iter()
+            .filter_map(Tag::as_compound)
+            .any(|c| c.str("Lock") == Some("secret")));
+        assert_eq!(saved.compound("structures").unwrap().int("marker"), Some(1));
+        assert_eq!(saved.int("InhabitedTime"), Some(1234));
+        // Once the box is broken its data goes too.
+        w.set_block(pos, block::AIR);
+        w.save_chunk(0, 0);
+        let saved = w.storage.read(0, 0).unwrap().unwrap();
+        assert!(!saved
+            .list("block_entities")
+            .unwrap()
+            .iter()
+            .filter_map(Tag::as_compound)
+            .any(|c| c.str("Lock") == Some("secret")));
+        // An unreadable chunk is never written over.
+        w.unreadable.insert((0, 0));
+        w.set_block(BlockPos::new(6, -60, 6), block::STONE);
+        w.save_chunk(0, 0);
+        let again = w.storage.read(0, 0).unwrap().unwrap();
+        assert_eq!(again, saved);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// The parts of a player file Levitas does not manage (the ender chest) stay, armour
+    /// in the old inventory slots is worn, and the position counts in any dimension.
+    #[test]
+    fn player_files_keep_what_levitas_does_not_manage() {
+        let (tx, _rx) = tokio::sync::mpsc::channel(1);
+        let profile = crate::connection::Profile {
+            uuid: 5,
+            name: "Keeper".to_owned(),
+            properties: Vec::new(),
+        };
+        let mut p = Player::new(profile, tx, [0.0; 3]);
+        let helmet = Compound::new()
+            .with("id", "minecraft:iron_helmet")
+            .with("count", 1i32)
+            .with("Slot", 103i8);
+        let shield = Compound::new()
+            .with("id", "minecraft:shield")
+            .with("count", 1i32)
+            .with("Slot", -106i8);
+        let saved = Compound::new()
+            .with("Dimension", "minecraft:the_nether")
+            .with(
+                "Pos",
+                vec![Tag::Double(30.5), Tag::Double(40.0), Tag::Double(-90.5)],
+            )
+            .with(
+                "Inventory",
+                vec![Tag::Compound(helmet), Tag::Compound(shield)],
+            )
+            .with(
+                "EnderItems",
+                vec![Tag::Compound(
+                    Compound::new().with("id", "minecraft:diamond"),
+                )],
+            );
+        p.load_nbt(&saved);
+        assert_eq!(p.pos, [30.5, 40.0, -90.5]);
+        let head = ItemInfo::id_of("minecraft:iron_helmet").unwrap();
+        assert_eq!(p.inventory.slots[5].item, head);
+        let shield = ItemInfo::id_of("minecraft:shield").unwrap();
+        assert_eq!(p.inventory.slots[OFFHAND].item, shield);
+        let out = p.to_nbt();
+        assert_eq!(out.list("EnderItems").map(<[Tag]>::len), Some(1));
+        // The armour is now saved the new way.
+        assert!(out
+            .compound("equipment")
+            .unwrap()
+            .compound("head")
+            .is_some());
     }
 
     #[test]

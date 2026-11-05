@@ -2529,6 +2529,9 @@ impl World {
                 .filter(|s| s.chunk() == (cx, cz))
                 .map(|s| Tag::Compound(s.to_nbt())),
         );
+        if let Some(kept) = self.kept_entities.get(&(cx, cz)) {
+            entities.extend(kept.iter().cloned().map(Tag::Compound));
+        }
         Compound::new()
             .with("DataVersion", DATA_VERSION)
             .with("Position", vec![cx, cz])
@@ -2563,6 +2566,9 @@ impl World {
     }
 
     fn save_mob_chunk(&mut self, x: i32, z: i32) {
+        if self.unreadable_entities.contains(&(x, z)) {
+            return; // the original on disk stays as it was
+        }
         let nbt = self.mob_chunk_nbt(x, z);
         if let Err(e) = self.entity_storage.write(x, z, &nbt) {
             error!("could not save the mobs of chunk {x},{z}: {e}");
@@ -2617,9 +2623,13 @@ impl World {
             && stand_ids.is_empty()
             && !had_mobs
         {
+            self.kept_entities.remove(&(x, z));
+            self.unreadable_entities.remove(&(x, z));
             return;
         }
         self.save_mob_chunk(x, z);
+        self.kept_entities.remove(&(x, z));
+        self.unreadable_entities.remove(&(x, z));
         for id in ids {
             let mob = self.mobs.remove(&id).expect("listed");
             self.send_to_viewers(&mob, items::remove_entity(id));
@@ -2652,7 +2662,8 @@ impl World {
             Ok(Some(nbt)) => nbt,
             Ok(None) => return,
             Err(e) => {
-                error!("the mobs of chunk {x},{z} are unreadable: {e}");
+                error!("the mobs of chunk {x},{z} are unreadable and will not be saved over: {e}");
+                self.unreadable_entities.insert((x, z));
                 return;
             }
         };
@@ -2710,6 +2721,15 @@ impl World {
             if let Some(mob) = Mob::from_nbt(entity, &mut self.rng) {
                 self.mob_chunks.insert(mob.chunk());
                 self.mobs.insert(next_entity_id(), mob);
+                continue;
+            }
+            // An entity Levitas does not handle yet: it goes back on disk unchanged.
+            let known_mob = entity.str("id").and_then(MobKind::from_name).is_some();
+            if !known_mob && entity.str("id") != Some("minecraft:item") {
+                self.kept_entities
+                    .entry((x, z))
+                    .or_default()
+                    .push(entity.clone());
             }
         }
     }
@@ -3049,6 +3069,43 @@ mod path_tests {
         world.tick = 20;
         world.hurt_mob(id, &mut fish, 1.0, "minecraft:dry_out");
         assert_eq!(fish.health, 2.0);
+    }
+
+    #[test]
+    fn entities_levitas_does_not_know_are_saved_back() {
+        let mut world = flat_world();
+        let horse = Compound::new()
+            .with("id", "minecraft:horse")
+            .with(
+                "Pos",
+                vec![Tag::Double(2.5), Tag::Double(-60.0), Tag::Double(2.5)],
+            )
+            .with("Tame", 1i8);
+        let cow = Compound::new()
+            .with("id", "minecraft:cow")
+            .with(
+                "Pos",
+                vec![Tag::Double(3.5), Tag::Double(-60.0), Tag::Double(3.5)],
+            )
+            .with("Health", 10.0f32);
+        let nbt = Compound::new()
+            .with("DataVersion", DATA_VERSION)
+            .with("Position", vec![0, 0])
+            .with("Entities", vec![Tag::Compound(horse), Tag::Compound(cow)]);
+        world.entity_storage.write(0, 0, &nbt).unwrap();
+        world.load_mobs(0, 0);
+        assert_eq!(world.mobs.len(), 1, "the cow is loaded");
+        world.save_mob_chunk(0, 0);
+        let saved = world.entity_storage.read(0, 0).unwrap().unwrap();
+        let ids: Vec<&str> = saved
+            .list("Entities")
+            .unwrap()
+            .iter()
+            .filter_map(Tag::as_compound)
+            .filter_map(|e| e.str("id"))
+            .collect();
+        assert!(ids.contains(&"minecraft:horse"), "{ids:?}");
+        assert!(ids.contains(&"minecraft:cow"), "{ids:?}");
     }
 
     #[test]

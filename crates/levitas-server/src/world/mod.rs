@@ -434,6 +434,9 @@ struct Player {
     respawn: Option<BlockPos>,
     /// Whether `respawn` was set by /spawnpoint (and needs no bed).
     respawn_forced: bool,
+    /// The saved player file as it was read: keys Levitas does not manage (the ender
+    /// chest, the recipe book, abilities, ...) are written back unchanged.
+    saved_extra: levitas_nbt::Compound,
     /// Tick the attack charge last started over (after an attack or switching items).
     attack_reset: u64,
     /// Hand and start tick of a bow being drawn.
@@ -528,6 +531,7 @@ impl Player {
             sleep_ticks: 0,
             respawn: None,
             respawn_forced: false,
+            saved_extra: levitas_nbt::Compound::new(),
             attack_reset: 0,
             drawing: None,
             xp_level: 0,
@@ -615,10 +619,20 @@ struct World {
     orbs: HashMap<i32, experience::XpOrb>,
     /// Loaded chunks that held mobs at the last save, so emptied ones are saved too.
     mob_chunks: HashSet<(i32, i32)>,
+    /// Saved entities Levitas does not handle (horses, cats, chest minecarts, ...), by
+    /// entity chunk, written back unchanged; and entity chunks that could not be read,
+    /// which are never written over.
+    kept_entities: HashMap<(i32, i32), Vec<levitas_nbt::Compound>>,
+    unreadable_entities: HashSet<(i32, i32)>,
     biome_spawns: mobs::BiomeSpawns,
     chunks: HashMap<(i32, i32), Chunk>,
     /// Chunks changed since they were last saved.
     dirty: HashSet<(i32, i32)>,
+    /// What saved chunks hold that Levitas does not handle, written back unchanged.
+    kept: HashMap<(i32, i32), storage::KeptChunkData>,
+    /// Chunks on disk that could not be read: they are served regenerated for now but
+    /// never saved, so the original stays as it was.
+    unreadable: HashSet<(i32, i32)>,
     spawn: [f64; 3],
     players: HashMap<i32, Player>,
     items: HashMap<i32, ItemEntity>,
@@ -731,6 +745,8 @@ impl World {
             arrows: HashMap::new(),
             orbs: HashMap::new(),
             mob_chunks: HashSet::new(),
+            kept_entities: HashMap::new(),
+            unreadable_entities: HashSet::new(),
             biome_spawns: mobs::BiomeSpawns::load(),
             dir,
             chunks: HashMap::new(),
@@ -761,6 +777,8 @@ impl World {
             comparators: HashMap::new(),
             landings: Vec::new(),
             block_entities: HashMap::new(),
+            kept: HashMap::new(),
+            unreadable: HashSet::new(),
             scheduled: Vec::new(),
             terrain,
             generation,
@@ -1010,6 +1028,16 @@ impl World {
         if let Some(other) = saved_in.filter(|&d| d != self.dimension) {
             if self.hand_over(id, other, None, travel::Via::Login) {
                 return;
+            }
+            // That dimension is not running: its coordinates mean nothing here.
+            let spawn = self.spawn;
+            if let Some(p) = self.players.get_mut(&id) {
+                p.pos = spawn;
+                p.sent_pos = spawn;
+                p.center = (
+                    (spawn[0] / 16.0).floor() as i32,
+                    (spawn[2] / 16.0).floor() as i32,
+                );
             }
         }
         self.welcome(id);
