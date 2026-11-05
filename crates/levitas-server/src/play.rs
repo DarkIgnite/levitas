@@ -109,6 +109,32 @@ async fn read_loop(
     }
 }
 
+/// A stack from a creative client, kept only as far as every client can read it back:
+/// an unknown item, potion, trim or enchantment ID would disconnect whoever is sent it.
+fn valid_creative_stack(mut stack: Stack) -> Stack {
+    if levitas_registry::ItemInfo::get(stack.item).is_none() {
+        return Stack::EMPTY;
+    }
+    stack.count = stack.count.clamp(1, 99);
+    if stack
+        .potion
+        .is_some_and(|p| crate::potions::name(p).is_none())
+    {
+        stack.potion = None;
+    }
+    let in_registry = |name: &str, id: u16| {
+        levitas_registry::SyncedRegistry::get(name)
+            .is_some_and(|r| usize::from(id) < r.entries.len())
+    };
+    if stack.trim.is_some_and(|t| {
+        !in_registry("minecraft:trim_material", t.material)
+            || !in_registry("minecraft:trim_pattern", t.pattern)
+    }) {
+        stack.trim = None;
+    }
+    stack
+}
+
 /// Turns a serverbound play packet into a world event. Packets the server does not act
 /// on yet (teleport confirmations, keep-alive replies, settings, ...) give `None`.
 fn decode(id: i32, packet: &[u8]) -> io::Result<Option<Event>> {
@@ -224,6 +250,7 @@ fn decode(id: i32, packet: &[u8]) -> io::Result<Option<Event>> {
                             crate::enchanting::Enchantments::read(&mut Reader::new(data))?;
                     }
                 }
+                stack = valid_creative_stack(stack);
             }
             Event::CreativeSlot { id, slot, stack }
         }
@@ -296,8 +323,8 @@ fn decode(id: i32, packet: &[u8]) -> io::Result<Option<Event>> {
             for line in &mut lines {
                 *line = r.string(384)?.to_owned();
             }
-            // The text slot: 0 is the front.
-            let front = r.varint()? == 0;
+            // The text slot: 0 is the back, 1 the front.
+            let front = r.varint()? == 1;
             Event::SignUpdate {
                 id,
                 pos,
@@ -397,4 +424,36 @@ fn hashed_stack(r: &mut Reader<'_>) -> io::Result<Stack> {
         let _component = r.varint()?;
     }
     Ok(Stack::new(item, count))
+}
+
+#[cfg(test)]
+mod creative_tests {
+    use super::*;
+
+    #[test]
+    fn creative_stacks_keep_only_ids_clients_know() {
+        assert!(valid_creative_stack(Stack::new(1_000_000, 1)).is_empty());
+        let stone = levitas_registry::ItemInfo::id_of("minecraft:stone").unwrap();
+        let mut s = Stack::new(stone, 500);
+        s.potion = Some(250);
+        s.trim = Some(crate::inventory::Trim {
+            material: 60_000,
+            pattern: 0,
+        });
+        let s = valid_creative_stack(s);
+        assert_eq!((s.item, s.count), (stone, 99));
+        assert!(s.potion.is_none() && s.trim.is_none());
+        let frame = Writer::packet(0)
+            .varint(2)
+            .varint(9999)
+            .varint(1)
+            .varint(0)
+            .varint(3)
+            .into_frame();
+        let mut r = Reader::new(&frame);
+        r.varint().unwrap(); // length
+        r.varint().unwrap(); // packet ID
+        let e = crate::enchanting::Enchantments::read(&mut r).unwrap();
+        assert_eq!(e.iter().count(), 1, "the unknown enchantment is dropped");
+    }
 }

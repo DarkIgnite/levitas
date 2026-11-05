@@ -77,7 +77,10 @@ impl Enchantments {
         for _ in 0..r.varint()?.clamp(0, 64) {
             let id = r.varint()?;
             let level = r.varint()?;
-            e.set(id, level.max(0) as u32);
+            // Only enchantments the registry has: others would disconnect clients.
+            if enchantment_name(id).is_some() {
+                e.set(id, level.max(0) as u32);
+            }
         }
         Ok(e)
     }

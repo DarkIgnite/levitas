@@ -75,7 +75,7 @@ use levitas_world::chunk::pack_heightmap;
 use self::dimension::Dimension;
 use levitas_world::{is_air, Chunk, LightEngine, RegionStorage, MAX_Y, MIN_Y};
 use tokio::sync::{mpsc, oneshot};
-use tracing::info;
+use tracing::{info, warn};
 
 use crate::connection::Profile;
 use crate::flat::FlatGenerator;
@@ -564,7 +564,13 @@ impl Player {
     }
 
     fn deliver(&mut self, frame: &Frame) {
-        if self.out.try_send(frame.clone()).is_err() {
+        if let Err(e) = self.out.try_send(frame.clone()) {
+            if !self.kicked && matches!(e, mpsc::error::TrySendError::Full(_)) {
+                warn!(
+                    "{} cannot keep up with the server and is dropped",
+                    self.profile.name
+                );
+            }
             self.kicked = true;
         }
     }
@@ -919,11 +925,7 @@ impl World {
                 }
             }
             Event::Swing { id, hand } => {
-                let animation = if hand == 0 { 0 } else { 3 };
-                let packet = Writer::packet(clientbound::ANIMATE)
-                    .varint(id)
-                    .u8(animation);
-                self.broadcast(packet, Some(id));
+                self.broadcast(swing(id, hand), Some(id));
             }
             Event::LeaveBed { id } => self.wake_up(id),
             Event::Attack { id, target } => self.attack(id, target),
@@ -2001,6 +2003,17 @@ fn block_update(pos: BlockPos, state: u16) -> Writer {
     Writer::packet(clientbound::BLOCK_UPDATE)
         .position(pos)
         .varint(i32::from(state))
+}
+
+/// An entity swinging a hand (0 main, 1 off): a whack lasting vanilla's 6 ticks.
+pub(super) fn swing(id: i32, hand: i32) -> Writer {
+    const WHACK: i32 = 1;
+    const SWING_TICKS: i32 = 6;
+    Writer::packet(clientbound::SWING_ANIMATION)
+        .varint(id)
+        .varint(i32::from(hand != 0))
+        .varint(WHACK)
+        .varint(SWING_TICKS)
 }
 
 fn entity_event(id: i32, event: i8) -> Writer {

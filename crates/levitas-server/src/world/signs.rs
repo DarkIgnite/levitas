@@ -307,7 +307,7 @@ impl World {
 fn open_editor(pos: BlockPos, front: bool) -> Writer {
     Writer::packet(clientbound::OPEN_SIGN_EDITOR)
         .position(pos)
-        .varint(if front { 0 } else { 1 }) // the text slot
+        .varint(if front { 1 } else { 0 }) // the text slot: 0 back, 1 front
 }
 
 #[cfg(test)]

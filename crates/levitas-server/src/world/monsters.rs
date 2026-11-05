@@ -258,7 +258,7 @@ impl World {
         let reach = ((width * 2.0).powi(2) + 0.6).sqrt();
         if distance <= reach && dy.abs() < 1.5 && mob.attack_cooldown == 0 {
             mob.attack_cooldown = ATTACK_TICKS;
-            self.send_to_viewers(mob, Writer::packet(clientbound::ANIMATE).varint(id).u8(0));
+            self.send_to_viewers(mob, super::swing(id, 0));
             if mob.kind == MobKind::Ravager {
                 self.play_sound_at("minecraft:entity.ravager.attack", mob.pos, 1.0, 1.0, None);
             }

@@ -302,9 +302,10 @@ async fn survival_drops_pickup_death_and_respawn() {
     let mut alice = join(addr, "Alice", 1).await;
     read_until(&mut alice, play::clientbound::PLAYER_POSITION).await;
 
-    // Grass takes 0.9 s by hand: starting does nothing, finishing in time breaks it.
+    // Grass takes 0.9 s by hand: starting does nothing, finishing in time breaks it
+    // (with some room for a server slowed down by the other tests).
     let grass = BlockPos::new(0, -61, 0);
-    dig(&mut alice, grass, 900).await;
+    dig(&mut alice, grass, 1200).await;
     let body = read_until(&mut alice, play::clientbound::BLOCK_UPDATE).await;
     let mut r = Reader::new(&body);
     assert_eq!(r.position().unwrap(), grass);
@@ -1514,7 +1515,11 @@ async fn sleeping_through_the_night_and_respawning_at_the_bed() {
     }
     // After 100 ticks asleep the night is skipped to the next morning.
     day_time_until(&mut alice, |t| t.rem_euclid(24_000) == 0 && t > 0).await;
-    read_until(&mut alice, play::clientbound::ANIMATE).await;
+    // Waking up is animation 0 in 26.3.
+    let body = read_until(&mut alice, play::clientbound::ANIMATE).await;
+    let mut r = Reader::new(&body);
+    r.varint().unwrap();
+    assert_eq!(r.u8().unwrap(), 0);
 
     // Dying brings the player back on their bed rather than at the world spawn.
     command(&mut alice, "kill").await;

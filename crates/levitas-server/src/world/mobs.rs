@@ -47,6 +47,8 @@ const ENTITY_EVENT_MOB_DEATH: i8 = 3;
 const ENTITY_EVENT_EAT_GRASS: i8 = 10;
 /// How close a player gets before a rabbit runs.
 const RABBIT_SHY: f64 = 5.0;
+/// How often a mob's position and viewers are sent, in ticks.
+const MOB_UPDATE_TICKS: u64 = 3;
 
 /// Wool colours by their dye number, as sheep store them.
 pub(super) const COLORS: [&str; 16] = [
@@ -1994,7 +1996,16 @@ impl World {
     /// Shows mobs to players who have their chunk loaded, hides them from players who
     /// do not, and sends everyone watching the moves of the last tick.
     fn track_mobs(&mut self) {
-        let ids: Vec<i32> = self.mobs.keys().copied().collect();
+        // Like vanilla, each mob is brought up to date every third tick (spread over the
+        // ticks by entity ID): a third of the traffic, and of this work.
+        let ids: Vec<i32> = self
+            .mobs
+            .keys()
+            .copied()
+            .filter(|&id| {
+                (self.tick + u64::from(id.unsigned_abs())).is_multiple_of(MOB_UPDATE_TICKS)
+            })
+            .collect();
         for id in ids {
             let mut mob = self.mobs.remove(&id).expect("listed");
             let chunk = mob.chunk();

@@ -23,7 +23,7 @@ const SWEEP_SPREAD: f64 = 1.0;
 const SWEEP_SPREAD_UP: f64 = 0.25;
 const SWEEP_RANGE: f64 = 3.0;
 const SWEEP_DAMAGE: f32 = 1.0;
-const ANIMATE_CRITICAL: u8 = 4;
+const ANIMATE_CRITICAL: u8 = 1;
 const PLAYER_HEIGHT: f64 = 1.8;
 
 /// Something a player can hit.

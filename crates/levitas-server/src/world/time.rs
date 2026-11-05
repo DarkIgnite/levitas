@@ -32,7 +32,7 @@ const SERIALIZER_OPTIONAL_POS: i32 = 11;
 const POSE_STANDING: i32 = 0;
 const POSE_SLEEPING: i32 = 2;
 /// Animation shown when a player gets out of bed.
-const ANIMATION_WAKE_UP: u8 = 2;
+const ANIMATION_WAKE_UP: u8 = 0;
 /// Height of a bed's top surface.
 const BED_HEIGHT: f64 = 0.5625;
 
