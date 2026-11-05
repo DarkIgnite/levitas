@@ -623,7 +623,7 @@ impl World {
     }
 
     /// `/clone <begin> <end> <destination> [replace|masked] [normal|force|move]`: copies a
-    /// box of blocks (block states only: chests and signs come empty).
+    /// box of blocks, with what chests, signs and other block entities hold.
     fn clone_command(&mut self, id: i32, args: &[&str]) -> String {
         const USAGE: &str =
             "Usage: /clone <x1 y1 z1> <x2 y2 z2> <x y z> [replace|masked] [normal|force|move]";
@@ -682,7 +682,9 @@ impl World {
                     else {
                         return "That position is not loaded".to_owned();
                     };
-                    blocks.push((from, at, state));
+                    // Block entities go along as their saved form, placed at the copy.
+                    let held = self.block_entities.get(&from).map(|e| e.to_nbt(at));
+                    blocks.push((from, at, state, held));
                 }
             }
         }
@@ -695,19 +697,25 @@ impl World {
                 && p.z <= end.z
         };
         if overlap == "move" {
-            for &(from, _, state) in &blocks {
-                if !is_air(state) && !in_destination(from) {
-                    self.place_by_command(from, block::AIR);
+            for (from, _, state, _) in &blocks {
+                if !is_air(*state) && !in_destination(*from) {
+                    // Moved, not dropped: what it held goes with the copy.
+                    self.block_entities.remove(from);
+                    self.place_by_command(*from, block::AIR);
                 }
             }
         }
         let mut changed = 0;
-        for &(_, at, state) in &blocks {
+        for (_, at, state, held) in &blocks {
+            let (at, state) = (*at, *state);
             if masked && is_air(state) {
                 continue;
             }
-            if self.loaded_block(at) != Some(state) {
+            if self.loaded_block(at) != Some(state) || held.is_some() {
                 self.place_by_command(at, state);
+            }
+            if let Some((_, entity)) = held.as_ref().and_then(BlockEntity::from_nbt) {
+                self.block_entities.insert(at, entity);
             }
             changed += 1;
         }
@@ -1050,5 +1058,22 @@ mod clone_tests {
         assert_eq!(w.block(BlockPos::new(1, -55, 9)), block::GOLD_BLOCK);
         assert!(is_air(w.block(BlockPos::new(1, -55, 1))));
         assert!(is_air(w.block(BlockPos::new(0, -55, 0))));
+        // A chest's contents are copied, and go along when it is moved.
+        let chest = BlockPos::new(3, -55, 3);
+        w.place_by_command(chest, block::CHEST);
+        let diamond = ItemInfo::id_of("minecraft:diamond").unwrap();
+        w.block_entities.get_mut(&chest).unwrap().items_mut()[0] = Stack::new(diamond, 5);
+        w.clone_command(
+            1,
+            &[
+                "3", "-55", "3", "3", "-55", "3", "3", "-55", "12", "replace", "move",
+            ],
+        );
+        let moved = BlockPos::new(3, -55, 12);
+        assert_eq!(
+            w.block_entities.get_mut(&moved).unwrap().items_mut()[0].count,
+            5
+        );
+        assert!(!w.block_entities.contains_key(&chest));
     }
 }
