@@ -65,6 +65,8 @@ pub struct Raid {
     pub raiders: HashSet<i32>,
     pub initial_wave_raiders: usize,
     pub participating_players: HashSet<i32>,
+    /// Players who killed a raider of this raid: the heroes, when it is won.
+    pub raider_killers: HashSet<i32>,
     pub spawned_wave: bool,
 }
 
@@ -222,12 +224,18 @@ impl World {
     fn find_ground_y(&mut self, x: f64, default_y: f64, z: f64) -> f64 {
         let bx = x.floor() as i32;
         let bz = z.floor() as i32;
-        let start_y = (default_y as i32 + 10).clamp(MIN_Y, MAX_Y);
-        for y in (MIN_Y..=start_y).rev() {
-            let pos = BlockPos::new(bx, y, bz);
-            if !is_air(self.block(pos)) {
+        // The highest ground with two blocks of room above it, so a raider is never put
+        // inside a hill.
+        for y in (MIN_Y..MAX_Y - 2).rev() {
+            let ground = self.block(BlockPos::new(bx, y, bz));
+            if is_air(ground) {
+                continue;
+            }
+            let room = (1..=2).all(|dy| is_air(self.block(BlockPos::new(bx, y + dy, bz))));
+            if room {
                 return f64::from(y + 1);
             }
+            break;
         }
         default_y
     }
@@ -253,6 +261,7 @@ impl World {
             raiders: HashSet::new(),
             initial_wave_raiders: 0,
             participating_players: HashSet::new(),
+            raider_killers: HashSet::new(),
             spawned_wave: false,
         };
 
@@ -577,16 +586,23 @@ impl World {
                         }
                     } else {
                         // Victory!
-                        let players = if let Some(r) = self.raids.get_mut(&raid_id) {
+                        let (players, heroes) = if let Some(r) = self.raids.get_mut(&raid_id) {
                             r.state = RaidState::Victory { ticks: 200 };
-                            r.participating_players.iter().copied().collect::<Vec<_>>()
+                            (
+                                r.participating_players.iter().copied().collect::<Vec<_>>(),
+                                r.raider_killers.clone(),
+                            )
                         } else {
-                            Vec::new()
+                            (Vec::new(), HashSet::new())
                         };
                         for pid in players {
                             self.send(pid, boss_bar_title(boss_bar, "Raid - Victory"));
                             self.send(pid, boss_bar_style(boss_bar, BOSS_GREEN));
                             self.send(pid, boss_bar_health(boss_bar, 1.0));
+                            // Only those who fought: killed a raider of this raid.
+                            if !heroes.contains(&pid) {
+                                continue;
+                            }
                             self.add_effect(
                                 pid,
                                 Effect {
@@ -708,17 +724,26 @@ impl World {
     pub(super) fn tick_evoker_fangs(&mut self) {
         let mut expired = Vec::new();
         let mut bites = Vec::new();
+        let mut snaps = Vec::new();
 
         for (&id, fang) in self.evoker_fangs.iter_mut() {
             fang.age += 1;
             if fang.age == fang.warmup {
                 bites.push((id, fang.pos, fang.caster));
+                snaps.push(id);
             }
             if fang.age >= fang.warmup + 16 {
                 expired.push(id);
             }
         }
 
+        // The jaws snap shut on clients (entity event 4).
+        for id in snaps {
+            self.broadcast(
+                Writer::packet(clientbound::ENTITY_EVENT).i32(id).i8(4),
+                None,
+            );
+        }
         for (_id, pos, caster) in bites {
             self.play_sound_at("minecraft:entity.evoker_fangs.attack", pos, 1.0, 1.0, None);
             let hit_players: Vec<i32> = self
@@ -868,8 +893,18 @@ mod tests {
             .count();
         assert_eq!(leader_count, 1);
 
-        // Kill all raiders in wave
-        for rid in raider_ids {
+        // A bystander who kills nothing gets no reward.
+        add_test_player(&mut w, 101, [2.0, -60.0, 0.0]);
+        // The player kills one raider; the rest die otherwise.
+        let (first, rest) = raider_ids.split_first().unwrap();
+        w.hit_mob(
+            *first,
+            1000.0,
+            Some(pid),
+            [0.0, 0.0],
+            "minecraft:player_attack",
+        );
+        for &rid in rest {
             let mut mob = w.mobs.remove(&rid).unwrap();
             w.kill_mob(rid, &mut mob);
         }
@@ -880,6 +915,9 @@ mod tests {
         assert!(matches!(raid.state, RaidState::Victory { .. }));
         let p = &w.players[&pid];
         assert!(p.effect(mob_effect::HERO_OF_THE_VILLAGE).is_some());
+        assert!(w.players[&101]
+            .effect(mob_effect::HERO_OF_THE_VILLAGE)
+            .is_none());
     }
 
     #[test]

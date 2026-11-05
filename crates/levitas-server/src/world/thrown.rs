@@ -310,7 +310,14 @@ impl World {
                 if self.point_in_block(cloud_pos) {
                     cloud_pos[1] = cloud_pos[1].floor() + 1.0;
                 }
-                self.spawn_lingering_cloud(cloud_pos, t.stack.potion, thrower);
+                // Water and other potions without effects leave no cloud in Java.
+                let has_effects = t
+                    .stack
+                    .potion
+                    .is_some_and(|p| !crate::potions::effects(p).is_empty());
+                if has_effects {
+                    self.spawn_lingering_cloud(cloud_pos, t.stack.potion, thrower);
+                }
             }
             ThrownKind::EnderPearl => {
                 let Some(id) = thrower.filter(|id| self.players[id].alive) else {

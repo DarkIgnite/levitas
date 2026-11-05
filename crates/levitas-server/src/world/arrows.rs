@@ -109,7 +109,9 @@ impl World {
             stuck: None,
             age: 0,
         };
-        self.broadcast(arrow_spawn(id, &arrow), None);
+        for packet in arrow_spawn(id, &arrow) {
+            self.broadcast(packet, None);
+        }
         self.arrows.insert(id, arrow);
         let pitch = 1.0 / (self.rng.f64() as f32 * 0.4 + 1.2) + 0.5;
         self.play_sound_at("minecraft:entity.arrow.shoot", from, 1.0, pitch, None);
@@ -282,10 +284,20 @@ impl World {
             }
             Hit::Mob(id) => {
                 let by = arrow.by_player.then_some(arrow.shooter);
+                // An arrow that did not hurt (dodged, or during the hurt cooldown) leaves
+                // no fire or effects.
+                if !self.hit_mob(id, damage, by, away, "minecraft:arrow") {
+                    return self.play_sound_at(
+                        "minecraft:entity.arrow.hit",
+                        arrow.pos,
+                        1.0,
+                        1.1,
+                        None,
+                    );
+                }
                 if arrow.flaming {
                     self.ignite_mob(id, 100);
                 }
-                self.hit_mob(id, damage, by, away, "minecraft:arrow");
                 if arrow.slowness {
                     self.add_mob_effect(id, stray_slowness());
                 }
@@ -355,7 +367,7 @@ impl World {
     pub(super) fn arrow_packets(&self) -> Vec<Writer> {
         self.arrows
             .iter()
-            .map(|(&id, arrow)| arrow_spawn(id, arrow))
+            .flat_map(|(&id, arrow)| arrow_spawn(id, arrow))
             .collect()
     }
 
@@ -462,7 +474,27 @@ fn find_arrows(p: &Player) -> Option<usize> {
         })
 }
 
-fn arrow_spawn(id: i32, arrow: &Arrow) -> Writer {
+/// An arrow appearing: a tipped one trails particles of its potion's colour (entity
+/// data 11, -1 for none).
+fn arrow_spawn(id: i32, arrow: &Arrow) -> Vec<Writer> {
+    const DATA_COLOR: u8 = 11;
+    const SERIALIZER_VARINT: i32 = 1;
+    let mut packets = vec![arrow_add(id, arrow)];
+    if let Some(potion) = arrow.potion {
+        let color = crate::potions::color(potion) | 0xFF00_0000_u32 as i32;
+        packets.push(
+            Writer::packet(clientbound::SET_ENTITY_DATA)
+                .varint(id)
+                .u8(DATA_COLOR)
+                .varint(SERIALIZER_VARINT)
+                .varint(color)
+                .u8(0xFF),
+        );
+    }
+    packets
+}
+
+fn arrow_add(id: i32, arrow: &Arrow) -> Writer {
     let yaw = (arrow.vel[0].atan2(arrow.vel[2])).to_degrees() as f32;
     let pitch = (arrow.vel[1].atan2(arrow.vel[0].hypot(arrow.vel[2]))).to_degrees() as f32;
     Writer::packet(clientbound::ADD_ENTITY)

@@ -294,7 +294,12 @@ impl World {
 
                 for (m_id, is_undead) in candidate_mobs {
                     if cloud.is_dragon_breath {
-                        self.hit_mob(m_id, 3.0, None, [0.0, 0.0], "minecraft:magic");
+                        // Harming in a cloud: it heals the undead instead.
+                        if is_undead {
+                            self.heal_mob(m_id, 2.0);
+                        } else {
+                            self.hit_mob(m_id, 3.0, None, [0.0, 0.0], "minecraft:magic");
+                        }
                     } else if let Some(pot) = cloud.potion {
                         let effects = potions::effects(pot);
                         for effect in &effects {

@@ -2213,7 +2213,13 @@ impl World {
         }
         let at = mob.pos;
         let kind = mob.kind.entity_type();
+        let raid_of_killed = mob.raid_id;
         self.mobs.insert(target, mob);
+        if let (Some(attacker), Some(raid)) = (by_player.filter(|_| killed), raid_of_killed) {
+            if let Some(r) = self.raids.get_mut(&raid) {
+                r.raider_killers.insert(attacker);
+            }
+        }
         if let Some(attacker) = by_player.filter(|_| killed) {
             self.stat(attacker, levitas_registry::stat_type::KILLED, kind, 1);
             self.stat(
