@@ -274,6 +274,9 @@ impl Tree {
 #[derive(Debug, Default, Clone)]
 pub struct Progress {
     met: HashMap<(usize, usize), i64>,
+    /// Saved entries Levitas does not track (the recipe unlocks, datapack ones):
+    /// written back unchanged.
+    kept: serde_json::Map<String, Value>,
     /// The advancements this player's client has been sent.
     sent: HashSet<usize>,
 }
@@ -359,6 +362,9 @@ impl Progress {
             entry.insert("done".into(), Value::Bool(self.is_done(a)));
             out.insert(adv.id.clone(), Value::Object(entry));
         }
+        for (id, entry) in &self.kept {
+            out.entry(id.clone()).or_insert_with(|| entry.clone());
+        }
         out.insert("DataVersion".into(), Value::from(DATA_VERSION));
         Value::Object(out)
     }
@@ -371,6 +377,9 @@ impl Progress {
         };
         for (id, entry) in all {
             let Some(a) = t.index(id) else {
+                if id != "DataVersion" {
+                    progress.kept.insert(id.clone(), entry.clone());
+                }
                 continue;
             };
             for (name, date) in entry["criteria"].as_object().into_iter().flatten() {
@@ -937,6 +946,16 @@ mod tests {
     fn done(w: &World, id: i32, name: &str) -> bool {
         let a = tree().index(name).expect(name);
         w.players[&id].advancements.is_done(a)
+    }
+
+    #[test]
+    fn saved_entries_levitas_does_not_track_are_kept() {
+        let saved = serde_json::json!({
+            "minecraft:recipes/misc/charcoal": {"criteria": {"has_log": "2026-01-01 10:00:00 +0000"}, "done": true},
+            "DataVersion": 4440
+        });
+        let out = Progress::from_json(&saved).to_json();
+        assert!(out.get("minecraft:recipes/misc/charcoal").is_some());
     }
 
     #[test]

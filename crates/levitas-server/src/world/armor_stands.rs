@@ -32,6 +32,11 @@ pub struct ArmorStand {
     last_hit: u64,
     fall: f64,
     sent_pos: [f64; 3],
+    /// Floats where it was put (NoGravity).
+    no_gravity: bool,
+    /// The saved entity as read: what Levitas does not manage (poses, small, arms,
+    /// invisible, marker, names, ...) is written back unchanged.
+    saved: Compound,
 }
 
 impl ArmorStand {
@@ -44,6 +49,8 @@ impl ArmorStand {
             last_hit: 0,
             fall: 0.0,
             sent_pos: pos,
+            no_gravity: false,
+            saved: Compound::new(),
         }
     }
 
@@ -67,8 +74,11 @@ impl ArmorStand {
                 equipment.insert(SLOT_NAMES[slot], stack.to_nbt());
             }
         }
-        Compound::new()
-            .with("id", "minecraft:armor_stand")
+        let mut base = self.saved.clone();
+        // The old ways of saving equipment are now in `equipment`.
+        base.remove("ArmorItems");
+        base.remove("HandItems");
+        base.with("id", "minecraft:armor_stand")
             .with("UUID", uuid.to_vec())
             .with(
                 "Pos",
@@ -91,6 +101,8 @@ impl ArmorStand {
             _ => 0.0,
         };
         let mut stand = ArmorStand::new([x, y, z], yaw, rng);
+        stand.no_gravity = nbt.int("NoGravity").unwrap_or(0) != 0;
+        stand.saved = nbt.clone();
         if let Some(&[a, b, c, d]) = nbt.int_array("UUID") {
             stand.uuid = (u128::from(a as u32) << 96)
                 | (u128::from(b as u32) << 64)
@@ -244,7 +256,7 @@ impl World {
         let Some(p) = self.players.get(&id) else {
             return true;
         };
-        if !p.alive {
+        if !super::hanging::reaches(p, stand.pos) {
             return true;
         }
         let hand_slot = p.hand_slot(hand);
@@ -297,6 +309,13 @@ impl World {
             return false;
         };
         let creative = self.players.get(&attacker).is_some_and(|p| !p.survival());
+        let near = self
+            .players
+            .get(&attacker)
+            .is_some_and(|p| super::hanging::reaches(p, stand.pos));
+        if !near {
+            return true;
+        }
         let quick = stand.last_hit > 0 && tick - stand.last_hit <= BREAK_TICKS;
         if !creative && !quick {
             stand.last_hit = tick.max(1);
@@ -331,7 +350,7 @@ impl World {
         let ids: Vec<i32> = self.armor_stands.keys().copied().collect();
         for id in ids {
             let mut stand = self.armor_stands.remove(&id).expect("listed");
-            if self.chunks.contains_key(&stand.chunk()) {
+            if self.chunks.contains_key(&stand.chunk()) && !stand.no_gravity {
                 let below = BlockPos::new(
                     stand.pos[0].floor() as i32,
                     (stand.pos[1] - 0.01).floor() as i32,
@@ -381,6 +400,32 @@ impl World {
 mod tests {
     use super::*;
     use crate::connection::Profile;
+
+    #[test]
+    fn saved_stands_keep_their_pose_and_float() {
+        let saved = Compound::new()
+            .with("id", "minecraft:armor_stand")
+            .with(
+                "Pos",
+                vec![Tag::Double(0.5), Tag::Double(70.0), Tag::Double(0.5)],
+            )
+            .with("NoGravity", true)
+            .with("Small", true)
+            .with("ShowArms", true)
+            .with(
+                "Pose",
+                Compound::new().with(
+                    "Head",
+                    vec![Tag::Float(10.0), Tag::Float(0.0), Tag::Float(0.0)],
+                ),
+            );
+        let stand = ArmorStand::from_nbt(&saved, &mut Rng::new(1)).unwrap();
+        assert!(stand.no_gravity);
+        let out = stand.to_nbt();
+        for key in ["NoGravity", "Small", "ShowArms", "Pose"] {
+            assert!(out.get(key).is_some(), "{key} kept");
+        }
+    }
 
     #[test]
     fn stands_wear_armor_give_it_back_and_break() {

@@ -100,10 +100,14 @@ fn name(category: i32, stat: i32) -> Option<&'static str> {
 fn id(category: i32, name: &str) -> Option<i32> {
     let index = |names: &[&str]| names.iter().position(|&n| n == name).map(|i| i as i32);
     match category {
-        stat_type::MINED => BLOCKS.iter().position(|b| b.name == name).map(|i| i as i32),
+        stat_type::MINED => {
+            // Blocks renamed since the stat was saved count under their new name.
+            let name = levitas_registry::current_name(name);
+            BLOCKS.iter().position(|b| b.name == name).map(|i| i as i32)
+        }
         stat_type::KILLED | stat_type::KILLED_BY => index(entity_type::NAMES),
         stat_type::CUSTOM => index(custom_stat::NAMES),
-        _ => ItemInfo::id_of(name),
+        _ => ItemInfo::id_of_saved(name),
     }
 }
 
@@ -253,6 +257,14 @@ impl World {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn statistics_under_old_names_take_the_new_ones() {
+        let saved = serde_json::json!({"stats": {"minecraft:mined": {"minecraft:grass": 3}, "minecraft:used": {"minecraft:chain": 2}}});
+        let out = Stats::from_json(&saved).to_json();
+        assert_eq!(out["stats"]["minecraft:mined"]["minecraft:short_grass"], 3);
+        assert_eq!(out["stats"]["minecraft:used"]["minecraft:iron_chain"], 2);
+    }
 
     #[test]
     fn statistics_are_saved_as_vanilla_writes_them() {

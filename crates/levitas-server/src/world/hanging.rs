@@ -43,6 +43,12 @@ pub struct Hanging {
     /// The way it faces: away from its wall.
     pub facing: Dir,
     uuid: u128,
+    /// A fixed item frame (a map-art or shop display): it stays without a wall and
+    /// only creative players change or break it.
+    fixed: bool,
+    /// The saved entity as read: what Levitas does not manage (Invisible,
+    /// ItemDropChance, tags, ...) is written back unchanged.
+    saved: Compound,
 }
 
 /// Directions as the protocol numbers them.
@@ -137,6 +143,13 @@ fn painting_cells(block: BlockPos, facing: Dir, width: u8, height: u8) -> Vec<Bl
     cells
 }
 
+/// Whether a player can reach an entity at `at`: alive, and within a generous reach
+/// (vanilla checks interactions against about 6 blocks).
+pub(super) fn reaches(p: &Player, at: [f64; 3]) -> bool {
+    const REACH: f64 = 8.0;
+    p.alive && (0..3).map(|i| (p.pos[i] - at[i]).powi(2)).sum::<f64>() <= REACH * REACH
+}
+
 impl Hanging {
     fn new(what: What, block: BlockPos, facing: Dir, rng: &mut Rng) -> Self {
         Hanging {
@@ -144,11 +157,22 @@ impl Hanging {
             block,
             facing,
             uuid: (u128::from(rng.next_u64()) << 64) | u128::from(rng.next_u64()),
+            fixed: false,
+            saved: Compound::new(),
         }
     }
 
     pub fn chunk(&self) -> (i32, i32) {
         self.block.chunk()
+    }
+
+    fn centre(&self) -> [f64; 3] {
+        let b = self.block;
+        [
+            f64::from(b.x) + 0.5,
+            f64::from(b.y) + 0.5,
+            f64::from(b.z) + 0.5,
+        ]
     }
 
     /// The blocks it takes up.
@@ -186,7 +210,9 @@ impl Hanging {
             f64::from(b.y) + 0.5,
             f64::from(b.z) + 0.5,
         ];
-        let mut nbt = Compound::new()
+        let mut nbt = self
+            .saved
+            .clone()
             .with("id", self.item_name())
             .with("UUID", uuid.to_vec())
             .with(
@@ -201,9 +227,11 @@ impl Hanging {
             What::Frame { item, rotation, .. } => {
                 nbt.insert("Facing", dir_id(self.facing) as i8);
                 nbt.insert("ItemRotation", rotation as i8);
+                nbt.remove("Item");
                 if !item.is_empty() {
                     nbt.insert("Item", item.to_nbt());
                 }
+                nbt.insert("Fixed", self.fixed);
             }
             What::Painting { variant } => {
                 nbt.insert("facing", painting_facing(self.facing));
@@ -247,6 +275,8 @@ impl Hanging {
             _ => return None,
         };
         let mut h = Hanging::new(what, block, facing, rng);
+        h.fixed = nbt.int("Fixed").unwrap_or(0) != 0;
+        h.saved = nbt.clone();
         if let Some(&[a, b, c, d]) = nbt.int_array("UUID") {
             h.uuid = (u128::from(a as u32) << 96)
                 | (u128::from(b as u32) << 64)
@@ -414,6 +444,14 @@ impl World {
         let Some(h) = self.hanging.get(&target) else {
             return false;
         };
+        let creative = self.players.get(&id).is_some_and(|p| !p.survival());
+        let near = self
+            .players
+            .get(&id)
+            .is_some_and(|p| reaches(p, h.centre()));
+        if !near || (h.fixed && !creative) {
+            return true;
+        }
         let What::Frame {
             glow,
             item,
@@ -468,6 +506,13 @@ impl World {
             return false;
         };
         let creative = self.players.get(&attacker).is_some_and(|p| !p.survival());
+        let near = self
+            .players
+            .get(&attacker)
+            .is_some_and(|p| reaches(p, h.centre()));
+        if !near || (h.fixed && !creative) {
+            return true;
+        }
         if let What::Frame { glow, item, .. } = h.what {
             if !item.is_empty() {
                 let block = h.block;
@@ -529,7 +574,7 @@ impl World {
         let fallen: Vec<i32> = self
             .hanging
             .iter()
-            .filter(|(_, h)| self.chunks.contains_key(&h.chunk()))
+            .filter(|(_, h)| self.chunks.contains_key(&h.chunk()) && !h.fixed)
             .filter(|(_, h)| {
                 h.cells().iter().any(|&c| {
                     let wall = self.loaded_state(offset(c, h.facing.opposite()));
@@ -557,6 +602,23 @@ impl World {
 mod tests {
     use super::*;
     use crate::connection::Profile;
+
+    #[test]
+    fn saved_frames_keep_what_levitas_does_not_manage() {
+        let saved = Compound::new()
+            .with("id", "minecraft:item_frame")
+            .with("block_pos", vec![1, 2, 3])
+            .with("Facing", 2i8)
+            .with("Fixed", true)
+            .with("Invisible", true)
+            .with("ItemDropChance", 0.5f32);
+        let frame = Hanging::from_nbt(&saved, &mut Rng::new(1)).unwrap();
+        assert!(frame.fixed);
+        let out = frame.to_nbt();
+        assert_eq!(out.int("Fixed"), Some(1));
+        assert_eq!(out.int("Invisible"), Some(1));
+        assert!(out.float("ItemDropChance").is_some());
+    }
 
     fn setup() -> (World, i32) {
         let dir = std::env::temp_dir().join(format!(
