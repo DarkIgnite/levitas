@@ -5,7 +5,8 @@
 //! terrain within 128 blocks of them (64 in the Nether) is drawn onto it: each pixel is
 //! the colour of the highest block that maps can see, shaded by its height against the
 //! pixel to the north, and water is shaded by its depth. Maps are saved as
-//! `data/minecraft/map_<id>.dat`, their IDs counted in `idcounts.dat` for all dimensions.
+//! `data/minecraft/maps/<id>.dat` (since 26.1), the last ID given out kept in
+//! `data/minecraft/maps/last_id.dat` for all dimensions.
 
 use std::collections::HashMap;
 use std::fs;
@@ -32,7 +33,7 @@ const ICON_TICKS: u64 = 5;
 /// The base colour of water on maps.
 const WATER: u8 = 12;
 
-/// The next free map ID, shared by every dimension (vanilla's `idcounts.dat`).
+/// The next free map ID, shared by every dimension (one past vanilla's `maps/last_id.dat`).
 static NEXT_ID: AtomicI32 = AtomicI32::new(0);
 
 /// Takes a new map ID.
@@ -40,7 +41,7 @@ pub fn allocate_id() -> i32 {
     NEXT_ID.fetch_add(1, Ordering::Relaxed)
 }
 
-/// The next map ID that will be given out, as `idcounts.dat` saves it.
+/// The next map ID that will be given out.
 pub fn next_id() -> i32 {
     NEXT_ID.load(Ordering::Relaxed)
 }
@@ -150,7 +151,18 @@ impl MapData {
 fn map_file(dir: &Path, id: i32) -> PathBuf {
     dir.join("data")
         .join("minecraft")
-        .join(format!("map_{id}.dat"))
+        .join("maps")
+        .join(format!("{id}.dat"))
+}
+
+/// Where older versions kept a map: `data/minecraft/map_<id>.dat` (Levitas before 26.1's
+/// layout) and `data/map_<id>.dat` (1.21.8 and Leaf). Read when the new file is missing.
+fn old_map_files(dir: &Path, id: i32) -> [PathBuf; 2] {
+    let name = format!("map_{id}.dat");
+    [
+        dir.join("data").join("minecraft").join(&name),
+        dir.join("data").join(name),
+    ]
 }
 
 /// A player's marker on a map: its icon type, position in half pixels from the middle,
@@ -220,7 +232,11 @@ impl World {
     /// A map's data, loaded from disk the first time it is needed here.
     pub(super) fn map_data(&mut self, id: i32) -> Option<&mut MapData> {
         if !self.maps.contains_key(&id) {
-            let bytes = fs::read(map_file(&self.dir, id)).ok()?;
+            let [old, older] = old_map_files(&self.dir, id);
+            let bytes = fs::read(map_file(&self.dir, id))
+                .or_else(|_| fs::read(old))
+                .or_else(|_| fs::read(older))
+                .ok()?;
             let map = match levitas_nbt::from_gzip(&bytes) {
                 Ok((_, root)) => MapData::from_nbt(root.compound("data")?)?,
                 Err(e) => {
@@ -296,7 +312,7 @@ impl World {
 
     /// Writes the maps that changed since they were last saved.
     pub(super) fn save_maps(&mut self) {
-        let folder = self.dir.join("data").join("minecraft");
+        let folder = self.dir.join("data").join("minecraft").join("maps");
         for (&id, map) in &mut self.maps {
             if !map.unsaved {
                 continue;
@@ -504,6 +520,22 @@ mod tests {
             MapData::new("minecraft:overworld", 70, -70, 0).center,
             [128, -128]
         );
+    }
+
+    #[test]
+    fn maps_are_saved_where_26_3_keeps_them_and_old_ones_still_load() {
+        let mut w = flat_world();
+        let id = w.create_map(0, 0, 0);
+        w.save_maps();
+        let new = map_file(&w.dir, id);
+        assert!(new.ends_with(format!("data/minecraft/maps/{id}.dat")));
+        assert!(new.is_file());
+        // A map left where 1.21.8 kept it is still found.
+        let [_, older] = old_map_files(&w.dir, id);
+        fs::create_dir_all(older.parent().unwrap()).unwrap();
+        fs::rename(&new, &older).unwrap();
+        w.maps.clear();
+        assert!(w.map_data(id).is_some());
     }
 
     #[test]

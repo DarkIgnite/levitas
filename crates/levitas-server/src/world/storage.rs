@@ -80,9 +80,13 @@ impl LevelData {
                         .and_then(|o| o.compound("generator"))
                         .and_then(|g| g.str("type"))
                         .unwrap_or("minecraft:flat");
-                    let next_map_id = saved_data(dir, "idcounts")
+                    // `map` is the last ID given out (26.3's maps/last_id.dat, or the
+                    // idcounts.dat of older worlds).
+                    let next_map_id = saved_data(dir, "maps/last_id")
+                        .or_else(|| saved_data(dir, "idcounts"))
+                        .or_else(|| old_saved_data(dir, "idcounts"))
                         .and_then(|c| c.int("map"))
-                        .unwrap_or(0) as i32;
+                        .map_or(0, |last| last as i32 + 1);
                     // Map IDs are shared by every dimension; none is given twice.
                     super::maps::reserve_ids(next_map_id);
                     return Some(LevelData {
@@ -282,11 +286,13 @@ impl LevelData {
                 .with("minecraft:overworld", clock())
                 .with("minecraft:the_end", clock()),
         )?;
-        save_data(
-            dir,
-            "idcounts",
-            Compound::new().with("map", i64::from(self.next_map_id)),
-        )?;
+        if self.next_map_id > 0 {
+            save_data(
+                dir,
+                "maps/last_id",
+                Compound::new().with("map", self.next_map_id - 1),
+            )?;
+        }
         save_data(
             dir,
             "world_gen_settings",
@@ -323,15 +329,22 @@ fn saved_data(dir: &Path, name: &str) -> Option<Compound> {
 
 /// Writes `data/minecraft/<name>.dat` as 26.3 does: the data, and its data version.
 fn save_data(dir: &Path, name: &str, data: Compound) -> io::Result<()> {
-    let folder = dir.join("data").join("minecraft");
-    fs::create_dir_all(&folder)?;
+    let path = dir
+        .join("data")
+        .join("minecraft")
+        .join(format!("{name}.dat"));
+    fs::create_dir_all(path.parent().expect("has a parent"))?;
     let root = Compound::new()
         .with("data", data)
         .with("DataVersion", DATA_VERSION);
-    write_atomic(
-        &folder.join(format!("{name}.dat")),
-        &levitas_nbt::to_gzip("", &root),
-    )
+    write_atomic(&path, &levitas_nbt::to_gzip("", &root))
+}
+
+/// Reads `data/<name>.dat`, where 1.21.8 and Leaf kept saved data.
+fn old_saved_data(dir: &Path, name: &str) -> Option<Compound> {
+    let bytes = fs::read(dir.join("data").join(format!("{name}.dat"))).ok()?;
+    let (_, root) = levitas_nbt::from_gzip(&bytes).ok()?;
+    root.compound("data").cloned()
 }
 
 /// Moves a world saved by 1.21.8 into 26.3's layout: each dimension's regions, entities
@@ -1047,6 +1060,9 @@ mod tests {
         assert_eq!(loaded.weather.rain_time, 777);
         assert_eq!((loaded.seed, loaded.kind), (-42, WorldKind::Noise));
         assert_eq!(loaded.next_map_id, 7);
+        // Saved as vanilla 26.3 does: the last ID given out, in maps/last_id.dat.
+        let last = saved_data(&dir, "maps/last_id").unwrap();
+        assert_eq!(last.int("map"), Some(6));
         fs::remove_dir_all(dir).unwrap();
     }
 
