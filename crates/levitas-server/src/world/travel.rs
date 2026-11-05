@@ -204,12 +204,21 @@ impl World {
     }
 
     fn forward(&mut self, f: Frame) {
-        for link in self.links.values() {
-            let link = link.clone();
-            let f = f.clone();
-            tokio::spawn(async move {
-                let _ = link.send(Event::Announce { frame: f }).await;
+        for (&dimension, link) in &self.links {
+            let forwarder = self.forwarders.entry(dimension).or_insert_with(|| {
+                // Sends one message at a time, so they keep their order.
+                let (tx, mut rx) = mpsc::unbounded_channel::<Frame>();
+                let link = link.clone();
+                tokio::spawn(async move {
+                    while let Some(frame) = rx.recv().await {
+                        if link.send(Event::Announce { frame }).await.is_err() {
+                            return;
+                        }
+                    }
+                });
+                tx
             });
+            let _ = forwarder.send(f.clone());
         }
     }
 

@@ -616,6 +616,9 @@ struct World {
     dimension: Dimension,
     /// The other dimensions' world tasks.
     links: HashMap<Dimension, mpsc::Sender<Event>>,
+    /// One forwarder per other dimension, so server-wide messages (the tab list's
+    /// adds and removes among them) arrive there in the order they were sent.
+    forwarders: HashMap<Dimension, mpsc::UnboundedSender<Frame>>,
     /// The player list of the whole server, shared with the other dimensions.
     tab: tablist::TabList,
     /// Nether portals in this dimension, for travellers to come out of.
@@ -758,6 +761,7 @@ impl World {
         let world = Self {
             dimension,
             links: HashMap::new(),
+            forwarders: HashMap::new(),
             tab: tablist::TabList::default(),
             portals: Self::load_portals(&folder),
             storage: RegionStorage::new(folder.join("region")),
