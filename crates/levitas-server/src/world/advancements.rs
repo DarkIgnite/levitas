@@ -24,6 +24,9 @@ use crate::inventory::write_template;
 /// How often inventories and positions are checked against criteria.
 const CHECK_TICKS: u64 = 10;
 
+/// The player inventory's crafting result and 2x2 grid come first.
+const CRAFTING_SLOTS: usize = 5;
+
 /// Something a player did that may meet criteria.
 #[derive(Debug, Clone, Copy)]
 pub enum Trigger {
@@ -737,7 +740,12 @@ impl World {
                     value.as_array().is_some_and(|predicates| {
                         predicates
                             .iter()
-                            .all(|pr| p.inventory.slots.iter().any(|&s| matches_item(pr, s)))
+                            // The real inventory: not the crafting grid or its result.
+                            .all(|pr| {
+                                p.inventory.slots[CRAFTING_SLOTS..]
+                                    .iter()
+                                    .any(|&s| matches_item(pr, s))
+                            })
                     })
                 }
                 ("from", Trigger::ChangedDimension { from, .. }) => value.as_str() == Some(from),
@@ -801,7 +809,8 @@ impl World {
             }
             if let Some(d) = adv.display.as_ref().filter(|d| d.announce) {
                 if crate::rules::bool("show_advancement_messages") {
-                    self.broadcast(announcement(&name, d), None);
+                    // Every player on the server, in any dimension.
+                    self.announce(announcement(&name, d));
                 }
             }
         }

@@ -158,6 +158,9 @@ pub enum Event {
         out: mpsc::Sender<Frame>,
         /// Lets the world point the connection at another dimension.
         route: travel::Route,
+        /// The skin layers and main hand the client told during configuration: they
+        /// travel with the player, wherever they log in.
+        settings: (u8, u8),
     },
     /// A player handed over from another dimension.
     Arrive(Box<travel::Arrival>),
@@ -850,7 +853,8 @@ impl World {
                 profile,
                 out,
                 route,
-            } => self.join(id, profile, out, route),
+                settings,
+            } => self.join(id, profile, out, route, settings),
             Event::Arrive(arrival) => self.arrive(*arrival),
             Event::Announce { frame } => {
                 for p in self.players.values_mut() {
@@ -1027,10 +1031,18 @@ impl World {
         }
     }
 
-    fn join(&mut self, id: i32, profile: Profile, out: mpsc::Sender<Frame>, route: travel::Route) {
+    fn join(
+        &mut self,
+        id: i32,
+        profile: Profile,
+        out: mpsc::Sender<Frame>,
+        route: travel::Route,
+        settings: (u8, u8),
+    ) {
         let op = crate::access::is_op(&profile.name, profile.uuid);
         let mut player = Player::new(profile, out, self.spawn);
         player.route = Some(route);
+        (player.skin_parts, player.main_hand) = settings;
         player.op = op;
         ONLINE.fetch_add(1, Ordering::Relaxed);
         self.players.insert(id, player);

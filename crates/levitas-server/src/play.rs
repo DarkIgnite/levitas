@@ -45,6 +45,7 @@ pub async fn run(conn: Conn, profile: Profile, world: mpsc::Sender<Event>) -> io
             profile,
             out: tx,
             route,
+            settings: (skin_parts, main_hand),
         })
         .await
         .is_err()
@@ -52,13 +53,6 @@ pub async fn run(conn: Conn, profile: Profile, world: mpsc::Sender<Event>) -> io
         writer.abort();
         return Ok(());
     }
-    let _ = world
-        .send(Event::Settings {
-            id,
-            skin_parts,
-            main_hand,
-        })
-        .await;
     let result = read_loop(&mut reader, id, &current, compressed).await;
     let world = current.borrow().clone();
     let _ = world.send(Event::Leave { id }).await;

@@ -112,7 +112,8 @@ pub fn check_pyramid(world: &World, pos: BlockPos) -> (i32, bool) {
             .loaded_block(BlockPos::new(pos.x, y, pos.z))
             .unwrap_or(block::AIR);
         let info = BlockInfo::of(state);
-        if info.light_filter >= 15 {
+        // The beam goes through bedrock, so beacons work under the Nether roof.
+        if info.light_filter >= 15 && state != block::BEDROCK {
             return (0, false);
         }
     }

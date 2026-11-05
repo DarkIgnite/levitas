@@ -515,7 +515,7 @@ impl MobKind {
 
 pub struct Mob {
     pub kind: MobKind,
-    uuid: u128,
+    pub(super) uuid: u128,
     pub pos: [f64; 3],
     vel: [f64; 3],
     /// Sideways speed from knockback and explosions, fading with friction.
@@ -3514,18 +3514,26 @@ mod path_tests {
         zombie.health = 20.0;
         zombie.attack_cooldown = 0;
 
-        let vid = next_entity_id();
-        let mut villager = Mob::new(MobKind::Villager, [1.0, -60.0, 0.0], &mut world.rng);
-        villager.health = 1.0; // One hit will kill it
-        world.mobs.insert(vid, villager);
-
-        // Tick zombie hunt
-        world.hunt(zid, &mut zombie);
-
-        // Villager should now be a ZombieVillager with the same entity id
-        let victim = world.mobs.get(&vid).unwrap();
-        assert_eq!(victim.kind, MobKind::ZombieVillager);
-        assert!(victim.villager.is_some());
+        // On Normal half the villagers zombies kill turn: try until one does.
+        for _ in 0..64 {
+            let vid = next_entity_id();
+            let mut villager = Mob::new(MobKind::Villager, [1.0, -60.0, 0.0], &mut world.rng);
+            villager.health = 1.0; // One hit will kill it
+            let uuid = villager.uuid;
+            world.mobs.insert(vid, villager);
+            zombie.attack_cooldown = 0;
+            zombie.prey = None;
+            world.hunt(zid, &mut zombie);
+            let victim = world.mobs.remove(&vid).unwrap();
+            if victim.kind == MobKind::ZombieVillager {
+                // The same creature, with its trades.
+                assert_eq!(victim.uuid, uuid);
+                assert!(victim.villager.is_some());
+                return;
+            }
+            assert!(!victim.alive(), "a villager that does not turn dies");
+        }
+        panic!("no villager ever turned");
     }
 
     #[test]

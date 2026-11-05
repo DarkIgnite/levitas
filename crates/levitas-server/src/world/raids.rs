@@ -387,7 +387,18 @@ impl World {
             .filter(|&(_, d)| d <= VILLAGE_SEARCH_RANGE)
             .min_by(|a, b| a.1.total_cmp(&b.1));
         if let Some((villager_pos, _)) = nearest_villager {
-            self.start_raid(villager_pos, amp as u32);
+            // A village already being raided takes the new omen into that raid.
+            let level = u32::from(amp) + 1;
+            let under_way = self
+                .raids
+                .values_mut()
+                .find(|r| horizontal_distance(r.center, villager_pos) <= VILLAGE_SEARCH_RANGE);
+            match under_way {
+                Some(raid) => raid.bad_omen_level = (raid.bad_omen_level + level).min(5),
+                None => {
+                    self.start_raid(villager_pos, u32::from(amp));
+                }
+            }
         }
     }
 

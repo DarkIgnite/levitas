@@ -272,15 +272,32 @@ impl World {
                 if let Some(mid) = mob.prey {
                     if let Some(mut target_mob) = self.mobs.remove(&mid) {
                         let will_kill = target_mob.health - damage <= 0.0;
+                        // Villagers killed by zombies turn: never on Easy, half the time
+                        // on Normal, always on Hard.
+                        let turns = match crate::rules::difficulty() {
+                            crate::rules::Difficulty::Hard => true,
+                            crate::rules::Difficulty::Normal => self.rng.below(2) == 0,
+                            _ => false,
+                        };
                         if will_kill
+                            && turns
                             && target_mob.kind == MobKind::Villager
                             && (mob.kind.family() == MobKind::Zombie
                                 || mob.kind == MobKind::ZombieVillager)
                         {
                             let pos = target_mob.pos;
-                            let villager = target_mob.villager.take();
+                            let mut villager = target_mob.villager.take();
+                            if let Some(v) = villager.as_mut() {
+                                v.customer = None;
+                            }
                             let mut zv = Mob::new(MobKind::ZombieVillager, pos, &mut self.rng);
                             zv.villager = villager;
+                            // The same creature, turned.
+                            zv.uuid = target_mob.uuid;
+                            zv.name = target_mob.name;
+                            zv.age = target_mob.age;
+                            zv.yaw = target_mob.yaw;
+                            zv.viewers = std::mem::take(&mut target_mob.viewers);
                             self.send_to_viewers(&zv, items::remove_entity(mid));
                             for p in zv.spawn_packets(mid) {
                                 self.send_to_viewers(&zv, p);
