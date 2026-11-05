@@ -56,6 +56,7 @@ impl Test {
             used: None,
             choice: self.choice,
             trades: Vec::new(),
+            maps: std::collections::HashMap::new(),
             rename: None,
             crafted: Vec::new(),
         };
@@ -386,11 +387,25 @@ fn cartography_table_cloning_locking_and_zooming() {
     // a locked map when the result is taken (see `maps::tests`).
     let _ = locked_map;
 
-    // Paper alone makes an empty map
+    // Paper alone, or an empty map with a compass, make nothing in Java Edition.
     t.slots[0] = stack("paper", 1);
     t.slots[1] = Stack::EMPTY;
     t.click(OUTSIDE, 0, PICKUP);
-    assert_eq!(t.slots[2], stack("map", 1));
+    assert!(t.slots[2].is_empty());
+    assert!(
+        crate::click::cartography_recipe(stack("map", 1), stack("compass", 1), None).is_empty()
+    );
+    // A locked map is not locked again or zoomed; a map at the largest scale is not
+    // zoomed; stained glass does not lock.
+    let paper = stack("paper", 1);
+    let pane = stack("glass_pane", 1);
+    assert!(crate::click::cartography_recipe(filled, paper, Some((0, true))).is_empty());
+    assert!(crate::click::cartography_recipe(filled, pane, Some((0, true))).is_empty());
+    assert!(crate::click::cartography_recipe(filled, paper, Some((4, false))).is_empty());
+    assert!(
+        crate::click::cartography_recipe(filled, stack("red_stained_glass_pane", 1), None)
+            .is_empty()
+    );
 }
 
 #[test]

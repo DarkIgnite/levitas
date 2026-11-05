@@ -299,6 +299,9 @@ pub struct Window<'a> {
     pub choice: Option<usize>,
     /// A villager's trades, for its trading screen.
     pub trades: Vec<Trade>,
+    /// The scale and locked state of the maps in the window, by map ID, for the
+    /// cartography table.
+    pub maps: std::collections::HashMap<i32, (u8, bool)>,
     /// The name typed into an anvil's box.
     pub rename: Option<&'a str>,
     /// Results taken from a crafting grid, stonecutter or smithing table, for the
@@ -389,7 +392,8 @@ fn refresh_result(w: &mut Window) {
             };
         }
         Layout::Cartography => {
-            w.slots[2] = cartography_recipe(w.slots[0], w.slots[1]);
+            let state = w.slots[0].map_id.and_then(|id| w.maps.get(&id).copied());
+            w.slots[2] = cartography_recipe(w.slots[0], w.slots[1], state);
         }
         _ => {
             if let Some((grid, size)) = w.layout.grid() {
@@ -404,14 +408,18 @@ pub fn anvil_cost(slots: &[Stack], rename: Option<&str>) -> i32 {
     repair::anvil_named(slots[0], slots[1], rename).map_or(0, |r| r.cost)
 }
 
-/// The recipe result of a cartography table from its map and modifier inputs.
-pub fn cartography_recipe(map: Stack, material: Stack) -> Stack {
+/// The result of a cartography table from its map and modifier, as in Java Edition: a
+/// filled map cloned with an empty map, zoomed out with paper (up to the largest scale,
+/// and not once locked) or locked with a plain glass pane (once). `state` is the map's
+/// scale and whether it is locked, when known.
+pub fn cartography_recipe(map: Stack, material: Stack, state: Option<(u8, bool)>) -> Stack {
     if map.is_empty() {
         return Stack::EMPTY;
     }
     let map_name = ItemInfo::get(map.item).map_or("", |i| i.name);
     let mat_name = ItemInfo::get(material.item).map_or("", |i| i.name);
-    let is_glass_pane = mat_name == "minecraft:glass_pane" || mat_name.ends_with("_glass_pane");
+    let is_glass_pane = mat_name == "minecraft:glass_pane";
+    let (scale, locked) = state.unwrap_or((0, false));
 
     if map_name == "minecraft:filled_map" {
         // Cloning: filled map + empty map -> 2 copies of filled map
@@ -420,25 +428,19 @@ pub fn cartography_recipe(map: Stack, material: Stack) -> Stack {
         }
         // Locking and zooming out: the result shows what will happen; taking it makes
         // the new map (see `World::finish_map_posts`).
-        if is_glass_pane {
+        if is_glass_pane && !locked {
             let mut locked = map.with_count(1);
             locked.map_post = Some(crate::inventory::MAP_LOCK);
             return locked;
         }
-        if mat_name == "minecraft:paper" {
+        if mat_name == "minecraft:paper" && !locked && scale < crate::world::MAX_MAP_SCALE {
             let mut zoomed = map.with_count(1);
             zoomed.map_post = Some(crate::inventory::MAP_SCALE);
             return zoomed;
         }
-    } else if map_name == "minecraft:paper" && material.is_empty() {
-        // Craft empty map from single paper
-        if let Some(empty_map) = ItemInfo::id_of("minecraft:map") {
-            return Stack::new(empty_map, 1);
-        }
-    } else if map_name == "minecraft:map" && mat_name == "minecraft:compass" {
-        // Locator map
-        return map.with_count(1);
     }
+    // A single paper making an empty map, and an empty map with a compass, are
+    // Bedrock Edition only.
     Stack::EMPTY
 }
 

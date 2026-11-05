@@ -88,6 +88,7 @@ use building::ScheduledTick;
 use containers::{BlockEntity, Open};
 use items::ItemEntity;
 use levitas_pumpkin::PumpkinTerrain;
+pub use maps::MAX_SCALE as MAX_MAP_SCALE;
 pub use storage::uuid_string;
 pub use storage::WorldKind;
 use storage::{LevelData, AUTOSAVE_TICKS, UNLOAD_TICKS};

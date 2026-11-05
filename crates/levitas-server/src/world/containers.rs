@@ -741,6 +741,21 @@ impl World {
             .get(&id)
             .and_then(|p| p.open.as_ref())
             .and_then(|o| o.rename.clone());
+        // The cartography table needs to know the scale and lock of the maps in play.
+        let mut maps = std::collections::HashMap::new();
+        if layout == click::Layout::Cartography {
+            let carried = self.players.get(&id).map(|p| p.inventory.carried);
+            let ids: Vec<i32> = slots
+                .iter()
+                .chain(carried.iter())
+                .filter_map(|s| s.map_id)
+                .collect();
+            for map_id in ids {
+                if let Some(m) = self.map_data(map_id) {
+                    maps.insert(map_id, (m.scale, m.locked));
+                }
+            }
+        }
         let p = self.players.get_mut(&id).expect("player exists");
         let mut cursor = p.inventory.carried;
         let mut offhand = p.inventory.slots[OFFHAND];
@@ -757,6 +772,7 @@ impl World {
             used: None,
             choice: p.open.as_ref().and_then(|o| o.choice),
             trades,
+            maps,
             rename: rename.as_deref(),
             crafted: Vec::new(),
         };
