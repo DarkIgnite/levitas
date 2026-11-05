@@ -359,34 +359,20 @@ their server.
   map data, boss bar, mob effect and sound packets match; commands are op-gated and parse safely, and /clone
   now copies block entities; farming matches vanilla; tamed wolves no longer go after creepers or ghasts;
   villagers look for monsters every tenth tick instead of every tick. Left as is: beacons and conduits find
-  themselves by walking all block entities every tick (cheap, but could keep a list). These 26 findings are still UNVERIFIED and unfixed (some may be
-  wrong):
-  - Tipped arrows are spawned without the Arrow colour metadata, so they show no potion particle trail (`world/arrows.rs:465`, minor)
-  - Tipped-arrow and stray-slowness effects land on mobs even when the hit was dodged or blocked (`world/arrows.rs:288`, wrong_behavior)
-  - Lingering water (and other effect-less) potions spawn an area effect cloud that does nothing (`world/thrown.rs:313`, wrong_behavior)
-  - Dragon's breath cloud hurts undead mobs instead of healing them (`world/clouds.rs:297`, minor)
-  - Beacon and conduit effects are sent as non-ambient (grey HUD border, full particles) (`world/effects.rs:96`, minor)
-  - Evoker fangs never get entity event 4, so clients never show the bite (`world/raids.rs:698`, wrong_behavior)
-  - Raiders spawn inside hills when the ground is more than 10 blocks above the raid center, and the wave cannot finish (`world/raids.rs:220`, wrong_behavior)
-  - Hero of the Village goes to every player who was ever within 96 blocks, including spectators and idle players (`world/raids.rs:570`, wrong_behavior)
-  - Armor stands can be placed inside other entities, so any number can stack in one block (`world/armor_stands.rs:211`, wrong_behavior)
-  - Wandering trader's invisibility is server-side only; clients still see it at night (`world/mobs.rs:2415`, wrong_behavior)
-  - Every villager scans every mob in the world every tick for its panic check (`world/villagers.rs:899`, performance)
-  - Pistons push straw beds instead of breaking them, leaving lone bed halves (`blocks/piston.rs:92`, wrong_behavior)
-  - Short and tall dry grass can no longer be placed on sand or terracotta, and natural ones pop (`blocks/mod.rs:347`, wrong_behavior)
-  - Periodic geysers erupt every 10 s for 3 s instead of vanilla's 15-60 s cycle with 1-5 s eruptions (`world/sulfur.rs:22`, wrong_behavior)
-  - Sulfur spikes (like dripstone) never update thickness, so stacked spikes all stay 'tip' (`blocks/place.rs:270`, minor)
-  - A cartography result that is thrown never becomes the new locked or zoomed map (`world/containers.rs:787`, wrong_behavior)
-  - Lodestone compasses keep pointing at a lodestone that was broken (`world/nature.rs:333`, wrong_behavior)
-  - Each dimension task keeps its own map cache: maps not yet saved are missing in other dimensions and cached copies go stale (`world/maps.rs:221`, wrong_behavior)
-  - Maps held in the Nether draw the bedrock roof instead of vanilla's static (`world/maps.rs:324`, minor)
-  - Skin layers and main hand are never sent to the player themselves (`world/mod.rs:960`, wrong_behavior)
-  - Tab list add/remove/mode updates to other dimensions can arrive out of order (`world/travel.rs:209`, minor)
-  - Boat and minecart rides count as walking/sprinting (or swimming) distance (`world/mod.rs:1242`, wrong_behavior)
-  - Every jump's air time is counted as flown and fallen distance; climbing down counts as falling (`world/stats.rs:173`, wrong_behavior)
-  - Wading or walking in water is counted as swim_one_cm instead of walk_on_water / walk_under_water (`world/stats.rs:158`, wrong_behavior)
-  - killed_by credits a mob that hit the player long before an unrelated death (`world/survival.rs:414`, wrong_behavior)
-  - Opening a trapped chest counts open_chest instead of trigger_trapped_chest (`world/stats.rs:114`, minor)
+  themselves by walking all block entities every tick (cheap, but could keep a list). The 26 small findings were then worked
+  through too (2026-11-05): fixed are arrows that did not hurt, tipped arrow colours, lingering water,
+  dragon's breath on the undead, fang snaps, raider spawn heights, heroes only for raider killers, straw beds
+  and pistons, dry grass, trader invisibility, maps saved at once for other dimensions, ride and water
+  statistics, trapped chests, the killed_by window, own skin data, and ordered cross-dimension messages (one
+  forwarder per dimension). Still open, all small:
+  - Beacon and conduit effects are not marked ambient (grey HUD border instead of blue).
+  - Armor stands can be placed inside other entities.
+  - Geysers use a fixed 10 s cycle instead of 15-60 s growing with depth.
+  - Sulfur spikes never update `thickness` (all stay `tip`).
+  - A cartography result thrown with Q keeps the old map ID (the material is used up).
+  - Lodestone compasses keep pointing at a broken lodestone.
+  - Maps held in the Nether draw the bedrock roof instead of static.
+  - Jumps count towards fly_one_cm and fall_one_cm (unclear what vanilla does; check before changing).
 
 ## 9. Testing pattern
 
