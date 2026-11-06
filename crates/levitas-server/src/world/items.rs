@@ -31,6 +31,10 @@ impl ItemEntity {
         self.stack
     }
 
+    pub fn position(&self) -> [f64; 3] {
+        self.pos
+    }
+
     pub fn chunk(&self) -> (i32, i32) {
         (
             (self.pos[0] / 16.0).floor() as i32,
@@ -110,6 +114,20 @@ fn solid(state: u16) -> bool {
 }
 
 impl World {
+    /// Drops an item flying off with `vel`, as a caught fish is thrown to the angler.
+    pub(super) fn spawn_item_moving(&mut self, stack: Stack, pos: [f64; 3], vel: [f64; 3]) {
+        self.spawn_item(stack, pos, vel, 0);
+    }
+
+    /// Pulls a dropped item along (a fishing rod reeling it in).
+    pub(super) fn pull_item(&mut self, id: i32, by: [f64; 3]) {
+        if let Some(item) = self.items.get_mut(&id) {
+            for (v, b) in item.vel.iter_mut().zip(by) {
+                *v += b;
+            }
+        }
+    }
+
     fn spawn_item(&mut self, stack: Stack, pos: [f64; 3], vel: [f64; 3], pickup_delay: u32) {
         if stack.is_empty() {
             return;

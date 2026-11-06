@@ -41,6 +41,8 @@ pub enum Trigger {
     BredAnimals(i32),
     /// The player tamed an animal of this type.
     TamedAnimal(i32),
+    /// The player reeled in this catch.
+    FishingRodHooked(Stack),
     ChangedDimension {
         from: &'static str,
         to: &'static str,
@@ -68,6 +70,7 @@ impl Trigger {
             Trigger::ConsumeItem(_) => "minecraft:consume_item",
             Trigger::BredAnimals(_) => "minecraft:bred_animals",
             Trigger::TamedAnimal(_) => "minecraft:tame_animal",
+            Trigger::FishingRodHooked(_) => "minecraft:fishing_rod_hooked",
             Trigger::ChangedDimension { .. } => "minecraft:changed_dimension",
             Trigger::EnchantedItem { .. } => "minecraft:enchanted_item",
             Trigger::SleptInBed => "minecraft:slept_in_bed",
@@ -729,7 +732,8 @@ impl World {
                 }
                 ("item", Trigger::ConsumeItem(stack))
                 | ("item", Trigger::EnchantedItem { item: stack, .. })
-                | ("item", Trigger::FilledBucket(stack)) => matches_item(value, stack),
+                | ("item", Trigger::FilledBucket(stack))
+                | ("item", Trigger::FishingRodHooked(stack)) => matches_item(value, stack),
                 ("levels", Trigger::EnchantedItem { levels, .. }) => {
                     in_range(value, i64::from(levels))
                 }

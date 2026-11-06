@@ -3,8 +3,12 @@
 //! bites: the bobber dips, and reeling in within the next second or two catches
 //! something from the `gameplay/fishing` loot table (fish mostly, junk sometimes,
 //! treasure in open water; Luck of the Sea shifts the odds towards treasure), with 1 to 6
-//! experience. Reeling in a catch wears the rod by one. The bobber goes when its owner
-//! stops holding the rod, dies or gets more than 32 blocks away.
+//! experience; the catch flies to the angler. Rain over open water brings fish sooner,
+//! a roof over the water later, and a trail of bubbles shows a fish coming. A cast can
+//! also hook a mob or a dropped item, which reeling in pulls towards the angler. Reeling
+//! in wears the rod: 1 for a catch, 2 from the ground, 3 for an item, 5 for a mob. The
+//! bobber goes when its owner stops holding the rod, dies or gets more than 32 blocks
+//! away.
 
 use levitas_registry::{custom_stat, entity_type, stat_type};
 
@@ -25,6 +29,15 @@ const LURE_TICKS: u32 = 100;
 const BITE_MIN: u32 = 20;
 const BITE_SPREAD: u32 = 20;
 const MAX_DISTANCE: f64 = 32.0;
+/// How long before a bite the fish's bubble trail shows.
+const TRAIL_TICKS: u32 = 60;
+
+/// What a bobber caught on its way: a mob or a dropped item, by entity ID.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Hooked {
+    Mob(i32),
+    Item(i32),
+}
 
 /// A cast bobber.
 pub struct Bobber {
@@ -39,6 +52,11 @@ pub struct Bobber {
     lure: u32,
     luck: u32,
     age: u32,
+    hooked: Option<Hooked>,
+    /// Lying on a block.
+    grounded: bool,
+    /// The way the next fish comes from.
+    trail_angle: f64,
 }
 
 fn spawn_packets(id: i32, b: &Bobber) -> Vec<Writer> {
@@ -58,15 +76,39 @@ fn spawn_packets(id: i32, b: &Bobber) -> Vec<Writer> {
 
 /// The bobber dipping as a fish bites (or coming back up).
 fn biting_data(id: i32, biting: bool) -> Writer {
+    bobber_data(id, 0, biting)
+}
+
+/// What the bobber holds (entity ID + 1, 0 for nothing) and whether a fish bites.
+fn bobber_data(id: i32, hooked: i32, biting: bool) -> Writer {
     Writer::packet(clientbound::SET_ENTITY_DATA)
         .varint(id)
         .u8(DATA_HOOKED)
         .varint(SERIALIZER_VARINT)
-        .varint(0) // nothing hooked
+        .varint(hooked)
         .u8(DATA_BITING)
         .varint(SERIALIZER_BOOLEAN)
         .bool(biting)
         .u8(0xFF)
+}
+
+/// A few particles of `kind` at `at` (the 26.3 Particle packet).
+fn particles(kind: i32, at: [f64; 3], count: i32, spread: f32, speed: f32) -> Writer {
+    Writer::packet(clientbound::LEVEL_PARTICLES)
+        .varint(kind)
+        .bool(false) // override limiter
+        .bool(false) // always show
+        .f64(at[0])
+        .f64(at[1])
+        .f64(at[2])
+        .f32(spread)
+        .f32(0.0)
+        .f32(spread)
+        .f32(speed)
+        .f32(speed)
+        .f32(speed)
+        .varint(count)
+        .varint(0) // default randomization
 }
 
 fn sync(id: i32, b: &Bobber) -> Writer {
@@ -133,6 +175,9 @@ impl World {
             lure: rod.enchants.level_of("minecraft:lure"),
             luck: rod.enchants.level_of("minecraft:luck_of_the_sea"),
             age: 0,
+            hooked: None,
+            grounded: false,
+            trail_angle: 0.0,
         };
         let bobber_id = next_entity_id();
         for packet in spawn_packets(bobber_id, &bobber) {
@@ -164,6 +209,41 @@ impl World {
             1.0,
             None,
         );
+        let survival = self.players.get(&id).is_some_and(|p| p.survival());
+        let event = if slot == OFFHAND {
+            48 // off hand broke
+        } else {
+            ENTITY_EVENT_MAINHAND_BREAK
+        };
+        // What was hooked comes towards the angler.
+        let pull = |from: [f64; 3]| {
+            [
+                (at[0] - from[0]) * 0.1,
+                (at[1] - from[1]) * 0.1,
+                (at[2] - from[2]) * 0.1,
+            ]
+        };
+        let wear = match b.hooked {
+            Some(Hooked::Mob(m)) => {
+                if let Some(mob) = self.mobs.get_mut(&m) {
+                    let by = pull(mob.pos);
+                    mob.push(by);
+                }
+                5
+            }
+            Some(Hooked::Item(i)) => {
+                self.pull_item(i, pull(b.pos));
+                3
+            }
+            None if b.grounded => 2,
+            None => 0,
+        };
+        if wear > 0 {
+            if survival {
+                self.damage_item(id, slot, wear, event);
+            }
+            return;
+        }
         if b.biting == 0 {
             return;
         }
@@ -180,20 +260,18 @@ impl World {
             },
         };
         let catch = self.loot.fishing(&mut ctx);
-        // The catch lands at the angler's feet, where they pick it up.
+        // The catch flies from the water to the angler, as vanilla throws it.
+        let d = [at[0] - b.pos[0], at[1] - b.pos[1], at[2] - b.pos[2]];
+        let lift = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt().sqrt() * 0.08;
+        let vel = [d[0] * 0.1, d[1] * 0.1 + lift, d[2] * 0.1];
         for stack in catch {
-            self.scatter_item(at, stack);
+            self.spawn_item_moving(stack, b.pos, vel);
+            self.advance(id, super::advancements::Trigger::FishingRodHooked(stack));
         }
         let xp = 1 + self.rng.below(6) as i32;
         self.spawn_xp(at, xp);
         self.stat(id, stat_type::CUSTOM, custom_stat::FISH_CAUGHT, 1);
-        let survival = self.players.get(&id).is_some_and(|p| p.survival());
         if survival {
-            let event = if slot == OFFHAND {
-                48 // off hand broke
-            } else {
-                ENTITY_EVENT_MAINHAND_BREAK
-            };
             self.damage_item(id, slot, 1, event);
         }
     }
@@ -241,7 +319,9 @@ impl World {
                 self.broadcast(items::remove_entity(id), None);
                 continue;
             }
-            if b.afloat {
+            if let Some(hooked) = b.hooked {
+                self.follow_hooked(id, &mut b, hooked);
+            } else if b.afloat {
                 self.tick_afloat(id, &mut b);
             } else {
                 self.fly_bobber(id, &mut b);
@@ -250,8 +330,54 @@ impl World {
         }
     }
 
+    /// A hooked bobber hangs on to its mob or item, and drops off when that is gone.
+    fn follow_hooked(&mut self, id: i32, b: &mut Bobber, hooked: Hooked) {
+        let at = match hooked {
+            Hooked::Mob(m) => self.mobs.get(&m).filter(|m| m.alive()).map(|m| {
+                let (_, h) = m.size();
+                [m.pos[0], m.pos[1] + h * 0.8, m.pos[2]]
+            }),
+            Hooked::Item(i) => self.items.get(&i).map(|item| item.position()),
+        };
+        match at {
+            Some(at) => b.pos = at,
+            None => {
+                b.hooked = None;
+                self.broadcast(bobber_data(id, 0, false), None);
+            }
+        }
+    }
+
     fn fly_bobber(&mut self, id: i32, b: &mut Bobber) {
         let next = [0, 1, 2].map(|i| b.pos[i] + b.vel[i]);
+        // A mob or a dropped item in the way is hooked (not the angler's own feet).
+        if b.age > 2 {
+            let near = |pos: [f64; 3], width: f64, height: f64| {
+                let half = width / 2.0 + 0.125;
+                (next[0] - pos[0]).abs() <= half
+                    && (next[2] - pos[2]).abs() <= half
+                    && next[1] >= pos[1] - 0.125
+                    && next[1] <= pos[1] + height + 0.125
+            };
+            let mob = self.mobs.iter().find(|(_, m)| {
+                let (w, h) = m.size();
+                m.alive() && near(m.pos, w, h)
+            });
+            let hooked = match mob {
+                Some((&m, _)) => Some((Hooked::Mob(m), m)),
+                None => self
+                    .items
+                    .iter()
+                    .find(|(_, item)| near(item.position(), 0.25, 0.25))
+                    .map(|(&i, _)| (Hooked::Item(i), i)),
+            };
+            if let Some((hooked, target)) = hooked {
+                b.hooked = Some(hooked);
+                b.vel = [0.0; 3];
+                self.broadcast(bobber_data(id, target + 1, false), None);
+                return;
+            }
+        }
         if self.in_water(next) {
             // It lands and floats at the top of the water.
             b.pos = next;
@@ -275,6 +401,7 @@ impl World {
         if self.point_in_block(next) {
             // It lies where it hit.
             b.vel = [0.0; 3];
+            b.grounded = true;
             if b.age.is_multiple_of(20) {
                 self.broadcast(sync(id, b), None);
             }
@@ -301,10 +428,48 @@ impl World {
             }
             return;
         }
-        b.wait = b.wait.saturating_sub(1);
+        // Rain over open water brings fish sooner, a roof over the water later.
+        let above = BlockPos::new(
+            b.pos[0].floor() as i32,
+            b.pos[1].floor() as i32 + 1,
+            b.pos[2].floor() as i32,
+        );
+        let open_sky = self.light_at(above).is_some_and(|(sky, _)| sky >= 15);
+        let mut step = 1;
+        if open_sky && self.weather.is_raining() && self.rng.below(4) == 0 {
+            step += 1;
+        }
+        if !open_sky && self.rng.below(2) == 0 {
+            step -= 1;
+        }
+        b.wait = b.wait.saturating_sub(step);
+        if b.wait == TRAIL_TICKS {
+            b.trail_angle = self.rng.f64() * std::f64::consts::TAU;
+        }
+        if b.wait > 0 && b.wait < TRAIL_TICKS && b.wait.is_multiple_of(2) {
+            // A fish swimming up: bubbles coming closer.
+            let off = f64::from(b.wait) / 20.0;
+            let at = [
+                b.pos[0] + b.trail_angle.sin() * off,
+                b.pos[1].floor() + 0.9,
+                b.pos[2] + b.trail_angle.cos() * off,
+            ];
+            self.broadcast(
+                particles(levitas_registry::particle::FISHING, at, 2, 0.05, 0.0),
+                None,
+            );
+        }
         if b.wait == 0 {
             b.biting = BITE_MIN + self.rng.below(BITE_SPREAD);
             self.broadcast(biting_data(id, true), None);
+            self.broadcast(
+                particles(levitas_registry::particle::BUBBLE, b.pos, 8, 0.2, 0.1),
+                None,
+            );
+            self.broadcast(
+                particles(levitas_registry::particle::FISHING, b.pos, 8, 0.2, 0.1),
+                None,
+            );
             let pitch = 1.0 + (self.rng.f64() as f32 - self.rng.f64() as f32) * 0.4;
             self.play_sound_at(
                 "minecraft:entity.fishing_bobber.splash",
@@ -414,6 +579,45 @@ mod tests {
                 .get(stat_type::CUSTOM, custom_stat::FISH_CAUGHT),
             1
         );
+    }
+
+    #[test]
+    fn a_hooked_mob_is_pulled_in_and_wears_the_rod_more() {
+        let mut w = pond();
+        let cow = next_entity_id();
+        w.mobs.insert(
+            cow,
+            super::super::mobs::Mob::new(
+                super::super::mobs::MobKind::Cow,
+                [3.5, -60.0, 0.5],
+                &mut w.rng,
+            ),
+        );
+        w.use_fishing_rod(ANGLER, 0);
+        let bobber = w.bobber_of(ANGLER).unwrap();
+        let b = w.bobbers.get_mut(&bobber).unwrap();
+        b.pos = [3.5, -59.5, 0.5];
+        b.vel = [0.1, 0.0, 0.0];
+        b.age = 5;
+        w.tick_bobbers();
+        assert_eq!(w.bobbers[&bobber].hooked, Some(Hooked::Mob(cow)));
+        w.use_fishing_rod(ANGLER, 0);
+        let slot = w.players[&ANGLER].hand_slot(0);
+        assert_eq!(w.players[&ANGLER].inventory.slots[slot].damage, 5);
+    }
+
+    #[test]
+    fn reeling_in_a_fish_counts_for_fishy_business() {
+        let mut w = pond();
+        let cod = ItemInfo::id_of("minecraft:cod").unwrap();
+        w.advance(
+            ANGLER,
+            super::super::advancements::Trigger::FishingRodHooked(Stack::new(cod, 1)),
+        );
+        let a = super::super::advancements::tree()
+            .index("minecraft:husbandry/fishy_business")
+            .unwrap();
+        assert!(w.players[&ANGLER].advancements.is_done(a));
     }
 
     #[test]

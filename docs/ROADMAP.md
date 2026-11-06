@@ -319,12 +319,14 @@ Known gaps are listed under each phase instead of being hidden.
 ## Phase 6: Farming, nature and time
 
 - [x] Fishing (`world/fishing.rs`): a rod casts a bobber that floats in water; a fish bites
-      after 5 to 30 seconds (5 less a level of Lure) and stays for 1 to 2 seconds; reeling in
-      then rolls `gameplay/fishing` (fish, junk, treasure only in open water, Luck of the Sea
-      weighing by quality), gives 1 to 6 experience, wears the rod and counts fish_caught. The
-      bobber goes when the rod is put away, its owner dies or is 32 blocks off. Missing: the
-      bubble trail before a bite, hooking mobs and items, rain speeding bites up, the catch
-      flying to the player (it lands at their feet), the fishing_rod_hooked advancement.
+      after 5 to 30 seconds (5 less a level of Lure; sooner in rain over open water, later
+      under a roof), with a bubble trail as it comes, and stays for 1 to 2 seconds; reeling
+      in then rolls `gameplay/fishing` (fish, junk, treasure only in open water, Luck of the
+      Sea weighing by quality), throws the catch to the angler, gives 1 to 6 experience,
+      counts fish_caught and the fishing_rod_hooked advancements (Fishy Business). Casts hook
+      mobs and dropped items, which reeling in pulls closer; the rod wears 1 for a catch, 2
+      from the ground, 3 for an item and 5 for a mob. The bobber goes when the rod is put
+      away, its owner dies or is 32 blocks off.
 - [x] Day/night cycle, weather (rain, thunder), sleeping in beds (`world/time.rs`):
       time and weather saved in level.dat, `/time` and `/weather`, beds set the
       respawn point and skip the night once everyone has slept 100 ticks.
