@@ -363,8 +363,11 @@ Known gaps are listed under each phase instead of being hidden.
       Composters take what 26.3's `compostable` component says, with its chances (the
       first layer always), are full at 7 and ready a second later, and give bone meal.
       Falls onto farmland trample it with the wiki's chance (height less half a block).
-      Cocoa sits on any jungle log or wood. Known gaps: huge mushrooms, mobs trampling,
-      hoppers and comparators at composters.
+      Cocoa sits on any jungle log or wood. Mobs big enough (width x width x height over
+      0.512) trample farmland too, when mob griefing is on. Bone meal grows a small
+      mushroom into a huge one 40% of the time (`world/huge_mushroom.rs`, shapes ported
+      from Pumpkin). A hopper above a composter feeds it, one below takes the bone meal,
+      and comparators read composter and cauldron levels.
 - [x] Leaf decay: leaves track their distance from a log through neighbour updates and
       rot (dropping saplings, sticks and apples) once out of reach; leaves players place
       never decay.

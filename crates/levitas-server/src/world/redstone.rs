@@ -365,7 +365,19 @@ impl World {
     }
 
     /// How full a container is, as a comparator reads it: 0 when empty, else 1 to 15.
-    fn container_signal(&self, pos: BlockPos) -> Option<u8> {
+    pub(super) fn container_signal(&self, pos: BlockPos) -> Option<u8> {
+        // Composters and cauldrons give their level.
+        let state = self.state_at(pos);
+        match blocks::name(state) {
+            "minecraft:composter"
+            | "minecraft:water_cauldron"
+            | "minecraft:powder_snow_cauldron" => {
+                return prop(state, "level").and_then(|l| l.parse().ok());
+            }
+            "minecraft:lava_cauldron" => return Some(3),
+            "minecraft:cauldron" => return Some(0),
+            _ => {}
+        }
         let entity = self.block_entities.get(&pos)?;
         let items = entity.stacks();
         if items.is_empty() {

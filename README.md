@@ -48,7 +48,7 @@ what is missing in each one.
 | 3. Fluids, gravity and light | 80% | `████████░░` |
 | 4. Combat and basic entities | 89% | `████████▉░` |
 | 5. Mobs | 78% | `███████▊░░` |
-| 6. Farming, nature and time | 97% | `█████████▋` |
+| 6. Farming, nature and time | 100% | `██████████` |
 | 7. Redstone | 68% | `██████▊░░░` |
 | 8. Progression (enchanting, brewing, ...) | 100% | `██████████` |
 | 9. Dimensions (Nether, End) | 60% | `██████░░░░` |

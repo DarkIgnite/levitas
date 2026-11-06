@@ -373,6 +373,10 @@ impl World {
                 self.set_block(pos, with_age(state, (age(state) + boost).min(STEM_MAX_AGE)));
                 true
             }
+            "minecraft:brown_mushroom" | "minecraft:red_mushroom" => {
+                self.bone_meal_mushroom(pos, state);
+                true
+            }
             "minecraft:cocoa" => {
                 if age(state) >= COCOA_MAX_AGE {
                     return Some(false);
@@ -469,26 +473,89 @@ impl World {
         if held.is_empty() || chance == 0 || level >= COMPOSTER_FULL {
             return false;
         }
-        // The first layer always takes.
-        let added = level == 0 || self.rng.below(100) < u32::from(chance);
         if survival {
             let p = self.players.get_mut(&id).expect("player exists");
             p.inventory.take(slot, 1);
             let update = p.inventory.set_slot_packet(slot);
             self.send(id, update);
         }
+        self.compost(pos, state, chance);
+        true
+    }
+
+    /// One item put in the composter at `pos`, which takes with its chance (the first
+    /// layer always).
+    fn compost(&mut self, pos: BlockPos, state: u16, chance: u8) {
+        let level: u8 = prop(state, "level")
+            .and_then(|l| l.parse().ok())
+            .unwrap_or(0);
+        let added = level == 0 || self.rng.below(100) < u32::from(chance);
         self.level_event(LEVEL_EVENT_COMPOSTER_FILL, pos, i32::from(added));
         if !added {
             self.play_sound("minecraft:block.composter.fill", pos, None);
-            return true;
+            return;
         }
         let level = level + 1;
         let full = with(state, "level", &level.to_string());
-        self.set_block(pos, full);
+        self.set_block_updating(pos, full);
+        self.redstone_dirty.push(pos);
         self.play_sound("minecraft:block.composter.fill_success", pos, None);
         if level == COMPOSTER_FULL {
             self.schedule(pos, full, 20);
         }
+    }
+
+    /// A hopper above a composter feeds it what can be composted, one item at a time.
+    /// Returns whether one went in.
+    pub(super) fn hopper_into_composter(&mut self, hopper: BlockPos, composter: BlockPos) -> bool {
+        let state = self.block(composter);
+        if blocks::name(state) != "minecraft:composter" {
+            return false;
+        }
+        let level: u8 = prop(state, "level")
+            .and_then(|l| l.parse().ok())
+            .unwrap_or(0);
+        if level >= COMPOSTER_FULL {
+            return false;
+        }
+        let Some(entity) = self.block_entities.get_mut(&hopper) else {
+            return false;
+        };
+        let items = entity.stacks_mut();
+        let Some((slot, chance)) = items.iter().enumerate().find_map(|(i, s)| {
+            let chance = ItemInfo::get(s.item).map_or(0, |info| info.compost);
+            (!s.is_empty() && chance > 0).then_some((i, chance))
+        }) else {
+            return false;
+        };
+        items[slot] = items[slot].with_count(items[slot].count - 1);
+        self.dirty.insert(hopper.chunk());
+        self.redstone_dirty.push(hopper);
+        self.notify_viewers(hopper, &[slot], None);
+        self.compost(composter, state, chance);
+        true
+    }
+
+    /// A hopper under a ready composter takes its bone meal. Returns whether it did.
+    pub(super) fn composter_into_hopper(&mut self, composter: BlockPos, hopper: BlockPos) -> bool {
+        let state = self.block(composter);
+        if blocks::name(state) != "minecraft:composter"
+            || prop(state, "level") != Some(&*COMPOSTER_READY.to_string())
+        {
+            return false;
+        }
+        let Some(bone_meal) = ItemInfo::id_of("minecraft:bone_meal") else {
+            return false;
+        };
+        if !self
+            .insert_stack(hopper, Dir::Up, Stack::new(bone_meal, 1))
+            .is_empty()
+        {
+            return false;
+        }
+        self.set_block_updating(composter, with(state, "level", "0"));
+        self.redstone_dirty.push(composter);
+        self.play_sound("minecraft:block.composter.empty", composter, None);
         true
     }
 

@@ -37,6 +37,7 @@ mod golems;
 mod hanging;
 mod hazards;
 mod hoppers;
+mod huge_mushroom;
 mod items;
 mod maps;
 mod minecarts;

@@ -184,9 +184,13 @@ impl World {
                 continue;
             }
             let facing = blocks::facing(state).unwrap_or(Dir::Down);
-            let pushed = self.transfer(pos, facing, offset(pos, facing));
+            let target = offset(pos, facing);
+            let pushed = self.transfer(pos, facing, target)
+                || (facing == Dir::Down && self.hopper_into_composter(pos, target));
             let above = offset(pos, Dir::Up);
-            let pulled = self.transfer(above, Dir::Down, pos) || self.hopper_pickup(pos);
+            let pulled = self.transfer(above, Dir::Down, pos)
+                || self.composter_into_hopper(above, pos)
+                || self.hopper_pickup(pos);
             if pushed || pulled {
                 if let Some(BlockEntity::Chest(c)) = self.block_entities.get_mut(&pos) {
                     c.cooldown = HOPPER_COOLDOWN;
@@ -478,6 +482,34 @@ mod tests {
         w.set_block(BlockPos::new(1, y, 0), state("minecraft:redstone_block"));
         settle(&mut w, 2);
         assert_eq!(prop(w.block(hopper), "enabled"), Some("false"));
+    }
+
+    #[test]
+    fn hoppers_fill_composters_and_take_their_bone_meal() {
+        let mut w = world();
+        let y = -58;
+        let feeder = BlockPos::new(1, y + 1, 1);
+        let composter = BlockPos::new(1, y, 1);
+        let catcher = BlockPos::new(1, y - 1, 1);
+        place(&mut w, feeder, state("minecraft:hopper"));
+        w.set_block(composter, state("minecraft:composter"));
+        place(&mut w, catcher, state("minecraft:hopper"));
+        let seeds = ItemInfo::id_of("minecraft:wheat_seeds").unwrap();
+        w.block_entities.get_mut(&feeder).unwrap().stacks_mut()[0] = Stack::new(seeds, 64);
+        settle(&mut w, 8 * 64 + 40);
+        // Seeds went in until the composter filled, then the bone meal came out below.
+        let bone_meal = ItemInfo::id_of("minecraft:bone_meal").unwrap();
+        let caught = w.block_entities[&catcher]
+            .stacks()
+            .iter()
+            .filter(|s| s.item == bone_meal)
+            .map(|s| s.count)
+            .sum::<i32>();
+        assert!(caught >= 1, "no bone meal");
+        assert!(count(&mut w, feeder) < 64);
+        // A comparator reads the composter's level.
+        let level: u8 = prop(w.block(composter), "level").unwrap().parse().unwrap();
+        assert_eq!(w.container_signal(composter), Some(level));
     }
 
     #[test]

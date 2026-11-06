@@ -1887,6 +1887,25 @@ impl World {
             {
                 mob.health -= (fallen - 3.0).ceil() as f32;
             }
+            // Mobs big enough (width x width x height over 0.512) trample farmland, if
+            // mob griefing allows.
+            if !in_water
+                && fallen > 0.5
+                && width * width * height > 0.512
+                && crate::rules::bool("mob_griefing")
+            {
+                let feet = BlockPos::new(
+                    pos[0].floor() as i32,
+                    pos[1].floor() as i32,
+                    pos[2].floor() as i32,
+                );
+                let soil = if crate::blocks::name(self.block(feet)) == "minecraft:farmland" {
+                    feet
+                } else {
+                    crate::blocks::offset(feet, crate::blocks::Dir::Down)
+                };
+                self.trample(soil, fallen);
+            }
         } else if pos[1] < mob.pos[1] {
             mob.fall_distance += mob.pos[1] - pos[1];
         }
