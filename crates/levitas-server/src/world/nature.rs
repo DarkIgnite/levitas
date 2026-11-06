@@ -290,6 +290,17 @@ impl World {
             }
             return true;
         }
+        if held == "minecraft:filled_map" && blocks::name(clicked).ends_with("_banner") {
+            let map = self
+                .players
+                .get(&id)
+                .and_then(|p| p.inventory.slots[slot].map_id);
+            if let Some(map) = map {
+                if self.mark_banner(map, pos, clicked) {
+                    return true;
+                }
+            }
+        }
         if held == "minecraft:compass" && blocks::name(clicked) == "minecraft:lodestone" {
             return self.bind_lodestone(id, slot, pos);
         }

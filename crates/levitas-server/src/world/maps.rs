@@ -65,6 +65,8 @@ pub struct MapData {
     changed: Option<[i32; 4]>,
     /// Whether the map changed since it was last saved.
     unsaved: bool,
+    /// Banners marked on the map (a map used on them): where, and their colour (0-15).
+    pub banners: Vec<(BlockPos, u8)>,
 }
 
 impl MapData {
@@ -80,6 +82,7 @@ impl MapData {
             colors: vec![0; (SIZE * SIZE) as usize],
             changed: None,
             unsaved: true,
+            banners: Vec::new(),
         }
     }
 
@@ -118,7 +121,25 @@ impl MapData {
             .with("locked", self.locked)
             .with("xCenter", self.center[0])
             .with("zCenter", self.center[1])
-            .with("banners", Vec::<Tag>::new())
+            .with(
+                "banners",
+                self.banners
+                    .iter()
+                    .map(|&(pos, color)| {
+                        Tag::Compound(
+                            Compound::new()
+                                .with("Color", super::mobs::COLORS[usize::from(color)])
+                                .with(
+                                    "Pos",
+                                    Compound::new()
+                                        .with("X", pos.x)
+                                        .with("Y", pos.y)
+                                        .with("Z", pos.z),
+                                ),
+                        )
+                    })
+                    .collect::<Vec<_>>(),
+            )
             .with("frames", Vec::<Tag>::new())
             .with(
                 "colors",
@@ -144,6 +165,25 @@ impl MapData {
             colors,
             changed: None,
             unsaved: false,
+            banners: nbt
+                .list("banners")
+                .unwrap_or_default()
+                .iter()
+                .filter_map(Tag::as_compound)
+                .filter_map(|b| {
+                    let pos = b.compound("Pos")?;
+                    let color = b.str("Color").unwrap_or("white");
+                    let color = super::mobs::COLORS.iter().position(|&c| c == color)? as u8;
+                    Some((
+                        BlockPos::new(
+                            pos.int("X")? as i32,
+                            pos.int("Y")? as i32,
+                            pos.int("Z")? as i32,
+                        ),
+                        color,
+                    ))
+                })
+                .collect(),
         })
     }
 }
@@ -179,17 +219,34 @@ fn marker(map: &MapData, pos: [f64; 3], yaw: f32) -> Option<(i8, i8, u8)> {
     Some((x.floor() as i8, z.floor() as i8, direction))
 }
 
+/// How far from an item frame players are sent the map in it.
+const FRAME_VIEW: f64 = 64.0;
+
+/// The way a frame faces, as a yaw for its marker.
+fn facing_yaw(facing: crate::blocks::Dir) -> f32 {
+    use crate::blocks::Dir;
+    match facing {
+        Dir::South => 0.0,
+        Dir::West => 90.0,
+        Dir::North => 180.0,
+        _ => 270.0,
+    }
+}
+
+/// A marker on a map: its decoration, position in half pixels and direction.
+type Icon = (i32, i8, i8, u8);
+
 /// A map data packet: the markers, then the changed rectangle of pixels if any.
-fn map_packet(id: i32, map: &MapData, icons: &[(i8, i8, u8)], area: Option<[i32; 4]>) -> Writer {
+fn map_packet(id: i32, map: &MapData, icons: &[Icon], area: Option<[i32; 4]>) -> Writer {
     let mut packet = Writer::packet(clientbound::MAP_ITEM_DATA)
         .varint(id)
         .i8(map.scale as i8)
         .bool(map.locked)
         .bool(true)
         .varint(icons.len() as i32);
-    for &(x, z, direction) in icons {
+    for &(decoration, x, z, direction) in icons {
         packet = packet
-            .varint(map_decoration::PLAYER)
+            .varint(decoration)
             .i8(x)
             .i8(z)
             .i8(direction as i8)
@@ -247,6 +304,42 @@ impl World {
             self.maps.insert(id, map);
         }
         self.maps.get_mut(&id)
+    }
+
+    /// A map used on a banner marks it (or takes the mark off again): returns whether the
+    /// map is drawn here and covers the banner.
+    pub(super) fn mark_banner(&mut self, map_id: i32, pos: BlockPos, state: u16) -> bool {
+        let name = crate::blocks::name(state);
+        let Some(color) = name
+            .strip_prefix("minecraft:")
+            .and_then(|n| {
+                n.strip_suffix("_wall_banner")
+                    .or_else(|| n.strip_suffix("_banner"))
+            })
+            .and_then(|c| super::mobs::COLORS.iter().position(|&x| x == c))
+        else {
+            return false;
+        };
+        let here = self.dimension.name();
+        let Some(map) = self.map_data(map_id) else {
+            return false;
+        };
+        let at = [
+            f64::from(pos.x) + 0.5,
+            f64::from(pos.y),
+            f64::from(pos.z) + 0.5,
+        ];
+        if map.dimension != here || marker(map, at, 0.0).is_none() {
+            return false;
+        }
+        match map.banners.iter().position(|&(p, _)| p == pos) {
+            Some(i) => {
+                map.banners.remove(i);
+            }
+            None => map.banners.push((pos, color as u8)),
+        }
+        map.unsaved = true;
+        true
     }
 
     /// Starts a new map of `scale` around block (`x`, `z`) here, returning its ID.
@@ -360,6 +453,40 @@ impl World {
         Some((0, MIN_Y, 0))
     }
 
+    /// What a pixel of a zoomed-out map shows for the `step` by `step` blocks from
+    /// (`x`, `z`): the colour most of them have (sampling up to 4 by 4 of them), at
+    /// their average height and water depth. A plain map's pixel is one column.
+    fn area_column(&self, x: i32, z: i32, step: i32) -> Option<(u8, i32, i32)> {
+        if step <= 1 {
+            return self.map_column(x, z);
+        }
+        let stride = (step / 4).max(1);
+        let mut samples: Vec<(u8, i32, i32)> = Vec::new();
+        for dx in (0..step).step_by(stride as usize) {
+            for dz in (0..step).step_by(stride as usize) {
+                if let Some(c) = self.map_column(x + dx, z + dz) {
+                    samples.push(c);
+                }
+            }
+        }
+        if samples.is_empty() {
+            return None;
+        }
+        let mut counts = [0u32; 256];
+        for &(color, _, _) in &samples {
+            counts[usize::from(color)] += 1;
+        }
+        // Empty pixels only win when nothing else is there.
+        let color = (1..256)
+            .max_by_key(|&c| counts[c])
+            .filter(|&c| counts[c] > 0)
+            .unwrap_or(0) as u8;
+        let n = samples.len() as i32;
+        let height = samples.iter().map(|s| s.1).sum::<i32>() / n;
+        let depth = samples.iter().map(|s| s.2).sum::<i32>() / n;
+        Some((color, height, depth))
+    }
+
     /// Draws one turn's worth of a map's pixels within reach of a player at `pos`.
     fn draw_map(&mut self, id: i32, pos: [f64; 3]) {
         let nether = self.dimension == Dimension::Nether;
@@ -382,11 +509,11 @@ impl World {
             let last = (pz + radius).min(SIZE - 1);
             // The pixel to the north decides the first one's shade.
             let (_, z) = map.block_of(column, first);
-            let mut north_height = self.map_column(x, z - step).map(|c| c.1);
+            let mut north_height = self.area_column(x, z - step, step).map(|c| c.1);
             for row in first..=last {
                 let (dx, dz) = (column - px, row - pz);
                 let (_, z) = map.block_of(column, row);
-                let here = self.map_column(x, z);
+                let here = self.area_column(x, z, step);
                 if dx * dx + dz * dz <= radius * radius {
                     if let Some((color, height, depth)) = here {
                         let shade = if color == 0 {
@@ -431,6 +558,38 @@ impl World {
                 }
             }
         }
+        // Maps in item frames: their markers, and the players near enough to see them.
+        let mut framed: HashMap<i32, Vec<(BlockPos, f32)>> = HashMap::new();
+        for h in self.hanging.values() {
+            if let super::hanging::What::Frame { item, .. } = h.what {
+                if let Some(id) = item.map_id {
+                    framed
+                        .entry(id)
+                        .or_default()
+                        .push((h.block, facing_yaw(h.facing)));
+                }
+            }
+        }
+        for (&id, frames) in &framed {
+            let watchers: Vec<i32> = self
+                .players
+                .iter()
+                .filter(|(_, p)| {
+                    p.alive
+                        && frames.iter().any(|(b, _)| {
+                            (p.pos[0] - f64::from(b.x)).hypot(p.pos[2] - f64::from(b.z))
+                                <= FRAME_VIEW
+                        })
+                })
+                .map(|(&pid, _)| pid)
+                .collect();
+            let list = held.entry(id).or_default();
+            for pid in watchers {
+                if !list.contains(&pid) {
+                    list.push(pid);
+                }
+            }
+        }
         for (id, holders) in held {
             let Some(map) = self.map_data(id) else {
                 continue;
@@ -438,21 +597,47 @@ impl World {
             let drawable = map.dimension == here && !map.locked;
             if drawable {
                 for &pid in &holders {
-                    let pos = self.players[&pid].pos;
-                    self.draw_map(id, pos);
+                    // Only those holding the map draw it, not those looking at a frame.
+                    let p = &self.players[&pid];
+                    let holding = [HOTBAR + p.held, OFFHAND]
+                        .iter()
+                        .any(|&s| p.inventory.slots[s].map_id == Some(id));
+                    if holding {
+                        let pos = p.pos;
+                        self.draw_map(id, pos);
+                    }
                 }
             }
             let Some(map) = self.maps.get_mut(&id) else {
                 continue;
             };
-            let icons: Vec<(i8, i8, u8)> = if map.dimension == here {
-                holders
+            let icons: Vec<Icon> = if map.dimension == here {
+                let mut icons: Vec<Icon> = holders
                     .iter()
+                    .filter(|pid| {
+                        let p = &self.players[pid];
+                        [HOTBAR + p.held, OFFHAND]
+                            .iter()
+                            .any(|&s| p.inventory.slots[s].map_id == Some(id))
+                    })
                     .filter_map(|pid| {
                         let p = &self.players[pid];
-                        marker(map, p.pos, p.yaw)
+                        marker(map, p.pos, p.yaw).map(|(x, z, d)| (map_decoration::PLAYER, x, z, d))
                     })
-                    .collect()
+                    .collect();
+                let centre =
+                    |b: BlockPos| [f64::from(b.x) + 0.5, f64::from(b.y), f64::from(b.z) + 0.5];
+                for &(block, yaw) in framed.get(&id).into_iter().flatten() {
+                    if let Some((x, z, d)) = marker(map, centre(block), yaw) {
+                        icons.push((map_decoration::FRAME, x, z, d));
+                    }
+                }
+                for &(block, color) in &map.banners {
+                    if let Some((x, z, _)) = marker(map, centre(block), 180.0) {
+                        icons.push((map_decoration::BANNER_WHITE + i32::from(color), x, z, 8));
+                    }
+                }
+                icons
             } else {
                 Vec::new()
             };
@@ -524,6 +709,45 @@ mod tests {
             MapData::new("minecraft:overworld", 70, -70, 0).center,
             [128, -128]
         );
+    }
+
+    #[test]
+    fn banners_are_marked_and_framed_maps_reach_players_nearby() {
+        let mut w = flat_world();
+        let id = w.create_map(0, 0, 0);
+        // A map used on a red banner marks it; used again, the mark goes.
+        let banner = BlockPos::new(3, -60, 3);
+        let red = BlockInfo::by_name("minecraft:red_banner")
+            .unwrap()
+            .default_state;
+        assert!(w.mark_banner(id, banner, red));
+        assert_eq!(w.maps[&id].banners, vec![(banner, 14)]);
+        let back = MapData::from_nbt(&w.maps[&id].to_nbt()).unwrap();
+        assert_eq!(back.banners, vec![(banner, 14)]);
+        assert!(w.mark_banner(id, banner, red));
+        assert!(w.maps[&id].banners.is_empty());
+        // A map in a frame is sent to a player close by who never held it.
+        let filled = ItemInfo::id_of("minecraft:filled_map").unwrap();
+        let mut stack = Stack::new(filled, 1);
+        stack.map_id = Some(id);
+        let frame = Compound::new()
+            .with("id", "minecraft:item_frame")
+            .with("block_pos", vec![2, -60, 2])
+            .with("Facing", 2i8)
+            .with("Item", stack.to_nbt());
+        let h = super::super::hanging::Hanging::from_nbt(&frame, &mut w.rng).unwrap();
+        w.hanging.insert(next_entity_id(), h);
+        let (out, _frames) = mpsc::channel(100_000);
+        let pid = next_entity_id();
+        let profile = Profile {
+            name: "Looker".to_owned(),
+            uuid: 9,
+            properties: Vec::new(),
+        };
+        w.players
+            .insert(pid, Player::new(profile, out, [5.5, -60.0, 5.5]));
+        w.tick_maps();
+        assert!(w.players[&pid].known_maps.contains(&id));
     }
 
     #[test]
