@@ -4,6 +4,10 @@
 //! has 40 health, follows its owner, teleports to them when left far behind and fights
 //! whatever the owner fights or what attacks the owner. Meat mends it and, at full
 //! health, puts it in love mode. Right-clicking sits it down or stands it up again.
+//!
+//! Cats are tamed the same way with raw cod or salmon: they sit, wear a collar,
+//! follow and teleport, are mended and bred with fish, but never fight. Wild ones keep
+//! away from players, and stray cats turn up around villages.
 
 use super::mobs::{Mob, MobKind};
 use super::survival::Damage;
@@ -59,7 +63,37 @@ fn dye_colour(item: &str) -> Option<u8> {
         .map(|i| i as u8)
 }
 
-/// The entity data telling clients a wolf's owner, pose, collar and anger.
+/// What tames, mends and breeds an animal of `kind`.
+fn tames_with(kind: MobKind, item: &str) -> bool {
+    match kind {
+        MobKind::Cat => matches!(item, "minecraft:cod" | "minecraft:salmon"),
+        _ => item == "minecraft:bone",
+    }
+}
+
+fn mends(kind: MobKind, item: &str) -> Option<f32> {
+    match kind {
+        MobKind::Cat => matches!(item, "minecraft:cod" | "minecraft:salmon").then_some(2.0),
+        _ => meat_health(item),
+    }
+}
+
+/// A cat's look: its variant (an ID in `cat_variant`) and collar.
+fn cat_data(mob: &Mob, packet: Writer) -> Writer {
+    const DATA_CAT_VARIANT: u8 = 20;
+    const DATA_CAT_COLLAR: u8 = 23;
+    const SERIALIZER_CAT_VARIANT: i32 = 21;
+    packet
+        .u8(DATA_CAT_VARIANT)
+        .varint(SERIALIZER_CAT_VARIANT)
+        .varint(i32::from(mob.variant))
+        .u8(DATA_CAT_COLLAR)
+        .varint(SERIALIZER_VARINT)
+        .varint(i32::from(mob.collar))
+        .u8(0xFF)
+}
+
+/// The entity data telling clients a wolf's (or cat's) owner, pose, collar and anger.
 pub fn wolf_data(mob: &Mob, id: i32) -> Writer {
     let flags = if mob.sitting { SITTING } else { 0 } | if mob.owner.is_some() { TAMED } else { 0 };
     let packet = Writer::packet(clientbound::SET_ENTITY_DATA)
@@ -73,6 +107,9 @@ pub fn wolf_data(mob: &Mob, id: i32) -> Writer {
         Some(owner) => packet.bool(true).uuid(owner),
         None => packet.bool(false),
     };
+    if mob.kind == MobKind::Cat {
+        return cat_data(mob, packet);
+    }
     packet
         .u8(DATA_COLLAR)
         .varint(SERIALIZER_VARINT)
@@ -102,12 +139,12 @@ impl World {
         let mut used = false;
         match mob.owner {
             None => {
-                if held == "minecraft:bone" && mob.anger == 0 {
+                if tames_with(mob.kind, held) && mob.anger == 0 {
                     used = true;
                     if self.rng.below(3) == 0 {
                         mob.owner = Some(uuid);
                         mob.sitting = true;
-                        mob.health = TAMED_HEALTH;
+                        mob.health = mob.max_health();
                         mob.hunting = None;
                         mob.target = None;
                         mob.path.clear();
@@ -129,17 +166,12 @@ impl World {
                         used = true;
                         self.send_to_viewers(&mob, wolf_data(&mob, target));
                     }
-                } else if let Some(heal) = meat_health(held) {
+                } else if let Some(heal) = mends(mob.kind, held) {
                     if mob.health < mob.max_health() {
                         mob.health = (mob.health + heal).min(mob.max_health());
                         used = true;
-                        self.play_sound_at(
-                            "minecraft:entity.wolf.ambient",
-                            mob.pos,
-                            1.0,
-                            1.0,
-                            None,
-                        );
+                        let sound = format!("minecraft:entity.{}.ambient", mob.kind.sound());
+                        self.play_sound_at(&sound, mob.pos, 1.0, 1.0, None);
                     } else if mob.age >= 0 {
                         // Fed at full health it falls in love instead.
                         self.mobs.insert(target, mob);
@@ -328,6 +360,51 @@ impl World {
     }
 }
 
+impl World {
+    /// Stray cats turn up in villages, as vanilla's cat spawner does every minute: next
+    /// to a villager near a player, while fewer than five cats live around.
+    pub(super) fn tick_village_cats(&mut self) {
+        const EVERY: u64 = 1200;
+        const RANGE: f64 = 48.0;
+        const MAX_CATS: usize = 5;
+        if !self.tick.is_multiple_of(EVERY) || !crate::rules::bool("spawn_mobs") {
+            return;
+        }
+        let players: Vec<[f64; 3]> = self
+            .players
+            .values()
+            .filter(|p| p.alive)
+            .map(|p| p.pos)
+            .collect();
+        for at in players {
+            let villagers: Vec<[f64; 3]> = self
+                .mobs
+                .values()
+                .filter(|m| {
+                    m.alive() && m.kind == MobKind::Villager && distance(m.pos, at) <= RANGE
+                })
+                .map(|m| m.pos)
+                .collect();
+            if villagers.is_empty() {
+                continue;
+            }
+            let cats = self
+                .mobs
+                .values()
+                .filter(|m| m.kind == MobKind::Cat && distance(m.pos, at) <= RANGE)
+                .count();
+            if cats >= MAX_CATS {
+                continue;
+            }
+            let spot = villagers[self.rng.below(villagers.len() as u32) as usize];
+            if self.mob_fits(MobKind::Cat, spot) {
+                let cat = Mob::new(MobKind::Cat, spot, &mut self.rng);
+                self.mobs.insert(next_entity_id(), cat);
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -385,6 +462,56 @@ mod tests {
             }
         }
         panic!("a bone never tamed the wolf");
+    }
+
+    #[test]
+    fn cats_are_tamed_with_fish_keep_their_coat_and_turn_up_in_villages() {
+        let mut w = world();
+        let id = next_entity_id();
+        w.mobs
+            .insert(id, Mob::new(MobKind::Cat, [10.5, -60.0, 8.5], &mut w.rng));
+        // A bone does nothing for a cat; fish does.
+        give(&mut w, "minecraft:bone", 1);
+        w.use_on_wolf(OWNER, id, SLOT, "minecraft:bone");
+        assert!(w.mobs[&id].owner.is_none());
+        give(&mut w, "minecraft:cod", 64);
+        for _ in 0..200 {
+            w.use_on_wolf(OWNER, id, SLOT, "minecraft:cod");
+            if w.mobs[&id].owner.is_some() {
+                break;
+            }
+        }
+        let cat = &w.mobs[&id];
+        assert_eq!(cat.owner, Some(0xB0B));
+        assert!(cat.sitting);
+        assert_eq!(cat.max_health(), 10.0, "tamed cats keep their health");
+        // Its data carries its coat (index 20) and collar (23).
+        let frame = wolf_data(cat, id).into_frame();
+        let mut r = levitas_protocol::Reader::new(&frame);
+        r.varint().unwrap();
+        r.varint().unwrap();
+        r.varint().unwrap();
+        assert_eq!((r.u8().unwrap(), r.varint().unwrap()), (18, 0));
+        r.u8().unwrap();
+        assert_eq!((r.u8().unwrap(), r.varint().unwrap()), (19, 13));
+        assert!(r.bool().unwrap());
+        r.uuid().unwrap();
+        assert_eq!((r.u8().unwrap(), r.varint().unwrap()), (20, 21));
+        assert_eq!(r.varint().unwrap(), i32::from(cat.variant));
+        assert_eq!((r.u8().unwrap(), r.varint().unwrap()), (23, 1));
+        // The coat survives saving.
+        w.mobs.get_mut(&id).unwrap().variant = 3;
+        let back = Mob::read(&w.mobs[&id].to_nbt(), &mut w.rng).unwrap();
+        assert_eq!((back.variant, back.owner), (3, Some(0xB0B)));
+        // A village near a player gets a stray cat now and then.
+        w.mobs.clear();
+        w.mobs.insert(
+            next_entity_id(),
+            Mob::new(MobKind::Villager, [12.5, -60.0, 8.5], &mut w.rng),
+        );
+        w.tick = 1200;
+        w.tick_village_cats();
+        assert!(w.mobs.values().any(|m| m.kind == MobKind::Cat));
     }
 
     #[test]

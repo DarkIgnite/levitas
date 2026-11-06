@@ -133,7 +133,7 @@ impl World {
         ];
         let mut baby = Mob::new(mob.kind, at, &mut self.rng);
         baby.age = BABY_AGE;
-        if mob.kind == MobKind::Wolf {
+        if matches!(mob.kind, MobKind::Wolf | MobKind::Cat) {
             // A tamed wolf's pup is tamed to the same owner.
             baby.owner = mob.owner.or(self.mobs[&pid].owner);
             baby.sitting = false;

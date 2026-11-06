@@ -104,6 +104,7 @@ pub enum MobKind {
     Squid,
     Cod,
     Salmon,
+    Cat,
 }
 
 impl MobKind {
@@ -153,6 +154,7 @@ impl MobKind {
             "minecraft:squid" => Some(MobKind::Squid),
             "minecraft:cod" => Some(MobKind::Cod),
             "minecraft:salmon" => Some(MobKind::Salmon),
+            "minecraft:cat" => Some(MobKind::Cat),
             _ => None,
         }
     }
@@ -191,6 +193,7 @@ impl MobKind {
             MobKind::Squid => "minecraft:squid",
             MobKind::Cod => "minecraft:cod",
             MobKind::Salmon => "minecraft:salmon",
+            MobKind::Cat => "minecraft:cat",
         }
     }
 
@@ -229,6 +232,7 @@ impl MobKind {
             MobKind::Squid => "Squid",
             MobKind::Cod => "Cod",
             MobKind::Salmon => "Salmon",
+            MobKind::Cat => "Cat",
         }
     }
 
@@ -378,6 +382,7 @@ impl MobKind {
             MobKind::Squid => entity_type::SQUID,
             MobKind::Cod => entity_type::COD,
             MobKind::Salmon => entity_type::SALMON,
+            MobKind::Cat => entity_type::CAT,
         }
     }
 
@@ -390,6 +395,7 @@ impl MobKind {
             MobKind::Rabbit => 3.0,
             MobKind::Squid => 10.0,
             MobKind::Cod | MobKind::Salmon => 3.0,
+            MobKind::Cat => 10.0,
             MobKind::Zombie | MobKind::Creeper | MobKind::Skeleton => 20.0,
             MobKind::Husk | MobKind::Stray => 20.0,
             MobKind::ZombifiedPiglin => 20.0,
@@ -423,6 +429,7 @@ impl MobKind {
             MobKind::Squid => (0.8, 0.8),
             MobKind::Cod => (0.5, 0.3),
             MobKind::Salmon => (0.7, 0.4),
+            MobKind::Cat => (0.6, 0.7),
             MobKind::Zombie | MobKind::Husk => (0.6, 1.95),
             MobKind::Spider => (1.4, 0.9),
             MobKind::CaveSpider => (0.7, 0.5),
@@ -453,6 +460,7 @@ impl MobKind {
             MobKind::Rabbit => 0.14,
             MobKind::Squid => 0.04,
             MobKind::Cod | MobKind::Salmon => 0.08,
+            MobKind::Cat => 0.15,
             MobKind::Zombie | MobKind::Husk => 0.12,
             MobKind::Spider | MobKind::CaveSpider => 0.15,
             MobKind::Creeper => 0.11,
@@ -509,6 +517,7 @@ impl MobKind {
             MobKind::Squid => "squid",
             MobKind::Cod => "cod",
             MobKind::Salmon => "salmon",
+            MobKind::Cat => "cat",
         }
     }
 }
@@ -594,6 +603,8 @@ pub struct Mob {
     /// Wolves: the owner's UUID once tamed, whether it sits, its collar colour (dye
     /// index, red by default).
     pub owner: Option<u128>,
+    /// Cats: their coat, an ID in the `cat_variant` registry.
+    pub variant: u8,
     pub sitting: bool,
     pub collar: u8,
     /// Wandering trader despawn countdown in ticks.
@@ -682,6 +693,11 @@ impl Mob {
             leader: None,
             panic_ticks: 0,
             owner: None,
+            variant: if kind == MobKind::Cat {
+                rng.below(cat_variants().max(1)) as u8
+            } else {
+                0
+            },
             sitting: false,
             collar: super::wolves::DEFAULT_COLLAR,
         }
@@ -786,7 +802,7 @@ impl Mob {
         if self.kind == MobKind::IronGolem {
             packets.push(super::golems::golem_data(id, self.player_created));
         }
-        if self.kind == MobKind::Wolf {
+        if matches!(self.kind, MobKind::Wolf | MobKind::Cat) {
             packets.push(super::wolves::wolf_data(self, id));
         }
         if let Some(name) = self.name {
@@ -916,7 +932,12 @@ impl Mob {
                 nbt.insert("Size", i32::from(self.slime_size) - 1);
             }
             MobKind::ZombifiedPiglin => nbt.insert("AngerTime", self.anger as i32),
-            MobKind::Wolf => {
+            MobKind::Wolf | MobKind::Cat => {
+                if self.kind == MobKind::Cat {
+                    if let Some(name) = cat_variant_name(self.variant) {
+                        nbt.insert("variant", name);
+                    }
+                }
                 nbt.insert("Sitting", self.sitting);
                 nbt.insert("CollarColor", self.collar as i8);
                 if let Some(owner) = self.owner {
@@ -989,7 +1010,12 @@ impl Mob {
             mob.slime_size = (size.clamp(0, 3) as u8 + 1).next_power_of_two().min(4);
         }
         mob.anger = nbt.int("AngerTime").unwrap_or(0).max(0) as u32;
-        if kind == MobKind::Wolf {
+        if kind == MobKind::Cat {
+            if let Some(v) = nbt.str("variant").and_then(cat_variant_id) {
+                mob.variant = v;
+            }
+        }
+        if matches!(kind, MobKind::Wolf | MobKind::Cat) {
             mob.sitting = nbt.int("Sitting").unwrap_or(0) != 0;
             mob.collar = nbt
                 .int("CollarColor")
@@ -1087,7 +1113,7 @@ struct SpawnList {
 }
 
 /// Mobs `/summon` knows.
-pub const SUMMONABLE: [&str; 32] = [
+pub const SUMMONABLE: [&str; 33] = [
     "cow",
     "pig",
     "sheep",
@@ -1120,6 +1146,7 @@ pub const SUMMONABLE: [&str; 32] = [
     "squid",
     "cod",
     "salmon",
+    "cat",
 ];
 
 fn spawners(list: &Value) -> Vec<Spawner> {
@@ -1485,7 +1512,7 @@ impl World {
             } else if !mob.kind.is_monster() {
                 self.tick_breeding(id, &mut mob);
             }
-            if mob.kind == MobKind::Wolf {
+            if matches!(mob.kind, MobKind::Wolf | MobKind::Cat) {
                 self.tick_wolf(id, &mut mob);
             }
             if mob.kind.is_monster() && self.hunt(id, &mut mob) {
@@ -1588,8 +1615,9 @@ impl World {
         if !panicking && !mob.kind.is_monster() && mob.love == 0 && self.follow_temptation(mob) {
             return;
         }
-        // Rabbits bolt from players who come close.
-        if mob.kind == MobKind::Rabbit
+        // Rabbits and wild cats bolt from players who come close.
+        let shy = mob.kind == MobKind::Rabbit || (mob.kind == MobKind::Cat && mob.owner.is_none());
+        if shy
             && !panicking
             && self.players.values().any(|p| {
                 p.alive && (p.pos[0] - mob.pos[0]).hypot(p.pos[2] - mob.pos[2]) < RABBIT_SHY
@@ -2339,7 +2367,7 @@ impl World {
             self.name_mob(id, target, slot);
             return;
         }
-        if mob.kind == MobKind::Wolf {
+        if matches!(mob.kind, MobKind::Wolf | MobKind::Cat) {
             self.use_on_wolf(id, target, slot, held);
             return;
         }
@@ -2859,6 +2887,25 @@ impl World {
             self.send(id, update);
         }
     }
+}
+
+fn cat_variant_registry() -> Option<&'static SyncedRegistry> {
+    SyncedRegistry::get("minecraft:cat_variant")
+}
+
+fn cat_variants() -> u32 {
+    cat_variant_registry().map_or(0, |r| r.entries.len() as u32)
+}
+
+fn cat_variant_name(id: u8) -> Option<&'static str> {
+    cat_variant_registry()?
+        .entries
+        .get(usize::from(id))
+        .copied()
+}
+
+fn cat_variant_id(name: &str) -> Option<u8> {
+    cat_variant_registry()?.id_of(name).map(|i| i as u8)
 }
 
 pub(super) fn yaw_towards(from: [f64; 3], to: [f64; 3]) -> f32 {

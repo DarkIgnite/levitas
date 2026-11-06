@@ -1658,6 +1658,7 @@ impl World {
         self.tick_raids();
         self.tick_evoker_fangs();
         self.tick_village_golem_spawning();
+        self.tick_village_cats();
         self.tick_wandering_trader_spawning();
         self.tick_effects();
         self.tick_items();
