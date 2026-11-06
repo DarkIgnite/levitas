@@ -375,6 +375,12 @@ impl World {
                 return prop(state, "level").and_then(|l| l.parse().ok());
             }
             "minecraft:lava_cauldron" => return Some(3),
+            "minecraft:jukebox" => {
+                return Some(match self.block_entities.get(&pos) {
+                    Some(BlockEntity::Jukebox(j)) => j.signal(),
+                    _ => 0,
+                });
+            }
             "minecraft:cauldron" => return Some(0),
             _ => {}
         }

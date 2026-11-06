@@ -40,6 +40,7 @@ mod hazards;
 mod hoppers;
 mod huge_mushroom;
 mod items;
+mod jukebox;
 mod maps;
 mod minecarts;
 mod mobs;
@@ -1708,6 +1709,7 @@ impl World {
         self.track_ground_entities();
         self.tick_brushing();
         self.tick_brushables();
+        self.tick_jukeboxes();
         self.tick_beacons();
         self.tick_maps();
         self.tick_advancements();

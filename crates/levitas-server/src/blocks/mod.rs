@@ -653,6 +653,137 @@ fn speleothem_thickness(state: u16, pos: BlockPos, get: &mut impl FnMut(BlockPos
     with(state, "thickness", thickness)
 }
 
+/// The sound of placing a block, for the players who did not place it. The data
+/// generator does not give blocks' sound types, so they are worked out from the name:
+/// a sound of the block's own (`block.anvil.place`), its family's (`_bricks`,
+/// `_leaves`, cherry and bamboo wood, deepslate, copper, ...), the tag it is in
+/// (wood, wool, sand, gravel, grass, glass), or stone.
+pub fn place_sound(state: u16) -> String {
+    let name = name(state).trim_start_matches("minecraft:");
+    let has = |s: &str| levitas_registry::sound_id(&format!("minecraft:block.{s}.place")).is_some();
+    let pick = |s: &str| format!("minecraft:block.{s}.place");
+    // The block's own sound, or that of what it is made of.
+    let base = name
+        .trim_start_matches("waxed_")
+        .trim_start_matches("exposed_")
+        .trim_start_matches("weathered_")
+        .trim_start_matches("oxidized_");
+    for candidate in [
+        name,
+        base,
+        base.trim_end_matches("_block"),
+        base.trim_end_matches("_slab"),
+        base.trim_end_matches("_stairs"),
+        base.trim_end_matches("_wall"),
+    ] {
+        if has(candidate) {
+            return pick(candidate);
+        }
+    }
+    let family = [
+        ("cherry", "cherry_wood"),
+        ("bamboo", "bamboo_wood"),
+        ("crimson", "nether_wood"),
+        ("warped", "nether_wood"),
+        ("deepslate_brick", "deepslate_bricks"),
+        ("deepslate_tile", "deepslate_tiles"),
+        ("polished_deepslate", "polished_deepslate"),
+        ("deepslate", "deepslate"),
+        ("tuff_brick", "tuff_bricks"),
+        ("polished_tuff", "polished_tuff"),
+        ("tuff", "tuff"),
+        ("mud_brick", "mud_bricks"),
+        ("nether_brick", "nether_bricks"),
+        ("copper", "copper"),
+        ("amethyst", "amethyst_block"),
+        ("sculk", "sculk"),
+        ("resin_brick", "resin_bricks"),
+        ("sulfur", "sulfur"),
+        ("cinnabar", "cinnabar"),
+        ("_hanging_sign", "hanging_sign"),
+        ("candle", "candle"),
+        ("lantern", "lantern"),
+        ("froglight", "froglight"),
+        ("nylium", "nylium"),
+        ("_stem", "stem"),
+        ("_hyphae", "stem"),
+        ("_roots", "roots"),
+        ("coral_block", "coral_block"),
+    ];
+    for (part, sound) in family {
+        if name.contains(part) && has(sound) {
+            return pick(sound);
+        }
+    }
+    let tagged = [
+        ("minecraft:logs", "wood"),
+        ("minecraft:planks", "wood"),
+        ("minecraft:wooden_slabs", "wood"),
+        ("minecraft:wooden_stairs", "wood"),
+        ("minecraft:wooden_fences", "wood"),
+        ("minecraft:wooden_doors", "wood"),
+        ("minecraft:wooden_trapdoors", "wood"),
+        ("minecraft:wooden_buttons", "wood"),
+        ("minecraft:wooden_pressure_plates", "wood"),
+        ("minecraft:fence_gates", "wood"),
+        ("minecraft:signs", "wood"),
+        ("minecraft:wool", "wool"),
+        ("minecraft:wool_carpets", "wool"),
+        ("minecraft:beds", "wood"),
+        ("minecraft:sand", "sand"),
+        ("minecraft:concrete_powders", "sand"),
+        ("minecraft:leaves", "grass"),
+        ("minecraft:saplings", "grass"),
+        ("minecraft:flowers", "grass"),
+        ("minecraft:crops", "grass"),
+        ("minecraft:dirt", "gravel"),
+        ("minecraft:ice", "glass"),
+        ("minecraft:anvil", "anvil"),
+    ];
+    for (tag, sound) in tagged {
+        if block_has_tag(state, tag) {
+            return pick(sound);
+        }
+    }
+    let by_name = [
+        ("glass", "glass"),
+        ("grass", "grass"),
+        ("fern", "grass"),
+        ("mushroom", "grass"),
+        ("farmland", "gravel"),
+        ("dirt", "gravel"),
+        ("clay", "gravel"),
+        ("podzol", "grass"),
+        ("mycelium", "grass"),
+        ("iron_", "metal"),
+        ("gold", "metal"),
+        ("diamond_block", "metal"),
+        ("emerald_block", "metal"),
+        ("lapis_block", "stone"),
+        ("redstone_block", "metal"),
+        ("hopper", "metal"),
+        ("cauldron", "metal"),
+        ("rail", "metal"),
+        ("bell", "metal"),
+        ("snow", "snow"),
+        ("bookshelf", "wood"),
+        ("chest", "wood"),
+        ("barrel", "wood"),
+        ("crafting_table", "wood"),
+        ("lectern", "wood"),
+        ("composter", "wood"),
+        ("note_block", "wood"),
+        ("jukebox", "wood"),
+        ("_mushroom_block", "wood"),
+    ];
+    for (part, sound) in by_name {
+        if name.contains(part) {
+            return pick(sound);
+        }
+    }
+    pick("stone")
+}
+
 /// Whether a falling block can fall through (or into) this block.
 pub fn can_fall_through(state: u16) -> bool {
     is_air(state)

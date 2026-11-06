@@ -113,6 +113,14 @@ fn main() {
     embed_json_dir(
         &data,
         &out_dir,
+        "jukebox_song",
+        "JUKEBOX_SONGS_JSON",
+        "Jukebox songs as JSON: length, comparator output and sound.",
+        &mut out,
+    );
+    embed_json_dir(
+        &data,
+        &out_dir,
         "loot_table/archaeology",
         "ARCHAEOLOGY_LOOT_JSON",
         "Archaeology loot tables as JSON (suspicious sand and gravel): `minecraft:<path>`.",

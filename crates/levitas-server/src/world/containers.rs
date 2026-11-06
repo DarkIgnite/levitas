@@ -38,6 +38,7 @@ pub enum BlockEntity {
     Conduit(Box<super::conduit::Conduit>),
     Brushable(Box<super::archaeology::Brushable>),
     Pot(Box<super::archaeology::Pot>),
+    Jukebox(Box<super::jukebox::Jukebox>),
 }
 
 pub struct Plain {
@@ -107,6 +108,7 @@ impl BlockEntity {
             BlockEntity::Conduit(_) => ("minecraft:conduit", &[][..]),
             BlockEntity::Brushable(_) => ("minecraft:brushable_block", &[][..]),
             BlockEntity::Pot(_) => ("minecraft:decorated_pot", &[][..]),
+            BlockEntity::Jukebox(_) => ("minecraft:jukebox", &[][..]),
         };
         let mut nbt = Compound::new()
             .with("id", id)
@@ -121,6 +123,7 @@ impl BlockEntity {
                 | BlockEntity::Conduit(_)
                 | BlockEntity::Brushable(_)
                 | BlockEntity::Pot(_)
+                | BlockEntity::Jukebox(_)
         ) {
             nbt.insert("Items", items_to_nbt(items.iter().copied().enumerate()));
         }
@@ -158,6 +161,9 @@ impl BlockEntity {
         }
         if let BlockEntity::Pot(p) = self {
             p.write_nbt(&mut nbt);
+        }
+        if let BlockEntity::Jukebox(j) = self {
+            j.write_nbt(&mut nbt);
         }
         nbt
     }
@@ -208,6 +214,9 @@ impl BlockEntity {
             }
             "minecraft:decorated_pot" => {
                 BlockEntity::Pot(Box::new(super::archaeology::Pot::read_nbt(nbt)))
+            }
+            "minecraft:jukebox" => {
+                BlockEntity::Jukebox(Box::new(super::jukebox::Jukebox::read_nbt(nbt)))
             }
             id @ ("minecraft:sign" | "minecraft:hanging_sign") => BlockEntity::Sign(Box::new(
                 super::signs::Sign::read_nbt(id == "minecraft:hanging_sign", nbt),
@@ -293,6 +302,7 @@ impl BlockEntity {
                 Some(BlockEntity::Brushable(Box::default()))
             }
             "minecraft:decorated_pot" => Some(BlockEntity::Pot(Box::default())),
+            "minecraft:jukebox" => Some(BlockEntity::Jukebox(Box::default())),
             _ => super::signs::sign_kind(state)
                 .map(|hanging| BlockEntity::Sign(Box::new(super::signs::Sign::new(hanging)))),
         }
@@ -316,6 +326,7 @@ impl BlockEntity {
             BlockEntity::Conduit(c) => c.type_id(),
             BlockEntity::Brushable(_) => block_entity_type::BRUSHABLE_BLOCK,
             BlockEntity::Pot(_) => block_entity_type::DECORATED_POT,
+            BlockEntity::Jukebox(_) => block_entity_type::JUKEBOX,
         }
     }
 
@@ -335,6 +346,7 @@ impl BlockEntity {
             BlockEntity::Campfire(c) => &c.items,
             BlockEntity::Brewing(b) => &b.items,
             BlockEntity::Pot(p) => &p.items,
+            BlockEntity::Jukebox(j) => &j.items,
             BlockEntity::Plain(_)
             | BlockEntity::Spawner(_)
             | BlockEntity::Sign(_)
@@ -351,6 +363,7 @@ impl BlockEntity {
             BlockEntity::Campfire(c) => &mut c.items,
             BlockEntity::Brewing(b) => &mut b.items,
             BlockEntity::Pot(p) => &mut p.items,
+            BlockEntity::Jukebox(j) => &mut j.items,
             BlockEntity::Plain(_)
             | BlockEntity::Spawner(_)
             | BlockEntity::Sign(_)
@@ -373,6 +386,7 @@ impl BlockEntity {
             BlockEntity::Conduit(c) => &mut c.viewers,
             BlockEntity::Brushable(b) => &mut b.viewers,
             BlockEntity::Pot(p) => &mut p.viewers,
+            BlockEntity::Jukebox(j) => &mut j.viewers,
         }
     }
 }

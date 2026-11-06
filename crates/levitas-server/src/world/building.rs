@@ -54,7 +54,9 @@ impl World {
                 || self.open_container(id, pos, clicked)
                 || self.interact(id, pos, clicked)
                 || self.use_farm_block(id, slot, pos, clicked)
-                || self.use_decorated_pot(id, slot, pos, clicked))
+                || self.use_decorated_pot(id, slot, pos, clicked)
+                || self.use_jukebox(id, slot, pos, clicked)
+                || self.use_flower_pot(id, slot, pos, clicked))
         {
             return self.ack(id, sequence);
         }
@@ -95,7 +97,11 @@ impl World {
                         self.update_neighbors(q);
                         self.check_falling(q, state);
                     }
-                    if let Some(&(q, _)) = blocks.first() {
+                    if let Some(&(q, placed)) = blocks.first() {
+                        // The placer's client plays the sound itself.
+                        let sound = crate::blocks::place_sound(placed);
+                        let at = [q.x, q.y, q.z].map(|v| f64::from(v) + 0.5);
+                        self.play_sound_at(&sound, at, 1.0, 0.8, Some(id));
                         self.sign_placed(id, q);
                         self.try_build_golem(q);
                     }
