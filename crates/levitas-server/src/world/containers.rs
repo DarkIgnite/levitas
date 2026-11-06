@@ -746,6 +746,19 @@ impl World {
             Some(open) if open.window == window => open.view,
             _ => return,
         };
+        // Curse of binding keeps worn armour on (creative players may take it off).
+        let bound = view == View::Inventory
+            && p.survival()
+            && (5..=8).contains(&slot)
+            && p.inventory.slots[slot as usize]
+                .enchants
+                .level_of("minecraft:binding_curse")
+                > 0;
+        if bound {
+            // The window contents carry the cursor too.
+            self.resync_window(id, window, view);
+            return;
+        }
         let layout = view.layout();
         let trades = match view {
             View::Merchant(target) => {

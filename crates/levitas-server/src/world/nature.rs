@@ -321,6 +321,61 @@ impl World {
         false
     }
 
+    /// Frost walker boots freeze the still water around a player walking on the ground:
+    /// within 2 blocks plus the level, water sources with air above become frosted ice.
+    pub(super) fn frost_walk(&mut self, id: i32) {
+        let Some(p) = self.players.get(&id) else {
+            return;
+        };
+        let level = p.inventory.slots[8]
+            .enchants
+            .level_of("minecraft:frost_walker");
+        if level == 0 {
+            return;
+        }
+        let radius = (2 + level).min(16) as i32;
+        let under = BlockPos::new(
+            p.pos[0].floor() as i32,
+            (p.pos[1] - 0.5).floor() as i32,
+            p.pos[2].floor() as i32,
+        );
+        for dx in -radius..=radius {
+            for dz in -radius..=radius {
+                if dx * dx + dz * dz > radius * radius {
+                    continue;
+                }
+                let pos = BlockPos::new(under.x + dx, under.y, under.z + dz);
+                let above = BlockPos::new(pos.x, pos.y + 1, pos.z);
+                if self.loaded_block(pos) != Some(block::WATER)
+                    || self.loaded_block(above) != Some(block::AIR)
+                {
+                    continue;
+                }
+                self.set_block_updating(pos, block::FROSTED_ICE);
+                let delay = 60 + u64::from(self.rng.below(60));
+                self.schedule(pos, block::FROSTED_ICE, delay);
+            }
+        }
+    }
+
+    /// Frosted ice cracks a little now and then, and melts back into water at the end.
+    pub(super) fn frosted_ice_tick(&mut self, pos: BlockPos, state: u16) {
+        if blocks::name(state) != "minecraft:frosted_ice" {
+            return;
+        }
+        let age: u8 = blocks::prop(state, "age")
+            .and_then(|a| a.parse().ok())
+            .unwrap_or(0);
+        if age >= 3 {
+            self.set_block_updating(pos, block::WATER);
+            return;
+        }
+        let older = blocks::with(state, "age", &(age + 1).to_string());
+        self.set_block_updating(pos, older);
+        let delay = 20 + u64::from(self.rng.below(20));
+        self.schedule(pos, older, delay);
+    }
+
     /// Every second: compasses tracking a lodestone of this dimension that is no longer
     /// there lose their target and spin, as in vanilla.
     pub(super) fn tick_lodestone_compasses(&mut self) {
@@ -605,6 +660,45 @@ mod tests {
             world.random_tick(grass, g);
         }
         assert_eq!(blocks::name(world.block(dirt)), "minecraft:grass_block");
+    }
+
+    #[test]
+    fn frost_walker_freezes_water_that_melts_again() {
+        let mut w = flat_world();
+        for x in -4..5 {
+            for z in -4..5 {
+                w.set_block(BlockPos::new(x, -61, z), block::WATER);
+            }
+        }
+        let id = next_entity_id();
+        let (tx, _rx) = tokio::sync::mpsc::channel(4096);
+        let profile = crate::connection::Profile {
+            uuid: 78,
+            name: "Skater".to_owned(),
+            properties: Vec::new(),
+        };
+        let mut p = Player::new(profile, tx, [0.5, -60.0, 0.5]);
+        let boots = ItemInfo::id_of("minecraft:diamond_boots").unwrap();
+        let mut b = Stack::new(boots, 1);
+        b.enchants.set(
+            crate::enchanting::enchantment_id("minecraft:frost_walker").unwrap(),
+            1,
+        );
+        p.inventory.slots[8] = b;
+        w.players.insert(id, p);
+        w.frost_walk(id);
+        assert_eq!(w.block(BlockPos::new(2, -61, 2)), block::FROSTED_ICE);
+        assert_eq!(
+            w.block(BlockPos::new(4, -61, 0)),
+            block::WATER,
+            "only within 3 blocks"
+        );
+        // Left alone, it cracks and melts back into water.
+        for _ in 0..400 {
+            w.tick += 1;
+            w.tick_scheduled();
+        }
+        assert_eq!(w.block(BlockPos::new(2, -61, 2)), block::WATER);
     }
 
     #[test]

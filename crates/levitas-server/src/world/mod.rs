@@ -1334,6 +1334,12 @@ impl World {
         };
         p.on_ground = on_ground;
         p.moved = true;
+        if on_ground && pos.is_some() {
+            self.frost_walk(id);
+        }
+        let Some(p) = self.players.get_mut(&id) else {
+            return;
+        };
 
         let chunk = (
             (p.pos[0] / 16.0).floor() as i32,

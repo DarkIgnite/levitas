@@ -396,8 +396,9 @@ Known gaps are listed under each phase instead of being hidden.
 - [x] Experience: orbs, levels, sources. Orbs (`world/experience.rs`) drift to players
       within 8 blocks; mobs killed by players (1-3 for animals, 5 for monsters) and ores
       mined without silk touch give experience; levels follow the wiki's costs, are
-      saved, and dying drops 7 per level (at most 100). `/xp add|query`. Missing:
-      experience from smelting, breeding, fishing and trading.
+      saved, and dying drops 7 per level (at most 100). `/xp add|query`. Smelting
+      (the recipe's experience, paid when the result is taken), breeding, fishing and
+      trading give experience too.
 - [x] Enchanting table and bookshelves, enchantment effects. The table
       (`world/enchanting_table.rs`, `enchanting.rs`) counts up to 15 bookshelves,
       offers three slots by the wiki's costs, hints at what each gives, and picks
@@ -406,8 +407,12 @@ Known gaps are listed under each phase instead of being hidden.
       sent to clients and saved. Working effects: sharpness, smite, bane of
       arthropods, knockback, fire aspect, sweeping edge, efficiency, unbreaking,
       fortune, silk touch, looting, the protection family, feather falling,
-      respiration, power, flame, infinity and mending. Missing: thorns, punch,
-      frost walker, depth strider (client side), aqua affinity, curses.
+      respiration, power, flame, infinity, mending, thorns (15% a level, 1 to 4 back
+      at melee attackers), punch, frost walker (freezing still water into frosted ice
+      that cracks and melts), curse of binding and curse of vanishing. Enchantments that
+      act through attributes (efficiency, aqua affinity, depth strider, respiration,
+      swift sneak, blast and fire protection, sweeping edge) are sent to each player as
+      attribute modifiers read from their definitions (`world/attributes.rs`).
 - [x] Anvil (repair, rename, combine), grindstone. Anvils (`repair.rs`) repair with
       materials or a second item, merge enchantments from items and books by the
       wiki's rules, charge levels with the prior work penalty, refuse 40 levels or

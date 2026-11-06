@@ -535,6 +535,7 @@ impl World {
                 potion: None,
                 // A stray's arrows slow what they hit.
                 slowness: mob.kind == MobKind::Stray,
+                punch: 0,
             },
         );
         mob.attack_cooldown = SKELETON_SHOT_TICKS;

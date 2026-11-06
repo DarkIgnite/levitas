@@ -42,6 +42,8 @@ pub struct Shot {
     pub potion: Option<u8>,
     /// Whether the arrow slows what it hits for 30 seconds, as a stray's does.
     pub slowness: bool,
+    /// The bow's punch level: extra knockback.
+    pub punch: u32,
 }
 
 pub struct Arrow {
@@ -56,6 +58,7 @@ pub struct Arrow {
     flaming: bool,
     potion: Option<u8>,
     slowness: bool,
+    punch: u32,
     stuck: Option<u32>,
     age: u32,
 }
@@ -83,6 +86,7 @@ impl World {
             flaming,
             potion,
             slowness,
+            punch,
         } = shot;
         let length = (dir[0] * dir[0] + dir[1] * dir[1] + dir[2] * dir[2])
             .sqrt()
@@ -106,6 +110,7 @@ impl World {
             flaming,
             potion,
             slowness,
+            punch,
             stuck: None,
             age: 0,
         };
@@ -267,7 +272,8 @@ impl World {
                     self.ignite_player(id, 100);
                 }
                 self.damage_from(id, damage, Damage::Arrow(shooter_name), Some(arrow.shooter));
-                self.push_player(id, [away[0] * 0.3, 0.1, away[1] * 0.3]);
+                let punch = 0.3 + 0.6 * f64::from(arrow.punch);
+                self.push_player(id, [away[0] * punch, 0.1, away[1] * punch]);
                 if arrow.slowness {
                     self.add_effect(id, stray_slowness());
                 }
@@ -294,6 +300,12 @@ impl World {
                         1.1,
                         None,
                     );
+                }
+                if arrow.punch > 0 {
+                    let punch = 0.6 * f64::from(arrow.punch);
+                    if let Some(m) = self.mobs.get_mut(&id) {
+                        m.push([away[0] * punch, 0.1, away[1] * punch]);
+                    }
                 }
                 if arrow.flaming {
                     self.ignite_mob(id, 100);
@@ -447,6 +459,7 @@ impl World {
             flaming: bow.level_of("minecraft:flame") > 0,
             potion,
             slowness: false,
+            punch: bow.level_of("minecraft:punch"),
         };
         self.shoot_arrow(id, true, shot);
     }
@@ -557,6 +570,7 @@ mod tests {
             flaming: false,
             potion: Some(swiftness),
             slowness: false,
+            punch: 0,
             stuck: None,
             age: 0,
         };
@@ -581,6 +595,7 @@ mod tests {
             flaming: false,
             potion: None,
             slowness: true,
+            punch: 0,
             stuck: None,
             age: 0,
         };
@@ -622,6 +637,7 @@ mod tests {
             flaming: false,
             potion: Some(slowness),
             slowness: false,
+            punch: 0,
             stuck: None,
             age: 0,
         };

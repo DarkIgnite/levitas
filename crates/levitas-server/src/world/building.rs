@@ -367,6 +367,7 @@ impl World {
                 self.fire_tick(tick.pos, state);
             }
             self.composter_tick(tick.pos, state);
+            self.frosted_ice_tick(tick.pos, state);
             if crate::blocks::redstone::is_component(state) {
                 self.redstone_tick(tick.pos, state);
             }

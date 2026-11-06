@@ -336,10 +336,45 @@ impl World {
         if absorbed > 0.0 {
             self.send_absorption(id);
         }
+        // Thorns hurts whoever struck in melee.
+        if let Some(attacker) =
+            source.filter(|_| matches!(kind, Damage::Mob(_) | Damage::Player(_)))
+        {
+            self.thorns(id, attacker);
+        }
         if dead {
             self.die(id, kind);
         }
         true
+    }
+
+    /// Each armour piece with thorns may strike back: a 15% chance a level, 1 to 4
+    /// damage (the level less 10 above level 10).
+    fn thorns(&mut self, id: i32, attacker: i32) {
+        let levels: Vec<u32> = [5, 6, 7, 8]
+            .iter()
+            .map(|&slot| {
+                self.players[&id].inventory.slots[slot]
+                    .enchants
+                    .level_of("minecraft:thorns")
+            })
+            .filter(|&l| l > 0)
+            .collect();
+        for level in levels {
+            if self.rng.f64() >= 0.15 * f64::from(level) {
+                continue;
+            }
+            let damage = if level > 10 {
+                (level - 10) as f32
+            } else {
+                1.0 + self.rng.below(4) as f32
+            };
+            if self.mobs.contains_key(&attacker) {
+                self.hit_mob(attacker, damage, Some(id), [0.0, 0.0], "minecraft:thorns");
+            } else if attacker != id && self.players.contains_key(&attacker) {
+                self.damage_from(attacker, damage, Damage::Magic, None);
+            }
+        }
     }
 
     /// What is left of `amount` after the player's armor, which wears down a little.
@@ -467,7 +502,12 @@ impl World {
         let dropped = if keep {
             Vec::new()
         } else {
-            p.inventory.drain()
+            // Curse of vanishing: gone instead of dropped.
+            p.inventory
+                .drain()
+                .into_iter()
+                .filter(|s| s.enchants.level_of("minecraft:vanishing_curse") == 0)
+                .collect()
         };
         let content = p.inventory.content_packet();
 
@@ -1006,5 +1046,88 @@ mod tests {
         // A blank map of the grid square the player stands in.
         let map = world.map_data(held.map_id.unwrap()).unwrap();
         assert_eq!((map.center, map.scale), ([0, 0], 0));
+    }
+}
+
+#[cfg(test)]
+mod curse_tests {
+    use super::*;
+    use crate::connection::Profile;
+
+    fn world_with(id: i32) -> World {
+        let dir = std::env::temp_dir().join(format!(
+            "levitas-curses-{}-{}",
+            std::process::id(),
+            next_entity_id()
+        ));
+        let (mut w, _) = World::new(
+            dir,
+            NewWorld {
+                kind: WorldKind::Flat,
+                seed: Some(0),
+            },
+        );
+        w.chunk(0, 0);
+        let (tx, _rx) = tokio::sync::mpsc::channel(4096);
+        let profile = Profile {
+            uuid: 5,
+            name: "Cursed".to_owned(),
+            properties: Vec::new(),
+        };
+        w.players
+            .insert(id, Player::new(profile, tx, [0.5, -60.0, 0.5]));
+        w
+    }
+
+    fn cursed(item: &str, curse: &str) -> Stack {
+        let mut s = Stack::new(ItemInfo::id_of(item).unwrap(), 1);
+        s.enchants
+            .set(crate::enchanting::enchantment_id(curse).unwrap(), 1);
+        s
+    }
+
+    #[test]
+    fn vanishing_items_are_gone_on_death_and_bound_armour_stays_on() {
+        let id = 1;
+        let mut w = world_with(id);
+        let p = w.players.get_mut(&id).unwrap();
+        p.inventory.slots[10] = cursed("minecraft:diamond_sword", "minecraft:vanishing_curse");
+        p.inventory.slots[11] = Stack::new(ItemInfo::id_of("minecraft:dirt").unwrap(), 3);
+        p.inventory.slots[5] = cursed("minecraft:iron_helmet", "minecraft:binding_curse");
+        // Taking the bound helmet off is refused in survival.
+        w.container_click(id, 0, 5, 0, 0, Vec::new(), Stack::EMPTY);
+        assert!(!w.players[&id].inventory.slots[5].is_empty());
+        // Dying drops the dirt but not the vanishing sword.
+        let before = w.items.len();
+        w.die(id, Damage::Kill);
+        let sword = ItemInfo::id_of("minecraft:diamond_sword").unwrap();
+        let dropped: Vec<i32> = w.items.values().map(|i| i.stack().item).collect();
+        assert!(w.items.len() > before);
+        assert!(!dropped.contains(&sword));
+    }
+
+    #[test]
+    fn thorns_strikes_back_at_a_mob() {
+        let id = 1;
+        let mut w = world_with(id);
+        let mut chest = cursed("minecraft:iron_chestplate", "minecraft:thorns");
+        // Thorns X: a 150% chance, so it always strikes.
+        chest.enchants.set(
+            crate::enchanting::enchantment_id("minecraft:thorns").unwrap(),
+            10,
+        );
+        w.players.get_mut(&id).unwrap().inventory.slots[6] = chest;
+        let zid = next_entity_id();
+        w.mobs.insert(
+            zid,
+            super::super::mobs::Mob::new(
+                super::super::mobs::MobKind::Zombie,
+                [1.5, -60.0, 0.5],
+                &mut w.rng,
+            ),
+        );
+        let before = w.mobs[&zid].health;
+        w.damage_from(id, 2.0, Damage::Mob("Zombie"), Some(zid));
+        assert!(w.mobs[&zid].health < before);
     }
 }
