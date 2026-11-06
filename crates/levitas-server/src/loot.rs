@@ -247,6 +247,47 @@ impl LootTables {
             "minecraft:set_potion" => {
                 stack.potion = function["id"].as_str().and_then(crate::potions::id);
             }
+            // One of the listed effects, its duration in seconds.
+            "minecraft:set_stew_effect" => {
+                let effects = array(&function["effects"]);
+                if !effects.is_empty() {
+                    let e = &effects[ctx.rng.below(effects.len() as u32) as usize];
+                    let id = e["type"].as_str().and_then(|n| {
+                        levitas_registry::mob_effect::NAMES
+                            .iter()
+                            .position(|&x| x == n)
+                    });
+                    if let Some(id) = id {
+                        let seconds = int_number(&e["duration"], ctx.rng).max(1);
+                        stack.stew = Some((id as u8, seconds * 20));
+                    }
+                }
+            }
+            "minecraft:set_ominous_bottle_amplifier" => {
+                stack.ominous = Some(int_number(&function["amplifier"], ctx.rng).clamp(0, 4) as u8);
+            }
+            // A random instrument of the tag.
+            "minecraft:set_instrument" => {
+                let tag = function["options"].as_str().unwrap_or_default();
+                let tag = tag.strip_prefix('#').unwrap_or(tag);
+                let members = levitas_registry::TagRegistry::get("minecraft:instrument")
+                    .map(|t| t.members(tag).to_vec())
+                    .unwrap_or_default();
+                if !members.is_empty() {
+                    let pick = members[ctx.rng.below(members.len() as u32) as usize];
+                    stack.instrument = Some(pick as u8);
+                }
+            }
+            "minecraft:set_enchantments" => {
+                if let Some(map) = function["enchantments"].as_object() {
+                    for (name, level) in map {
+                        if let Some(id) = enchanting::enchantment_id(name) {
+                            let level = int_number(level, ctx.rng).max(1) as u32;
+                            self.enchant(stack, id, level);
+                        }
+                    }
+                }
+            }
             "minecraft:enchant_randomly" => {
                 let picked = enchanting::random_for_loot(ctx.rng, stack.item, &function["options"]);
                 if let Some((id, level)) = picked {
@@ -1023,5 +1064,42 @@ mod tests {
             books > 0 && enchanted_gear > 0 && worn > 0,
             "{books} {enchanted_gear} {worn}"
         );
+    }
+
+    #[test]
+    fn chest_loot_sets_stew_effects_bottle_levels_and_horns() {
+        let loot = LootTables::load();
+        let mut found = (false, false, false);
+        for seed in 1..400 {
+            for table in [
+                "minecraft:chests/ancient_city_ice_box",
+                "minecraft:chests/trial_chambers/reward_ominous_common",
+                "minecraft:chests/pillager_outpost",
+            ] {
+                let mut slots = [Stack::EMPTY; 27];
+                assert!(loot.fill(table, seed, &mut slots));
+                for s in slots.iter().filter(|s| !s.is_empty()) {
+                    let name = ItemInfo::get(s.item).unwrap().name;
+                    if name == "minecraft:suspicious_stew" {
+                        let (_, ticks) = s.stew.expect("stew has an effect");
+                        assert!((20..=400).contains(&ticks));
+                        found.0 = true;
+                    }
+                    if name == "minecraft:ominous_bottle" {
+                        assert!((2..=4).contains(&s.ominous.expect("bottle level")));
+                        found.1 = true;
+                    }
+                    if name == "minecraft:goat_horn" {
+                        assert!(s.instrument.is_some());
+                        found.2 = true;
+                    }
+                }
+            }
+        }
+        assert!(found.0 && found.1 && found.2, "{found:?}");
+        // They are saved and read back.
+        let mut stew = Stack::new(ItemInfo::id_of("minecraft:suspicious_stew").unwrap(), 1);
+        stew.stew = Some((levitas_registry::mob_effect::NIGHT_VISION as u8, 160));
+        assert_eq!(Stack::from_nbt(&stew.to_nbt()), stew);
     }
 }

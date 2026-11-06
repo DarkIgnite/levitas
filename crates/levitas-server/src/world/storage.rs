@@ -777,6 +777,9 @@ impl World {
                     self.loot.fill(table, seed, entity.items_mut())
                 });
                 self.block_entities.insert(pos, entity);
+                if rolled {
+                    self.draw_loot_maps(pos);
+                }
                 rolled
             }
             Some(_) => {

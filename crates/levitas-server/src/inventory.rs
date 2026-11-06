@@ -52,6 +52,24 @@ pub struct Stack {
     pub map_post: Option<u8>,
     /// An explorer map's destination marker (the `minecraft:map_decorations` component).
     pub map_target: Option<MapTarget>,
+    /// A suspicious stew's effect and its duration in ticks (the
+    /// `minecraft:suspicious_stew_effects` component, one effect).
+    pub stew: Option<(u8, i32)>,
+    /// An ominous bottle's Bad Omen level less one (`minecraft:ominous_bottle_amplifier`).
+    pub ominous: Option<u8>,
+    /// A goat horn's sound, by `minecraft:instrument` registry ID.
+    pub instrument: Option<u8>,
+}
+
+fn effect_name(id: u8) -> &'static str {
+    levitas_registry::mob_effect::NAMES
+        .get(usize::from(id))
+        .copied()
+        .unwrap_or("minecraft:speed")
+}
+
+fn instrument_registry() -> Option<&'static SyncedRegistry> {
+    SyncedRegistry::get("minecraft:instrument")
 }
 
 /// The marker an explorer map shows where its structure is: a map decoration type and
@@ -153,6 +171,9 @@ impl Stack {
         map_id: None,
         map_post: None,
         map_target: None,
+        stew: None,
+        ominous: None,
+        instrument: None,
     };
 
     pub fn new(item: i32, count: i32) -> Self {
@@ -186,6 +207,9 @@ impl Stack {
             && self.map_id == other.map_id
             && self.map_post == other.map_post
             && self.map_target == other.map_target
+            && self.stew == other.stew
+            && self.ominous == other.ominous
+            && self.instrument == other.instrument
     }
 
     pub fn is_empty(&self) -> bool {
@@ -259,6 +283,25 @@ impl Stack {
         }
         if let Some(target) = self.map_target {
             components.insert("minecraft:map_decorations", target.to_nbt());
+        }
+        if let Some((effect, duration)) = self.stew {
+            components.insert(
+                "minecraft:suspicious_stew_effects",
+                vec![Tag::Compound(
+                    Compound::new()
+                        .with("id", effect_name(effect))
+                        .with("duration", duration),
+                )],
+            );
+        }
+        if let Some(amp) = self.ominous {
+            components.insert("minecraft:ominous_bottle_amplifier", i32::from(amp));
+        }
+        if let Some(name) = self
+            .instrument
+            .and_then(|i| instrument_registry()?.entries.get(usize::from(i)).copied())
+        {
+            components.insert("minecraft:instrument", name);
         }
         if !components.is_empty() {
             nbt.insert("components", components);
@@ -356,6 +399,23 @@ impl Stack {
             map_target: components
                 .and_then(|c| c.compound("minecraft:map_decorations"))
                 .and_then(MapTarget::from_nbt),
+            stew: components
+                .and_then(|c| c.list("minecraft:suspicious_stew_effects"))
+                .and_then(|l| l.first()?.as_compound())
+                .and_then(|e| {
+                    let name = e.str("id")?;
+                    let id = levitas_registry::mob_effect::NAMES
+                        .iter()
+                        .position(|&n| n == name)?;
+                    Some((id as u8, e.int("duration").unwrap_or(160) as i32))
+                }),
+            ominous: components
+                .and_then(|c| c.int("minecraft:ominous_bottle_amplifier"))
+                .map(|a| a.clamp(0, 4) as u8),
+            instrument: components
+                .and_then(|c| c.str("minecraft:instrument"))
+                .and_then(|n| instrument_registry()?.id_of(n))
+                .map(|i| i as u8),
         }
     }
 }
@@ -410,6 +470,9 @@ fn write_components(packet: Writer, stack: &Stack) -> Writer {
     let mapped = stack.map_id.is_some();
     let processing = stack.map_post.is_some();
     let targeted = stack.map_target.is_some();
+    let stewed = stack.stew.is_some();
+    let ominous = stack.ominous.is_some();
+    let horned = stack.instrument.is_some();
     let added = i32::from(damaged)
         + i32::from(processing)
         + i32::from(dyed)
@@ -420,7 +483,10 @@ fn write_components(packet: Writer, stack: &Stack) -> Writer {
         + i32::from(named)
         + i32::from(lodestone)
         + i32::from(mapped)
-        + i32::from(targeted);
+        + i32::from(targeted)
+        + i32::from(stewed)
+        + i32::from(ominous)
+        + i32::from(horned);
     let mut packet = packet.varint(added).varint(0);
     if damaged {
         packet = packet.varint(component::DAMAGE).varint(stack.damage);
@@ -486,6 +552,24 @@ fn write_components(packet: Writer, stack: &Stack) -> Writer {
         packet = packet
             .varint(component::MAP_DECORATIONS)
             .bytes(&levitas_nbt::to_network(&Tag::Compound(target.to_nbt())));
+    }
+    if let Some((effect, duration)) = stack.stew {
+        packet = packet
+            .varint(component::SUSPICIOUS_STEW_EFFECTS)
+            .varint(1)
+            .varint(i32::from(effect))
+            .varint(duration);
+    }
+    if let Some(amp) = stack.ominous {
+        packet = packet
+            .varint(component::OMINOUS_BOTTLE_AMPLIFIER)
+            .varint(i32::from(amp));
+    }
+    if let Some(i) = stack.instrument {
+        // A registry holder: the ID plus one.
+        packet = packet
+            .varint(component::INSTRUMENT)
+            .varint(i32::from(i) + 1);
     }
     packet
 }

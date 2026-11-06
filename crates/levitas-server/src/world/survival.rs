@@ -818,6 +818,17 @@ impl World {
                 levitas_registry::Effect {
                     id: levitas_registry::mob_effect::BAD_OMEN,
                     duration: 120_000,
+                    amplifier: stack.ominous.unwrap_or(0),
+                },
+            );
+        }
+        // A suspicious stew gives its effect.
+        if let Some((effect, duration)) = stack.stew {
+            self.add_effect(
+                id,
+                levitas_registry::Effect {
+                    id: i32::from(effect),
+                    duration,
                     amplifier: 0,
                 },
             );

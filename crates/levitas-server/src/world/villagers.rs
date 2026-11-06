@@ -809,8 +809,49 @@ fn explorer_target(item: i32) -> Option<(&'static str, i32)> {
     let name = ItemInfo::get(item)?.name.strip_prefix("minecraft:")?;
     EXPLORER_MAPS
         .iter()
+        .chain(LOOT_MAPS)
         .find(|(n, _, _)| *n == name)
         .map(|&(_, structure, decoration)| (structure, decoration))
+}
+
+/// Maps found in structure chests, with what they lead to. Treasure maps are drawn
+/// closer in (scale 1). Abandoned camp maps have no structure Levitas generates, so
+/// they come out of no chest, as vanilla drops a map it cannot draw.
+const LOOT_MAPS: &[(&str, &str, i32)] = &[
+    (
+        "buried_treasure_map",
+        "buried_treasure",
+        map_decoration::RED_X,
+    ),
+    (
+        "buried_ancient_city_map",
+        "ancient_city",
+        map_decoration::ANCIENT_CITY,
+    ),
+    (
+        "buried_mineshaft_map",
+        "mineshaft",
+        map_decoration::MINESHAFT,
+    ),
+    (
+        "desert_pyramid_map",
+        "desert_pyramid",
+        map_decoration::DESERT_PYRAMID,
+    ),
+    (
+        "warm_ocean_ruins_map",
+        "ocean_ruin_warm",
+        map_decoration::OCEAN_RUIN_WARM,
+    ),
+];
+
+/// Whether an item is one of 26.3's explorer or treasure map items.
+pub(super) fn is_explorer_map(item: i32) -> bool {
+    ItemInfo::get(item).is_some_and(|i| i.name != "minecraft:filled_map")
+        && TagRegistry::get("minecraft:item").is_some_and(|t| {
+            t.members("minecraft:clonable_maps")
+                .contains(&i64::from(item))
+        })
 }
 
 /// How far explorer maps look for their structure, in chunks.
@@ -1167,41 +1208,72 @@ impl World {
     /// with the structure. A trade whose structure is nowhere near is dropped, as vanilla
     /// does; so are they all outside the Overworld.
     pub(super) fn draw_explorer_maps(&mut self, v: &mut Villager, at: [f64; 3]) {
-        let overworld = self.dimension == Dimension::Overworld;
         let mut i = 0;
         while i < v.offers.len() {
             let sell = v.offers[i].sell;
-            let Some((structure, decoration)) = explorer_target(sell.item) else {
-                i += 1;
-                continue;
-            };
-            if sell.map_id.is_some() {
+            if explorer_target(sell.item).is_none() || sell.map_id.is_some() {
                 i += 1;
                 continue;
             }
-            let found = overworld
-                .then(|| {
-                    self.terrain.structure_near(
-                        structure,
-                        at[0].floor() as i32,
-                        at[2].floor() as i32,
-                        EXPLORER_SEARCH,
-                    )
-                })
-                .flatten();
-            let Some([x, _, z]) = found else {
+            let mut stack = sell;
+            if self.draw_explorer_map(&mut stack, at, 2) {
+                v.offers[i].sell = stack;
+                i += 1;
+            } else {
                 v.offers.remove(i);
-                continue;
-            };
-            let id = self.create_map(x, z, 2);
-            let sell = &mut v.offers[i].sell;
-            sell.map_id = Some(id);
-            sell.map_target = Some(crate::inventory::MapTarget {
-                decoration: decoration as u8,
-                x,
-                z,
-            });
-            i += 1;
+            }
+        }
+    }
+
+    /// Draws an explorer or treasure map: finds the nearest of its structure within 100
+    /// chunks (in the Overworld), starts a map of `scale` there and marks it. Returns
+    /// false when there is no such structure about.
+    pub(super) fn draw_explorer_map(&mut self, stack: &mut Stack, at: [f64; 3], scale: u8) -> bool {
+        let Some((structure, decoration)) = explorer_target(stack.item) else {
+            return false;
+        };
+        if self.dimension != Dimension::Overworld {
+            return false;
+        }
+        let found = self.terrain.structure_near(
+            structure,
+            at[0].floor() as i32,
+            at[2].floor() as i32,
+            EXPLORER_SEARCH,
+        );
+        let Some([x, _, z]) = found else {
+            return false;
+        };
+        stack.map_id = Some(self.create_map(x, z, scale));
+        stack.map_target = Some(crate::inventory::MapTarget {
+            decoration: decoration as u8,
+            x,
+            z,
+        });
+        true
+    }
+
+    /// The maps a freshly filled container got from its loot table are drawn now;
+    /// those that cannot be are taken out again.
+    pub(super) fn draw_loot_maps(&mut self, pos: BlockPos) {
+        let Some(entity) = self.block_entities.get(&pos) else {
+            return;
+        };
+        let pending: Vec<(usize, Stack)> = entity
+            .stacks()
+            .iter()
+            .enumerate()
+            .filter(|(_, s)| !s.is_empty() && s.map_id.is_none() && is_explorer_map(s.item))
+            .map(|(i, s)| (i, *s))
+            .collect();
+        let at = [f64::from(pos.x), f64::from(pos.y), f64::from(pos.z)];
+        for (slot, mut stack) in pending {
+            let treasure = ItemInfo::get(stack.item)
+                .is_some_and(|i| i.name == "minecraft:buried_treasure_map");
+            let drawn = self.draw_explorer_map(&mut stack, at, if treasure { 1 } else { 2 });
+            if let Some(entity) = self.block_entities.get_mut(&pos) {
+                entity.stacks_mut()[slot] = if drawn { stack } else { Stack::EMPTY };
+            }
         }
     }
 
@@ -1953,5 +2025,41 @@ mod tests {
         assert_eq!(v.trades()[0].buy.count, base);
         let saved = v.offers[0].to_nbt();
         assert_eq!(Offer::from_nbt(&saved).unwrap().demand, v.offers[0].demand);
+    }
+
+    #[test]
+    fn treasure_maps_in_chests_need_their_structure() {
+        let dir = std::env::temp_dir().join(format!("levitas-treasure-{}", std::process::id()));
+        let (mut w, _) = World::new(
+            dir.clone(),
+            NewWorld {
+                kind: WorldKind::Flat,
+                seed: Some(0),
+            },
+        );
+        w.chunk(0, 0);
+        let pos = BlockPos::new(2, -60, 2);
+        let nbt = Compound::new()
+            .with("id", "minecraft:chest")
+            .with("x", 2)
+            .with("y", -60)
+            .with("z", 2)
+            .with("LootTable", "minecraft:chests/shipwreck_map")
+            .with("LootTableSeed", 5i64);
+        assert!(w.add_block_entity(&nbt, 0, 0));
+        // A flat world has no buried treasure: the map is not left in the chest.
+        let maps = w.block_entities[&pos]
+            .stacks()
+            .iter()
+            .filter(|s| is_explorer_map(s.item))
+            .count();
+        assert_eq!(maps, 0);
+        assert!(is_explorer_map(
+            ItemInfo::id_of("minecraft:buried_treasure_map").unwrap()
+        ));
+        assert!(!is_explorer_map(
+            ItemInfo::id_of("minecraft:filled_map").unwrap()
+        ));
+        let _ = std::fs::remove_dir_all(dir);
     }
 }
