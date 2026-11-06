@@ -877,6 +877,7 @@ impl Mob {
             cube_size: (self.kind.family() == MobKind::MagmaCube)
                 .then_some(i32::from(self.slime_size)),
             killed_by_player: self.killed_by_player,
+            ..EntityProps::default()
         }
     }
 

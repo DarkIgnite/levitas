@@ -659,6 +659,7 @@ impl World {
             || self.fill_bottle(id, hand)
             || self.start_drawing(id, hand)
             || self.throw_held(id, hand)
+            || self.use_fishing_rod(id, hand)
             || self.throw_eye(id, hand)
             || self.use_spyglass(id, hand)
             || self.open_empty_map(id, hand)

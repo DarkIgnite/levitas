@@ -113,6 +113,14 @@ fn main() {
     embed_json_dir(
         &data,
         &out_dir,
+        "loot_table/gameplay",
+        "GAMEPLAY_LOOT_JSON",
+        "Gameplay loot tables as JSON (fishing, ...): `minecraft:<path under gameplay/>` to loot tables.",
+        &mut out,
+    );
+    embed_json_dir(
+        &data,
+        &out_dir,
         "predicate",
         "PREDICATES_JSON",
         "Named loot predicates as JSON (`minecraft:tool/can_silk_touch`, ...).",

@@ -21,6 +21,8 @@ pub struct LootTables {
     entities: HashMap<String, Value>,
     /// Chest tables, keyed `minecraft:<path under chests/>`.
     chests: HashMap<String, Value>,
+    /// Gameplay tables (fishing, ...), keyed `minecraft:<path under gameplay/>`.
+    gameplay: HashMap<String, Value>,
     item_ids: HashMap<&'static str, i32>,
 }
 
@@ -46,6 +48,10 @@ pub struct EntityProps {
     /// A slime's or magma cube's size as vanilla counts it: 1, 2 or 4.
     pub cube_size: Option<i32>,
     pub killed_by_player: bool,
+    /// A fishing bobber in open water (for treasure).
+    pub in_open_water: bool,
+    /// Luck (Luck of the Sea): each point shifts entries by their `quality`.
+    pub luck: i32,
 }
 
 impl LootTables {
@@ -56,6 +62,9 @@ impl LootTables {
             serde_json::from_str(ENTITY_LOOT_JSON).expect("entity loot tables are valid JSON");
         let chests: serde_json::Map<String, Value> =
             serde_json::from_str(CHEST_LOOT_JSON).expect("chest loot tables are valid JSON");
+        let gameplay: serde_json::Map<String, Value> =
+            serde_json::from_str(levitas_registry::GAMEPLAY_LOOT_JSON)
+                .expect("gameplay loot tables are valid JSON");
         let item_ids = levitas_registry::ITEMS
             .iter()
             .enumerate()
@@ -72,6 +81,7 @@ impl LootTables {
             blocks: tidy(blocks),
             entities: tidy(entities),
             chests: tidy(chests),
+            gameplay: tidy(gameplay),
             item_ids,
         }
     }
@@ -93,6 +103,16 @@ impl LootTables {
         let mut drops = Vec::new();
         self.roll(table, ctx, &mut drops);
         pairs(drops)
+    }
+
+    /// What a fishing rod reels in, from `gameplay/fishing`, as whole stacks (treasure
+    /// comes enchanted and worn).
+    pub fn fishing(&self, ctx: &mut LootContext) -> Vec<Stack> {
+        let mut catch = Vec::new();
+        if let Some(table) = self.gameplay.get("minecraft:fishing") {
+            self.roll(table, ctx, &mut catch);
+        }
+        catch
     }
 
     /// Items dropped by a mob of `entity` type (e.g. `minecraft:cow`) when it dies.
@@ -146,6 +166,9 @@ impl LootTables {
         }
         if let Some(chest) = path.strip_prefix("chests/") {
             return self.chests.get(&format!("minecraft:{chest}"));
+        }
+        if let Some(gameplay) = path.strip_prefix("gameplay/") {
+            return self.gameplay.get(&format!("minecraft:{gameplay}"));
         }
         let block = path.strip_prefix("blocks/")?;
         self.blocks.get(&format!("minecraft:{block}"))
@@ -460,8 +483,10 @@ fn expand<'a>(entry: &'a Value, ctx: &mut LootContext, out: &mut Vec<(&'a Value,
             true
         }
         _ => {
-            let weight = entry["weight"].as_u64().unwrap_or(1) as u32;
-            out.push((entry, weight));
+            // Luck moves the weight by the entry's quality, as vanilla's fishing does.
+            let weight = entry["weight"].as_i64().unwrap_or(1)
+                + entry["quality"].as_i64().unwrap_or(0) * i64::from(ctx.entity.luck);
+            out.push((entry, weight.max(0) as u32));
             true
         }
     }
@@ -585,6 +610,9 @@ fn entity_matches(predicate: &Value, entity: &EntityProps) -> bool {
             })
         }),
         "type_specific" => match wanted["type"].as_str() {
+            Some("minecraft:fishing_hook") => wanted
+                .get("in_open_water")
+                .is_none_or(|w| w.as_bool() == Some(entity.in_open_water)),
             Some("minecraft:sheep") => wanted
                 .get("sheared")
                 .is_none_or(|s| s.as_bool() == Some(entity.sheared)),

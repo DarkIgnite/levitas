@@ -378,6 +378,11 @@ their server.
   chunks are not loaded; a wave is over only when `raiders` and `away` are both empty. `rejoin_raid` runs in
   `load_mobs`, `raider_unloaded` in `unload_mobs`. The players who killed raiders (the heroes) are not saved.
 
+- Fishing (2026-11-06): `world/fishing.rs`, `World::bobbers`. Entity data 8 (hooked entity + 1, VarInt) and 9
+  (catchable, Boolean) follow the 26.3 wiki. `LootTables::fishing` rolls the gameplay tables, now embedded as
+  `GAMEPLAY_LOOT_JSON`; entry `quality` times `EntityProps.luck` changes weights, and the
+  `minecraft:type_specific/fishing_hook` `in_open_water` condition reads `EntityProps.in_open_water`.
+
 
 ## 9. Testing pattern
 

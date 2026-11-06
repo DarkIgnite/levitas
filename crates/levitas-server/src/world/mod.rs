@@ -30,6 +30,7 @@ mod falling;
 mod farming;
 mod fire;
 mod fireballs;
+mod fishing;
 mod fluids;
 mod golems;
 mod hanging;
@@ -656,6 +657,8 @@ struct World {
     fireballs: HashMap<i32, fireballs::Fireball>,
     /// Ender pearls, snowballs and eggs in flight.
     thrown: HashMap<i32, thrown::Thrown>,
+    /// Fishing bobbers out, by entity ID.
+    bobbers: HashMap<i32, fishing::Bobber>,
     pub area_effect_clouds: HashMap<i32, clouds::AreaEffectCloud>,
     pub raids: HashMap<u32, raids::Raid>,
     pub evoker_fangs: HashMap<i32, raids::EvokerFang>,
@@ -787,6 +790,7 @@ impl World {
             tnt: HashMap::new(),
             fireballs: HashMap::new(),
             thrown: HashMap::new(),
+            bobbers: HashMap::new(),
             area_effect_clouds: HashMap::new(),
             raids: HashMap::new(),
             evoker_fangs: HashMap::new(),
@@ -1201,6 +1205,7 @@ impl World {
         packets.extend(self.arrow_packets());
         packets.extend(self.fireball_packets());
         packets.extend(self.thrown_packets());
+        packets.extend(self.bobber_packets());
         packets.extend(self.area_effect_cloud_packets());
         packets.extend(self.evoker_fangs_packets());
         packets.extend(self.boat_packets());
@@ -1634,6 +1639,7 @@ impl World {
         self.tick_arrows();
         self.tick_fireballs();
         self.tick_thrown();
+        self.tick_bobbers();
         self.tick_area_effect_clouds();
         self.tick_boats();
         self.tick_minecarts();
