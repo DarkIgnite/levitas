@@ -67,6 +67,8 @@ pub struct Furnace {
     cook: i32,
     cook_total: i32,
     viewers: HashSet<i32>,
+    /// Experience earned by what was cooked, waiting for a player to take the result.
+    pub experience: f32,
 }
 
 impl BlockEntity {
@@ -119,6 +121,10 @@ impl BlockEntity {
             nbt.insert("lit_time_remaining", short(f.burn_left));
             nbt.insert("lit_total_time", short(f.burn_total));
             nbt.insert("cooking_time_spent", short(f.cook));
+            if f.experience > 0.0 {
+                // Vanilla keeps the recipes used instead; Levitas keeps the sum.
+                nbt.insert("levitas:experience", f.experience);
+            }
             nbt.insert("cooking_total_time", short(f.cook_total));
         }
         if let BlockEntity::Campfire(c) = self {
@@ -199,6 +205,7 @@ impl BlockEntity {
             f.burn_left = int("lit_time_remaining", "BurnTime");
             f.burn_total = int("lit_total_time", "BurnTime");
             f.cook = int("cooking_time_spent", "CookTime");
+            f.experience = nbt.float("levitas:experience").unwrap_or(0.0).max(0.0) as f32;
             f.cook_total = int("cooking_total_time", "CookTimeTotal");
         }
         if let BlockEntity::Campfire(c) = &mut entity {
@@ -676,6 +683,28 @@ impl World {
                 open.grid[..1].copy_from_slice(&slots[..1]);
             }
             View::Chest(..) | View::Furnace(..) | View::DoubleChest(..) | View::Brewing(..) => {
+                // Taking a furnace's result pays out the experience its cooking earned.
+                let mut earned = 0.0;
+                if let View::Furnace(pos, _) = view {
+                    if let Some(BlockEntity::Furnace(f)) = self.block_entities.get_mut(&pos) {
+                        let taken = f.items[FURNACE_OUTPUT].count > slots[FURNACE_OUTPUT].count
+                            || (!f.items[FURNACE_OUTPUT].is_empty()
+                                && slots[FURNACE_OUTPUT].is_empty());
+                        if taken {
+                            earned = std::mem::take(&mut f.experience);
+                        }
+                    }
+                }
+                if earned > 0.0 {
+                    let whole = earned.floor();
+                    let mut xp = whole as i32;
+                    if self.rng.f64() < f64::from(earned - whole) {
+                        xp += 1;
+                    }
+                    if let Some(at) = self.players.get(&id).map(|p| p.pos) {
+                        self.spawn_xp(at, xp);
+                    }
+                }
                 for (part, first) in view.parts() {
                     if let Some(entity) = self.block_entities.get_mut(&part) {
                         let items = entity.items_mut();
@@ -1241,6 +1270,7 @@ impl World {
                         } else {
                             out.count += r.result.count;
                         }
+                        f.experience += r.experience;
                         changed.extend([FURNACE_INPUT, FURNACE_OUTPUT]);
                     }
                 }
@@ -1314,4 +1344,50 @@ fn furnace_data(window: i32, f: &Furnace) -> Vec<Writer> {
                 .i16(value.clamp(0, i32::from(i16::MAX)) as i16)
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::connection::Profile;
+
+    #[test]
+    fn taking_a_furnace_result_pays_out_its_experience() {
+        let dir = std::env::temp_dir().join(format!(
+            "levitas-furnace-{}-{}",
+            std::process::id(),
+            next_entity_id()
+        ));
+        let (mut w, _) = World::new(
+            dir,
+            NewWorld {
+                kind: WorldKind::Flat,
+                seed: Some(0),
+            },
+        );
+        w.chunk(0, 0);
+        let (tx, _rx) = tokio::sync::mpsc::channel(64);
+        let profile = Profile {
+            uuid: 4,
+            name: "Smelter".to_owned(),
+            properties: Vec::new(),
+        };
+        w.players
+            .insert(1, Player::new(profile, tx, [0.5, -60.0, 0.5]));
+        let pos = BlockPos::new(2, -60, 2);
+        let ingot = ItemInfo::id_of("minecraft:iron_ingot").unwrap();
+        let mut furnace = Furnace::default();
+        furnace.items[FURNACE_OUTPUT] = Stack::new(ingot, 3);
+        furnace.experience = 2.1;
+        w.block_entities.insert(pos, BlockEntity::Furnace(furnace));
+        let view = View::Furnace(pos, Cooker::Furnace);
+        let mut slots = w.window_slots(1, view);
+        slots[FURNACE_OUTPUT] = Stack::EMPTY;
+        w.store_window(1, view, &slots);
+        assert!(!w.orbs.is_empty(), "the smelter gets experience");
+        let Some(BlockEntity::Furnace(f)) = w.block_entities.get(&pos) else {
+            panic!("no furnace");
+        };
+        assert_eq!(f.experience, 0.0);
+    }
 }

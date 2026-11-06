@@ -71,6 +71,8 @@ struct Shapeless {
 pub struct Smelting {
     pub result: Stack,
     pub cook_time: i32,
+    /// Experience each item cooked earns, paid out when the result is taken.
+    pub experience: f32,
 }
 
 /// The blocks that cook: furnaces cook everything, smokers food and blast furnaces ores
@@ -194,6 +196,7 @@ impl Recipes {
                 let smelting = Smelting {
                     result: result(&recipe["result"])?,
                     cook_time: (time / speed).max(1),
+                    experience: recipe["experience"].as_f64().unwrap_or(0.0) as f32,
                 };
                 for item in ingredient(&recipe["ingredient"])? {
                     self.cooking
