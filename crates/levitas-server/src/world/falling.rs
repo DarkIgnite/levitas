@@ -23,6 +23,8 @@ pub struct FallingBlock {
     pub vel: [f64; 3],
     pub fall_distance: f64,
     pub age: u32,
+    /// Players who have it shown.
+    pub viewers: HashSet<i32>,
 }
 
 pub fn spawn_packet(id: i32, falling: &FallingBlock) -> Writer {
@@ -93,8 +95,16 @@ impl World {
             vel: [0.0, 0.0, 0.0],
             fall_distance: 0.0,
             age: 0,
+            viewers: HashSet::new(),
         };
-        self.broadcast(spawn_packet(id, &falling), None);
+        let mut falling = falling;
+        falling.viewers = self.watchers_of(chunk_of(falling.pos));
+        let f = frame(spawn_packet(id, &falling));
+        for &pid in &falling.viewers {
+            if let Some(p) = self.players.get_mut(&pid) {
+                p.deliver(&f);
+            }
+        }
         self.falling_blocks.insert(id, falling);
         self.set_block_updating(pos, block::AIR);
     }

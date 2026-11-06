@@ -220,10 +220,11 @@ Known gaps are listed under each phase instead of being hidden.
       damage; speed/slowness scale walk speed; resistance and fire resistance protect mobs.
       Health Boost raises the most health by 4 a level; chorus fruit teleports the eater
       up to 8 blocks away.
-- [ ] Entity framework: tracking, physics, collisions, saving entities to disk.
+- [x] Entity framework: tracking, physics, collisions, saving entities to disk.
       Mobs (`world/mobs.rs`) are shown to players who have their chunk loaded, move
       with gravity and block collisions, and are saved in vanilla `entities/` region
-      files. Items and falling blocks are not tracked per player yet.
+      files. Dropped items and falling blocks are tracked the same way: shown to the
+      players with their chunk loaded, checked every third tick.
 - [ ] Minecarts, boats, item frames, paintings, armor stands, experience orbs.
       Experience orbs work. Boats and rafts of every wood (`world/boats.rs`) are
       placed on water or ground, ridden (the rider's client steers, the server checks

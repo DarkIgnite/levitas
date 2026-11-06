@@ -23,6 +23,8 @@ pub struct ItemEntity {
     on_ground: bool,
     age: u32,
     pickup_delay: u32,
+    /// Players who have it shown: those with its chunk loaded.
+    pub(super) viewers: HashSet<i32>,
 }
 
 impl ItemEntity {
@@ -84,6 +86,7 @@ impl ItemEntity {
             on_ground: nbt.int("OnGround").unwrap_or(0) != 0,
             age: nbt.int("Age").unwrap_or(0).max(0) as u32,
             pickup_delay: nbt.int("PickupDelay").unwrap_or(0).max(0) as u32,
+            viewers: HashSet::new(),
         })
     }
 }
@@ -146,16 +149,24 @@ impl World {
             return;
         }
         let id = next_entity_id();
-        let item = ItemEntity {
+        let mut item = ItemEntity {
             stack,
             pos,
             vel,
             on_ground: false,
             age: 0,
             pickup_delay,
+            viewers: HashSet::new(),
         };
+        item.viewers = self.watchers_of(chunk_of(pos));
+        let viewers: Vec<i32> = item.viewers.iter().copied().collect();
         for packet in spawn_packets(id, &item) {
-            self.broadcast(packet, None);
+            let f = frame(packet);
+            for &pid in &viewers {
+                if let Some(p) = self.players.get_mut(&pid) {
+                    p.deliver(&f);
+                }
+            }
         }
         self.items.insert(id, item);
     }
@@ -434,5 +445,47 @@ mod tests {
         assert_eq!(items.len(), 1);
         assert_eq!(items[0].stack, Stack::new(diamond, 5));
         assert!((items[0].pos[0] - 3.5).abs() < 0.5);
+    }
+
+    #[test]
+    fn items_are_shown_only_to_players_with_their_chunk() {
+        let dir = std::env::temp_dir().join(format!("levitas-itemtrack-{}", std::process::id()));
+        let (mut w, _) = World::new(
+            dir,
+            NewWorld {
+                kind: WorldKind::Flat,
+                seed: Some(0),
+            },
+        );
+        w.chunk(0, 0);
+        let (out, _frames) = tokio::sync::mpsc::channel(100_000);
+        let profile = crate::connection::Profile {
+            name: "Far".to_owned(),
+            uuid: 3,
+            properties: Vec::new(),
+        };
+        let pid = next_entity_id();
+        w.players
+            .insert(pid, Player::new(profile, out, [500.0, -60.0, 500.0]));
+        let diamond = ItemInfo::id_of("minecraft:diamond").unwrap();
+        w.drop_at_block(BlockPos::new(3, -60, 3), Stack::new(diamond, 1));
+        let id = *w.items.keys().next().unwrap();
+        assert!(
+            w.items[&id].viewers.is_empty(),
+            "the far player does not see it"
+        );
+        // Once the player has the chunk, the item comes into view.
+        w.players.get_mut(&pid).unwrap().loaded.insert((0, 0));
+        for _ in 0..3 {
+            w.tick += 1;
+            w.track_ground_entities();
+        }
+        assert!(w.items[&id].viewers.contains(&pid));
+        w.players.get_mut(&pid).unwrap().loaded.clear();
+        for _ in 0..3 {
+            w.tick += 1;
+            w.track_ground_entities();
+        }
+        assert!(w.items[&id].viewers.is_empty());
     }
 }

@@ -2783,11 +2783,8 @@ impl World {
             if entity.str("id") == Some("minecraft:item") {
                 if let Some(item) = items::ItemEntity::from_nbt(entity) {
                     self.mob_chunks.insert(item.chunk());
-                    let id = next_entity_id();
-                    for packet in items::spawn_packets(id, &item) {
-                        self.broadcast(packet, None);
-                    }
-                    self.items.insert(id, item);
+                    // Shown by `track_ground_entities` to whoever has the chunk.
+                    self.items.insert(next_entity_id(), item);
                 }
                 continue;
             }

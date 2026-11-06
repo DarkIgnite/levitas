@@ -1208,11 +1208,13 @@ impl World {
             .filter(|(&other, p)| other != id && p.alive)
             .flat_map(|(&other, p)| spawn_player(other, p))
             .collect();
-        for (&item_id, item) in &self.items {
-            packets.extend(items::spawn_packets(item_id, item));
+        // Dropped items and falling blocks come with the chunks the player loads (see
+        // `track_ground_entities`); the client has forgotten them.
+        for item in self.items.values_mut() {
+            item.viewers.remove(&id);
         }
-        for (&falling_id, falling) in &self.falling_blocks {
-            packets.push(falling::spawn_packet(falling_id, falling));
+        for falling in self.falling_blocks.values_mut() {
+            falling.viewers.remove(&id);
         }
         for (&tnt_id, tnt) in &self.tnt {
             packets.extend(tnt::spawn_packets(tnt_id, tnt));
@@ -1703,6 +1705,7 @@ impl World {
         self.tick_furnaces();
         self.tick_campfires();
         self.tick_hoppers();
+        self.track_ground_entities();
         self.tick_brushing();
         self.tick_brushables();
         self.tick_beacons();
@@ -2039,6 +2042,69 @@ impl World {
         }
     }
 
+    /// Players who have chunk `chunk` loaded.
+    pub(super) fn watchers_of(&self, chunk: (i32, i32)) -> HashSet<i32> {
+        self.players
+            .iter()
+            .filter(|(_, p)| p.loaded.contains(&chunk))
+            .map(|(&id, _)| id)
+            .collect()
+    }
+
+    /// Shows dropped items and falling blocks to the players who have their chunk
+    /// loaded and takes them away from those who no longer do; like mobs, each is
+    /// looked at every third tick.
+    fn track_ground_entities(&mut self) {
+        let tick = self.tick;
+        let due = |id: i32| (tick + u64::from(id.unsigned_abs())).is_multiple_of(3);
+        let item_ids: Vec<i32> = self.items.keys().copied().filter(|&id| due(id)).collect();
+        for id in item_ids {
+            let chunk = chunk_of(self.items[&id].pos());
+            let watching = self.watchers_of(chunk);
+            let item = &self.items[&id];
+            let new: Vec<i32> = watching.difference(&item.viewers).copied().collect();
+            let gone: Vec<i32> = item.viewers.difference(&watching).copied().collect();
+            if new.is_empty() && gone.is_empty() {
+                continue;
+            }
+            let spawn: Vec<_> = items::spawn_packets(id, item)
+                .into_iter()
+                .map(frame)
+                .collect();
+            for pid in new {
+                if let Some(p) = self.players.get_mut(&pid) {
+                    for f in &spawn {
+                        p.deliver(f);
+                    }
+                }
+            }
+            for pid in gone {
+                self.send(pid, items::remove_entity(id));
+            }
+            self.items.get_mut(&id).expect("listed").viewers = watching;
+        }
+        let falling_ids: Vec<i32> = self
+            .falling_blocks
+            .keys()
+            .copied()
+            .filter(|&id| due(id))
+            .collect();
+        for id in falling_ids {
+            let f = &self.falling_blocks[&id];
+            let watching = self.watchers_of(chunk_of(f.pos));
+            let new: Vec<i32> = watching.difference(&f.viewers).copied().collect();
+            let gone: Vec<i32> = f.viewers.difference(&watching).copied().collect();
+            for pid in new {
+                let packet = falling::spawn_packet(id, &self.falling_blocks[&id]);
+                self.send(pid, packet);
+            }
+            for pid in gone {
+                self.send(pid, items::remove_entity(id));
+            }
+            self.falling_blocks.get_mut(&id).expect("listed").viewers = watching;
+        }
+    }
+
     fn broadcast(&mut self, packet: Writer, except: Option<i32>) {
         let f = frame(packet);
         for (&id, p) in self.players.iter_mut() {
@@ -2047,6 +2113,14 @@ impl World {
             }
         }
     }
+}
+
+/// The chunk a point is in.
+pub(super) fn chunk_of(pos: [f64; 3]) -> (i32, i32) {
+    (
+        (pos[0] / 16.0).floor() as i32,
+        (pos[2] / 16.0).floor() as i32,
+    )
 }
 
 /// The spawn information shared by the login and respawn packets.
