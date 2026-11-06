@@ -282,6 +282,7 @@ impl World {
                         potion: stack.potion,
                         slowness: false,
                         punch: 0,
+                        ..Default::default()
                     },
                 );
                 self.level_event(LEVEL_EVENT_SHOOT, pos, 0);

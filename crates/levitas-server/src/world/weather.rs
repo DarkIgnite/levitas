@@ -107,7 +107,7 @@ impl World {
     }
 
     /// Whether it is raining (not snowing) on `pos`, which must be open to the sky.
-    fn raining_at(&self, pos: BlockPos) -> bool {
+    pub(super) fn raining_at(&self, pos: BlockPos) -> bool {
         self.weather.is_raining()
             && self.rain_height(pos.x, pos.z).is_some_and(|y| y <= pos.y)
             && self.precipitation_kind(pos) == Precipitation::Rain

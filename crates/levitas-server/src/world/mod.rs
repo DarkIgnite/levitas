@@ -49,6 +49,7 @@ mod pathfinding;
 mod piston;
 mod portal;
 mod raids;
+mod ranged;
 mod redstone;
 mod shields;
 mod signs;
@@ -452,7 +453,7 @@ struct Player {
     /// Tick the attack charge last started over (after an attack or switching items).
     attack_reset: u64,
     /// Hand and start tick of a bow being drawn.
-    drawing: Option<(i32, u64)>,
+    pub(super) drawing: Option<(i32, u64)>,
     /// Experience level, points towards the next level, and points collected in all.
     xp_level: i32,
     xp_points: i32,
@@ -1467,7 +1468,9 @@ impl World {
                 }
                 self.lower_shield(id);
                 self.stop_spyglass(id);
-                self.release_bow(id);
+                if !self.release_ranged(id) {
+                    self.release_bow(id);
+                }
             }
             _ => {}
         }

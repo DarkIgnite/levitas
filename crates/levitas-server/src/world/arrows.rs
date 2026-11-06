@@ -26,6 +26,7 @@ const FULL_DRAW: f64 = 20.0;
 
 /// How an arrow leaves the bow: from where, which way, how fast (blocks per tick), how
 /// wildly (0 is perfect aim), and whether the bow was fully drawn.
+#[derive(Default)]
 pub struct Shot {
     pub from: [f64; 3],
     pub dir: [f64; 3],
@@ -44,27 +45,38 @@ pub struct Shot {
     pub slowness: bool,
     /// The bow's punch level: extra knockback.
     pub punch: u32,
+    /// How many more mobs a crossbow arrow with piercing goes through.
+    pub pierce: u8,
+    /// A thrown trident: the item itself, which comes back when picked up.
+    pub trident: Option<Stack>,
 }
 
 pub struct Arrow {
-    pos: [f64; 3],
-    vel: [f64; 3],
+    pub(super) pos: [f64; 3],
+    pub(super) vel: [f64; 3],
     /// Entity ID of whoever shot it, and whether that was a player (who may pick it up).
-    shooter: i32,
-    by_player: bool,
+    pub(super) shooter: i32,
+    pub(super) by_player: bool,
     critical: bool,
     base_damage: f64,
-    pickup: bool,
+    pub(super) pickup: bool,
     flaming: bool,
     potion: Option<u8>,
     slowness: bool,
     punch: u32,
-    stuck: Option<u32>,
+    pub(super) stuck: Option<u32>,
     age: u32,
+    pierce: u8,
+    pierced: Vec<i32>,
+    pub(super) trident: Option<Stack>,
+    /// A loyal trident flying back to its thrower.
+    pub(super) returning: bool,
+    /// Whether a trident already hit something (it then drops away).
+    pub(super) dealt: bool,
 }
 
 /// Who an arrow hits.
-enum Hit {
+pub(super) enum Hit {
     Block,
     Player(i32),
     Mob(i32),
@@ -87,6 +99,8 @@ impl World {
             potion,
             slowness,
             punch,
+            pierce,
+            trident,
         } = shot;
         let length = (dir[0] * dir[0] + dir[1] * dir[1] + dir[2] * dir[2])
             .sqrt()
@@ -113,13 +127,22 @@ impl World {
             punch,
             stuck: None,
             age: 0,
+            pierce,
+            pierced: Vec::new(),
+            trident,
+            returning: false,
+            dealt: false,
         };
         for packet in arrow_spawn(id, &arrow) {
             self.broadcast(packet, None);
         }
         self.arrows.insert(id, arrow);
-        let pitch = 1.0 / (self.rng.f64() as f32 * 0.4 + 1.2) + 0.5;
-        self.play_sound_at("minecraft:entity.arrow.shoot", from, 1.0, pitch, None);
+        if trident.is_some() {
+            self.play_sound_at("minecraft:item.trident.throw", from, 1.0, 1.0, None);
+        } else {
+            let pitch = 1.0 / (self.rng.f64() as f32 * 0.4 + 1.2) + 0.5;
+            self.play_sound_at("minecraft:entity.arrow.shoot", from, 1.0, pitch, None);
+        }
     }
 
     pub(super) fn tick_arrows(&mut self) {
@@ -129,6 +152,14 @@ impl World {
                 continue;
             };
             arrow.age += 1;
+            match self.trident_returns(id, &mut arrow) {
+                Some(true) => continue,
+                Some(false) => {
+                    self.arrows.insert(id, arrow);
+                    continue;
+                }
+                None => {}
+            }
             if let Some(ticks) = arrow.stuck.as_mut() {
                 *ticks += 1;
                 if *ticks >= STUCK_TICKS || self.pick_up_arrow(id, &arrow) {
@@ -138,7 +169,9 @@ impl World {
                 self.arrows.insert(id, arrow);
                 continue;
             }
-            if arrow.age > STUCK_TICKS || arrow.pos[1] < f64::from(MIN_Y - 64) {
+            if (arrow.age > STUCK_TICKS && arrow.trident.is_none())
+                || arrow.pos[1] < f64::from(MIN_Y - 64)
+            {
                 self.broadcast(items::remove_entity(id), None);
                 continue;
             }
@@ -151,7 +184,12 @@ impl World {
                 Some(Hit::Block) => {
                     arrow.stuck = Some(0);
                     arrow.vel = [0.0; 3];
-                    self.play_sound_at("minecraft:entity.arrow.hit", arrow.pos, 1.0, 1.1, None);
+                    let sound = if arrow.trident.is_some() {
+                        "minecraft:item.trident.hit_ground"
+                    } else {
+                        "minecraft:entity.arrow.hit"
+                    };
+                    self.play_sound_at(sound, arrow.pos, 1.0, 1.1, None);
                     // Tell clients where it ended up, in case their flight differed.
                     self.broadcast(
                         Writer::packet(clientbound::ENTITY_POSITION_SYNC)
@@ -184,6 +222,24 @@ impl World {
                                 arrow.pos[2] + arrow.vel[2] * 5.0,
                             ];
                             arrow.critical = false;
+                            self.arrows.insert(id, arrow);
+                            continue;
+                        }
+                    }
+                    // A trident falls away from what it hit; it stays to be picked up.
+                    if arrow.trident.is_some() {
+                        if !arrow.dealt {
+                            self.trident_hits(&mut arrow, hit);
+                        }
+                        self.arrows.insert(id, arrow);
+                        continue;
+                    }
+                    // Piercing: on through the mob, to the next.
+                    if let Hit::Mob(mid) = hit {
+                        if arrow.pierce > 0 {
+                            self.arrow_hits(&arrow, hit);
+                            arrow.pierce -= 1;
+                            arrow.pierced.push(mid);
                             self.arrows.insert(id, arrow);
                             continue;
                         }
@@ -261,7 +317,11 @@ impl World {
         }
         for (&id, m) in &self.mobs {
             let (width, height) = m.size();
-            if m.alive() && !(skip_shooter && id == arrow.shooter) && inside(m.pos, width, height) {
+            if m.alive()
+                && !(skip_shooter && id == arrow.shooter)
+                && !arrow.pierced.contains(&id)
+                && inside(m.pos, width, height)
+            {
                 return Some(Hit::Mob(id));
             }
         }
@@ -364,6 +424,11 @@ impl World {
         let Some(item) = ItemInfo::id_of(name) else {
             return false;
         };
+        let picked = arrow.trident.unwrap_or_else(|| {
+            let mut s = Stack::new(item, 1);
+            s.potion = arrow.potion;
+            s
+        });
         let taker = self.players.iter().find(|(_, p)| {
             p.alive
                 && (p.pos[0] - arrow.pos[0]).abs() < 1.0
@@ -373,11 +438,13 @@ impl World {
         let Some((&pid, _)) = taker else {
             return false;
         };
+        // A trident goes back to its thrower only.
+        if arrow.trident.is_some() && pid != arrow.shooter {
+            return false;
+        }
         let p = self.players.get_mut(&pid).expect("found");
         if p.survival() {
-            let mut stack = Stack::new(item, 1);
-            stack.potion = arrow.potion;
-            let (changed, left) = p.inventory.add(stack);
+            let (changed, left) = p.inventory.add(picked);
             if left > 0 {
                 return false;
             }
@@ -484,6 +551,7 @@ impl World {
             potion,
             slowness: false,
             punch: bow.level_of("minecraft:punch"),
+            ..Default::default()
         };
         self.shoot_arrow(id, true, shot);
     }
@@ -500,7 +568,7 @@ fn stray_slowness() -> levitas_registry::Effect {
 
 /// The inventory slot of the arrows a bow uses: offhand first, then the hotbar and the
 /// rest of the inventory.
-fn find_arrows(p: &Player) -> Option<usize> {
+pub(super) fn find_arrows(p: &Player) -> Option<usize> {
     let arrows = ["minecraft:arrow", "minecraft:tipped_arrow"].map(ItemInfo::id_of);
     std::iter::once(OFFHAND)
         .chain(HOTBAR..HOTBAR + 9)
@@ -517,6 +585,9 @@ fn arrow_spawn(id: i32, arrow: &Arrow) -> Vec<Writer> {
     const DATA_COLOR: u8 = 11;
     const SERIALIZER_VARINT: i32 = 1;
     let mut packets = vec![arrow_add(id, arrow)];
+    if let Some(t) = arrow.trident {
+        packets.push(super::ranged::trident_data(id, t));
+    }
     if let Some(potion) = arrow.potion {
         let color = crate::potions::color(potion) | 0xFF00_0000_u32 as i32;
         packets.push(
@@ -537,7 +608,11 @@ fn arrow_add(id: i32, arrow: &Arrow) -> Writer {
     Writer::packet(clientbound::ADD_ENTITY)
         .varint(id)
         .uuid(id as u128)
-        .varint(entity_type::ARROW)
+        .varint(if arrow.trident.is_some() {
+            entity_type::TRIDENT
+        } else {
+            entity_type::ARROW
+        })
         .f64(arrow.pos[0])
         .f64(arrow.pos[1])
         .f64(arrow.pos[2])
@@ -597,6 +672,11 @@ mod tests {
             punch: 0,
             stuck: None,
             age: 0,
+            pierce: 0,
+            pierced: Vec::new(),
+            trident: None,
+            returning: false,
+            dealt: false,
         };
         w.arrow_hits(&arrow, Hit::Player(id));
         let effect = w.players[&id]
@@ -622,6 +702,11 @@ mod tests {
             punch: 0,
             stuck: None,
             age: 0,
+            pierce: 0,
+            pierced: Vec::new(),
+            trident: None,
+            returning: false,
+            dealt: false,
         };
         w.arrow_hits(&arrow, Hit::Player(id));
         let slow = w.players[&id]
@@ -664,6 +749,11 @@ mod tests {
             punch: 0,
             stuck: None,
             age: 0,
+            pierce: 0,
+            pierced: Vec::new(),
+            trident: None,
+            returning: false,
+            dealt: false,
         };
         w.arrow_hits(&arrow, Hit::Mob(mob_id));
         let effect = w.mobs[&mob_id]

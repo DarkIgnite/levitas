@@ -189,18 +189,25 @@ Known gaps are listed under each phase instead of being hidden.
       damage and speed from the data generator, charge, critical hits, sprint knockback,
       sweeping sword blows, weapon wear, attack sounds. Players get vanilla's short
       invulnerability after a hit.
-- [ ] Armor and armor toughness, shields, damage types and immunities. Worn armor
+- [x] Armor and armor toughness, shields, damage types and immunities. Worn armor
       reduces mob and explosion damage by the wiki's formula and wears down;
       protection enchantments work. Shields (`world/shields.rs`) block hits, arrows,
       fireballs and explosions from the front once raised for 5 ticks, wear down on
       hits of 3 or more, and are knocked down for 5 seconds by an axe; other players
-      see them raised. Missing: blocked arrows bouncing off, attackers knocked back.
-- [ ] Bows, crossbows, tridents, arrows, snowballs, eggs, ender pearls. Bows and arrows
+      see them raised. Blocked arrows bounce off and fall; a blocked melee attacker is
+      pushed back.
+- [x] Bows, crossbows, tridents, arrows, snowballs, eggs, ender pearls. Bows and arrows
       work (`world/arrows.rs`): draw strength, gravity and drag, damage from speed,
       critical shots, sticking in blocks, pickup. Ender pearls, snowballs and eggs are
       thrown (`world/thrown.rs`): pearls teleport their thrower for 5 damage with a
-      one-second cooldown, snowballs hurt blazes, eggs hatch chicks. Missing:
-      crossbows, tridents.
+      one-second cooldown, snowballs hurt blazes, eggs hatch chicks. Crossbows
+      (`world/ranged.rs`) load in 1.25 s (less with Quick Charge) and keep their arrow
+      as `minecraft:charged_projectiles`; they shoot at 3.15 blocks a tick, three arrows
+      with Multishot, through more mobs with Piercing. Tridents are thrown after half a
+      second for 8 damage (Impaling adds against water mobs), drop away from what they
+      hit and are picked up by their thrower; Loyalty brings them back, Channeling calls
+      lightning in a thunderstorm, Riptide flings the player in water or rain. Crossbows
+      shoot arrows only, since fireworks are not in yet.
 - [x] Status effects on players and mobs (`world/effects.rs`): given by food (golden apples,
       rotten flesh, pufferfish, ...), splash potions, tipped arrows and `/effect`, cleared
       by milk and death, removed by honey, shown to the client and saved. Regeneration,
@@ -211,7 +218,8 @@ Known gaps are listed under each phase instead of being hidden.
       undead and heals the living; instant damage heals undead and damages the living; spiders
       and undead ignore poison; undead ignore regeneration; strength/weakness adjust attack
       damage; speed/slowness scale walk speed; resistance and fire resistance protect mobs.
-      Missing: health boost, chorus fruit teleporting.
+      Health Boost raises the most health by 4 a level; chorus fruit teleports the eater
+      up to 8 blocks away.
 - [ ] Entity framework: tracking, physics, collisions, saving entities to disk.
       Mobs (`world/mobs.rs`) are shown to players who have their chunk loaded, move
       with gravity and block collisions, and are saved in vanilla `entities/` region

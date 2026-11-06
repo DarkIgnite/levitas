@@ -59,6 +59,25 @@ pub struct Stack {
     pub ominous: Option<u8>,
     /// A goat horn's sound, by `minecraft:instrument` registry ID.
     pub instrument: Option<u8>,
+    /// A loaded crossbow's projectiles (the `minecraft:charged_projectiles` component).
+    pub charged: Option<Charged>,
+}
+
+/// What a crossbow is loaded with: an arrow (tipped with a potion, perhaps), as many
+/// times as it shoots (three with multishot).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Charged {
+    pub item: i32,
+    pub count: u8,
+    pub potion: Option<u8>,
+}
+
+impl Charged {
+    fn stack(self) -> Stack {
+        let mut s = Stack::new(self.item, 1);
+        s.potion = self.potion;
+        s
+    }
 }
 
 fn effect_name(id: u8) -> &'static str {
@@ -280,6 +299,7 @@ impl Stack {
         stew: None,
         ominous: None,
         instrument: None,
+        charged: None,
     };
 
     pub fn new(item: i32, count: i32) -> Self {
@@ -316,6 +336,7 @@ impl Stack {
             && self.stew == other.stew
             && self.ominous == other.ominous
             && self.instrument == other.instrument
+            && self.charged == other.charged
     }
 
     pub fn is_empty(&self) -> bool {
@@ -402,6 +423,12 @@ impl Stack {
         }
         if let Some(amp) = self.ominous {
             components.insert("minecraft:ominous_bottle_amplifier", i32::from(amp));
+        }
+        if let Some(c) = self.charged {
+            let shots: Vec<Tag> = (0..c.count)
+                .map(|_| Tag::Compound(c.stack().to_nbt()))
+                .collect();
+            components.insert("minecraft:charged_projectiles", shots);
         }
         if let Some(name) = self
             .instrument
@@ -521,6 +548,16 @@ impl Stack {
                         .position(|&n| n == name)?;
                     Some((id as u8, e.int("duration").unwrap_or(160) as i32))
                 }),
+            charged: components
+                .and_then(|c| c.list("minecraft:charged_projectiles"))
+                .and_then(|l| {
+                    let first = Stack::from_nbt(l.first()?.as_compound()?);
+                    (!first.is_empty()).then_some(Charged {
+                        item: first.item,
+                        count: l.len().min(3) as u8,
+                        potion: first.potion,
+                    })
+                }),
             ominous: components
                 .and_then(|c| c.int("minecraft:ominous_bottle_amplifier"))
                 .map(|a| a.clamp(0, 4) as u8),
@@ -585,6 +622,7 @@ fn write_components(packet: Writer, stack: &Stack) -> Writer {
     let stewed = stack.stew.is_some();
     let ominous = stack.ominous.is_some();
     let horned = stack.instrument.is_some();
+    let loaded = stack.charged.is_some();
     let added = i32::from(damaged)
         + i32::from(processing)
         + i32::from(dyed)
@@ -598,7 +636,8 @@ fn write_components(packet: Writer, stack: &Stack) -> Writer {
         + i32::from(targeted)
         + i32::from(stewed)
         + i32::from(ominous)
-        + i32::from(horned);
+        + i32::from(horned)
+        + i32::from(loaded);
     let mut packet = packet.varint(added).varint(0);
     if damaged {
         packet = packet.varint(component::DAMAGE).varint(stack.damage);
@@ -676,6 +715,14 @@ fn write_components(packet: Writer, stack: &Stack) -> Writer {
         packet = packet
             .varint(component::OMINOUS_BOTTLE_AMPLIFIER)
             .varint(i32::from(amp));
+    }
+    if let Some(c) = stack.charged {
+        packet = packet
+            .varint(component::CHARGED_PROJECTILES)
+            .varint(i32::from(c.count));
+        for _ in 0..c.count {
+            packet = write_stack(packet, c.stack());
+        }
     }
     if let Some(i) = stack.instrument {
         // A registry holder: the ID plus one.
