@@ -230,6 +230,29 @@ impl World {
             f64::from(foot.y),
             f64::from(foot.z) + 0.5,
         ];
+        // Not inside another entity: a stand, a player or a mob in that space.
+        let overlaps = |pos: [f64; 3], width: f64, height: f64| {
+            let reach = (width + 0.5) / 2.0;
+            (pos[0] - at[0]).abs() < reach
+                && (pos[2] - at[2]).abs() < reach
+                && pos[1] < at[1] + 1.975
+                && pos[1] + height > at[1]
+        };
+        let occupied = self
+            .armor_stands
+            .values()
+            .any(|s| overlaps(s.pos, 0.5, 1.975))
+            || self
+                .players
+                .values()
+                .any(|p| p.alive && overlaps(p.pos, 0.6, 1.8))
+            || self.mobs.values().any(|m| {
+                let (w, h) = m.size();
+                m.alive() && overlaps(m.pos, w, h)
+            });
+        if occupied {
+            return true;
+        }
         let stand = ArmorStand::new(at, facing, &mut self.rng);
         let sid = next_entity_id();
         for packet in spawn_packets(sid, &stand) {

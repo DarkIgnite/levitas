@@ -17,6 +17,8 @@ use crate::world::survival::{Damage, MAX_HEALTH};
 /// Shown in the inventory and the HUD.
 const FLAG_SHOW_ICON: u8 = 0x04;
 const FLAG_SHOW_PARTICLES: u8 = 0x02;
+/// Beacon and conduit effects: a blue border on the HUD and faint particles.
+const FLAG_AMBIENT: u8 = 0x01;
 /// Entity data index of a player's extra (absorption) health, a float.
 const DATA_ABSORPTION: u8 = 17;
 const SERIALIZER_FLOAT: i32 = 3;
@@ -88,12 +90,17 @@ impl Player {
 }
 
 pub(super) fn update_packet(entity: i32, e: &ActiveEffect) -> Writer {
+    effect_packet(entity, e, false)
+}
+
+fn effect_packet(entity: i32, e: &ActiveEffect, ambient: bool) -> Writer {
+    let ambient = if ambient { FLAG_AMBIENT } else { 0 };
     Writer::packet(clientbound::UPDATE_MOB_EFFECT)
         .varint(entity)
         .varint(e.id)
         .varint(i32::from(e.amplifier))
         .varint(e.duration)
-        .u8(FLAG_SHOW_ICON | FLAG_SHOW_PARTICLES)
+        .u8(FLAG_SHOW_ICON | FLAG_SHOW_PARTICLES | ambient)
 }
 
 pub(super) fn remove_packet(entity: i32, effect: i32) -> Writer {
@@ -105,6 +112,15 @@ pub(super) fn remove_packet(entity: i32, effect: i32) -> Writer {
 impl World {
     /// Gives a player an effect. A stronger or longer one replaces what they have.
     pub(super) fn add_effect(&mut self, id: i32, effect: Effect) {
+        self.add_effect_from(id, effect, false);
+    }
+
+    /// An effect from a beacon or conduit: shown as ambient.
+    pub(super) fn add_ambient_effect(&mut self, id: i32, effect: Effect) {
+        self.add_effect_from(id, effect, true);
+    }
+
+    fn add_effect_from(&mut self, id: i32, effect: Effect, ambient: bool) {
         let Some(p) = self.players.get_mut(&id) else {
             return;
         };
@@ -149,7 +165,7 @@ impl World {
             p.absorption = p.absorption.max(extra);
             self.send_absorption(id);
         }
-        self.broadcast(update_packet(id, &new), None);
+        self.broadcast(effect_packet(id, &new, ambient), None);
     }
 
     /// Takes an effect away.

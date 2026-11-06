@@ -1668,6 +1668,7 @@ impl World {
         self.tick_beacons();
         self.tick_maps();
         self.tick_advancements();
+        self.tick_lodestone_compasses();
         self.tick_stats();
         self.tick_conduits();
         self.tick_daylight_detectors();

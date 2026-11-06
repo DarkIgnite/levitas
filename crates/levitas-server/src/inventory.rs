@@ -18,6 +18,8 @@ pub struct LodestoneTracker {
     pub dimension: &'static str,
     pub pos: BlockPos,
     pub tracked: bool,
+    /// The lodestone was broken: the compass spins (no target is written).
+    pub lost: bool,
 }
 
 /// An item stack. A count of zero or less means the slot is empty.
@@ -191,15 +193,14 @@ impl Stack {
             );
         }
         if let Some(tracker) = self.lodestone {
-            let target = Compound::new()
-                .with("dimension", tracker.dimension)
-                .with("pos", vec![tracker.pos.x, tracker.pos.y, tracker.pos.z]);
-            components.insert(
-                "minecraft:lodestone_tracker",
-                Compound::new()
-                    .with("target", target)
-                    .with("tracked", tracker.tracked),
-            );
+            let mut c = Compound::new().with("tracked", tracker.tracked);
+            if !tracker.lost {
+                let target = Compound::new()
+                    .with("dimension", tracker.dimension)
+                    .with("pos", vec![tracker.pos.x, tracker.pos.y, tracker.pos.z]);
+                c.insert("target", target);
+            }
+            components.insert("minecraft:lodestone_tracker", c);
         }
         if let Some(map_id) = self.map_id {
             components.insert("minecraft:map_id", map_id);
@@ -237,7 +238,15 @@ impl Stack {
             .and_then(|c| c.compound("minecraft:lodestone_tracker"))
             .and_then(|c| {
                 let tracked = c.int("tracked") != Some(0);
-                let target = c.compound("target")?;
+                let Some(target) = c.compound("target") else {
+                    // A compass whose lodestone is gone spins.
+                    return Some(LodestoneTracker {
+                        dimension: "minecraft:overworld",
+                        pos: BlockPos::new(0, 0, 0),
+                        tracked,
+                        lost: true,
+                    });
+                };
                 let dim = match target.str("dimension") {
                     Some("minecraft:the_nether") => "minecraft:the_nether",
                     Some("minecraft:the_end") => "minecraft:the_end",
@@ -251,6 +260,7 @@ impl Stack {
                     dimension: dim,
                     pos,
                     tracked,
+                    lost: false,
                 })
             });
         let map_id = components
@@ -396,12 +406,16 @@ fn write_components(packet: Writer, stack: &Stack) -> Writer {
             .varint(i32::from(trim.pattern) + 1);
     }
     if let Some(tracker) = stack.lodestone {
-        packet = packet
-            .varint(component::LODESTONE_TRACKER)
-            .bool(true)
-            .string(tracker.dimension)
-            .position(tracker.pos)
-            .bool(tracker.tracked);
+        packet = packet.varint(component::LODESTONE_TRACKER);
+        packet = if tracker.lost {
+            packet.bool(false)
+        } else {
+            packet
+                .bool(true)
+                .string(tracker.dimension)
+                .position(tracker.pos)
+        };
+        packet = packet.bool(tracker.tracked);
     }
     if let Some(map_id) = stack.map_id {
         packet = packet.varint(component::MAP_ID).varint(map_id);
@@ -658,6 +672,7 @@ mod tests {
             dimension: "minecraft:overworld",
             pos: BlockPos::new(10, 64, -20),
             tracked: true,
+            lost: false,
         };
         let mut stack = Stack::new(compass, 1);
         stack.lodestone = Some(tracker);

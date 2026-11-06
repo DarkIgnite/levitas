@@ -321,6 +321,38 @@ impl World {
         false
     }
 
+    /// Every second: compasses tracking a lodestone of this dimension that is no longer
+    /// there lose their target and spin, as in vanilla.
+    pub(super) fn tick_lodestone_compasses(&mut self) {
+        if !self.tick.is_multiple_of(20) {
+            return;
+        }
+        let here = self.dimension.name();
+        let ids: Vec<i32> = self.players.keys().copied().collect();
+        for id in ids {
+            let gone: Vec<usize> = self.players[&id]
+                .inventory
+                .slots
+                .iter()
+                .enumerate()
+                .filter_map(|(slot, s)| {
+                    let t = s.lodestone?;
+                    let checkable = t.tracked && !t.lost && t.dimension == here;
+                    let state = self.loaded_block(t.pos).filter(|_| checkable)?;
+                    (blocks::name(state) != "minecraft:lodestone").then_some(slot)
+                })
+                .collect();
+            for slot in gone {
+                let p = self.players.get_mut(&id).expect("listed");
+                if let Some(t) = p.inventory.slots[slot].lodestone.as_mut() {
+                    t.lost = true;
+                }
+                let update = p.inventory.set_slot_packet(slot);
+                self.send(id, update);
+            }
+        }
+    }
+
     /// Right-clicking a lodestone with a compass locks the compass onto that block.
     pub(super) fn bind_lodestone(&mut self, id: i32, slot: usize, pos: BlockPos) -> bool {
         let Some(p) = self.players.get_mut(&id) else {
@@ -334,6 +366,7 @@ impl World {
             dimension: self.dimension.name(),
             pos,
             tracked: true,
+            lost: false,
         };
         let sound_pos = pos;
         let player_pos = p.pos;
@@ -572,6 +605,54 @@ mod tests {
             world.random_tick(grass, g);
         }
         assert_eq!(blocks::name(world.block(dirt)), "minecraft:grass_block");
+    }
+
+    #[test]
+    fn a_compass_spins_once_its_lodestone_is_gone() {
+        let mut w = flat_world();
+        let id = next_entity_id();
+        let (tx, _rx) = tokio::sync::mpsc::channel(64);
+        let profile = crate::connection::Profile {
+            uuid: 77,
+            name: "Pointer".to_owned(),
+            properties: Vec::new(),
+        };
+        w.players
+            .insert(id, Player::new(profile, tx, [0.5, -60.0, 0.5]));
+        let lodestone = BlockPos::new(3, -60, 3);
+        w.set_block(
+            lodestone,
+            BlockInfo::by_name("minecraft:lodestone")
+                .unwrap()
+                .default_state,
+        );
+        let compass = ItemInfo::id_of("minecraft:compass").unwrap();
+        let mut stack = Stack::new(compass, 1);
+        stack.lodestone = Some(crate::inventory::LodestoneTracker {
+            dimension: w.dimension.name(),
+            pos: lodestone,
+            tracked: true,
+            lost: false,
+        });
+        w.players.get_mut(&id).unwrap().inventory.slots[crate::inventory::HOTBAR] = stack;
+        w.tick = 20;
+        w.tick_lodestone_compasses();
+        assert!(
+            !w.players[&id].inventory.slots[crate::inventory::HOTBAR]
+                .lodestone
+                .unwrap()
+                .lost
+        );
+        w.set_block(lodestone, block::AIR);
+        w.tick_lodestone_compasses();
+        let t = w.players[&id].inventory.slots[crate::inventory::HOTBAR]
+            .lodestone
+            .unwrap();
+        assert!(t.lost);
+        // Saved without a target, and read back spinning.
+        let back =
+            Stack::from_nbt(&w.players[&id].inventory.slots[crate::inventory::HOTBAR].to_nbt());
+        assert!(back.lodestone.unwrap().lost);
     }
 
     #[test]

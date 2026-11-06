@@ -259,7 +259,7 @@ impl World {
                         .collect();
 
                     for pid in near_players {
-                        self.add_effect(
+                        self.add_ambient_effect(
                             pid,
                             Effect {
                                 id: primary,
@@ -268,7 +268,7 @@ impl World {
                             },
                         );
                         if let Some(regen) = secondary_regen {
-                            self.add_effect(
+                            self.add_ambient_effect(
                                 pid,
                                 Effect {
                                     id: regen,

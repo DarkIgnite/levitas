@@ -202,7 +202,7 @@ impl World {
                         .collect();
 
                     for pid in near_players {
-                        self.add_effect(
+                        self.add_ambient_effect(
                             pid,
                             Effect {
                                 id: mob_effect::CONDUIT_POWER,
