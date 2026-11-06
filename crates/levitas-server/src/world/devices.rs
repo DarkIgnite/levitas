@@ -49,7 +49,7 @@ pub fn instrument(below: u16) -> &'static str {
 }
 
 impl World {
-    fn block_event(&mut self, pos: BlockPos, state: u16, action: u8, param: u8) {
+    pub(super) fn block_event(&mut self, pos: BlockPos, state: u16, action: u8, param: u8) {
         self.broadcast(
             Writer::packet(clientbound::BLOCK_EVENT)
                 .position(pos)

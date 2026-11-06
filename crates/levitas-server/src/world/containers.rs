@@ -36,6 +36,8 @@ pub enum BlockEntity {
     Brewing(Box<super::brewing::Brewer>),
     Beacon(Box<super::beacon::Beacon>),
     Conduit(Box<super::conduit::Conduit>),
+    Brushable(Box<super::archaeology::Brushable>),
+    Pot(Box<super::archaeology::Pot>),
 }
 
 pub struct Plain {
@@ -103,6 +105,8 @@ impl BlockEntity {
             BlockEntity::Brewing(b) => ("minecraft:brewing_stand", &b.items[..]),
             BlockEntity::Beacon(_) => ("minecraft:beacon", &[][..]),
             BlockEntity::Conduit(_) => ("minecraft:conduit", &[][..]),
+            BlockEntity::Brushable(_) => ("minecraft:brushable_block", &[][..]),
+            BlockEntity::Pot(_) => ("minecraft:decorated_pot", &[][..]),
         };
         let mut nbt = Compound::new()
             .with("id", id)
@@ -112,7 +116,11 @@ impl BlockEntity {
             .with("keepPacked", false);
         if !matches!(
             self,
-            BlockEntity::Sign(_) | BlockEntity::Beacon(_) | BlockEntity::Conduit(_)
+            BlockEntity::Sign(_)
+                | BlockEntity::Beacon(_)
+                | BlockEntity::Conduit(_)
+                | BlockEntity::Brushable(_)
+                | BlockEntity::Pot(_)
         ) {
             nbt.insert("Items", items_to_nbt(items.iter().copied().enumerate()));
         }
@@ -145,6 +153,12 @@ impl BlockEntity {
         if let BlockEntity::Conduit(c) = self {
             c.write_nbt(&mut nbt);
         }
+        if let BlockEntity::Brushable(b) = self {
+            b.write_nbt(&mut nbt);
+        }
+        if let BlockEntity::Pot(p) = self {
+            p.write_nbt(&mut nbt);
+        }
         nbt
     }
 
@@ -156,6 +170,8 @@ impl BlockEntity {
             BlockEntity::Sign(s) => Some(s.network_data()),
             BlockEntity::Beacon(b) => Some(b.network_data()),
             BlockEntity::Conduit(c) => Some(c.network_data()),
+            BlockEntity::Brushable(b) => Some(b.network_data()),
+            BlockEntity::Pot(p) => Some(p.network_data()),
             _ => None,
         }
     }
@@ -187,6 +203,12 @@ impl BlockEntity {
             "minecraft:brewing_stand" => BlockEntity::Brewing(Box::default()),
             "minecraft:beacon" => BlockEntity::Beacon(Box::default()),
             "minecraft:conduit" => BlockEntity::Conduit(Box::default()),
+            "minecraft:brushable_block" => {
+                BlockEntity::Brushable(Box::new(super::archaeology::Brushable::read_nbt(nbt)))
+            }
+            "minecraft:decorated_pot" => {
+                BlockEntity::Pot(Box::new(super::archaeology::Pot::read_nbt(nbt)))
+            }
             id @ ("minecraft:sign" | "minecraft:hanging_sign") => BlockEntity::Sign(Box::new(
                 super::signs::Sign::read_nbt(id == "minecraft:hanging_sign", nbt),
             )),
@@ -267,6 +289,10 @@ impl BlockEntity {
             "minecraft:brewing_stand" => Some(BlockEntity::Brewing(Box::default())),
             "minecraft:beacon" => Some(BlockEntity::Beacon(Box::default())),
             "minecraft:conduit" => Some(BlockEntity::Conduit(Box::default())),
+            "minecraft:suspicious_sand" | "minecraft:suspicious_gravel" => {
+                Some(BlockEntity::Brushable(Box::default()))
+            }
+            "minecraft:decorated_pot" => Some(BlockEntity::Pot(Box::default())),
             _ => super::signs::sign_kind(state)
                 .map(|hanging| BlockEntity::Sign(Box::new(super::signs::Sign::new(hanging)))),
         }
@@ -288,6 +314,8 @@ impl BlockEntity {
             BlockEntity::Brewing(b) => b.type_id(),
             BlockEntity::Beacon(b) => b.type_id(),
             BlockEntity::Conduit(c) => c.type_id(),
+            BlockEntity::Brushable(_) => block_entity_type::BRUSHABLE_BLOCK,
+            BlockEntity::Pot(_) => block_entity_type::DECORATED_POT,
         }
     }
 
@@ -306,11 +334,13 @@ impl BlockEntity {
             BlockEntity::Furnace(f) => &f.items,
             BlockEntity::Campfire(c) => &c.items,
             BlockEntity::Brewing(b) => &b.items,
+            BlockEntity::Pot(p) => &p.items,
             BlockEntity::Plain(_)
             | BlockEntity::Spawner(_)
             | BlockEntity::Sign(_)
             | BlockEntity::Beacon(_)
-            | BlockEntity::Conduit(_) => &[],
+            | BlockEntity::Conduit(_)
+            | BlockEntity::Brushable(_) => &[],
         }
     }
 
@@ -320,11 +350,13 @@ impl BlockEntity {
             BlockEntity::Furnace(f) => &mut f.items,
             BlockEntity::Campfire(c) => &mut c.items,
             BlockEntity::Brewing(b) => &mut b.items,
+            BlockEntity::Pot(p) => &mut p.items,
             BlockEntity::Plain(_)
             | BlockEntity::Spawner(_)
             | BlockEntity::Sign(_)
             | BlockEntity::Beacon(_)
-            | BlockEntity::Conduit(_) => &mut [],
+            | BlockEntity::Conduit(_)
+            | BlockEntity::Brushable(_) => &mut [],
         }
     }
 
@@ -339,6 +371,8 @@ impl BlockEntity {
             BlockEntity::Brewing(b) => &mut b.viewers,
             BlockEntity::Beacon(b) => &mut b.viewers,
             BlockEntity::Conduit(c) => &mut c.viewers,
+            BlockEntity::Brushable(b) => &mut b.viewers,
+            BlockEntity::Pot(p) => &mut p.viewers,
         }
     }
 }

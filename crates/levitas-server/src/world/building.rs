@@ -53,7 +53,8 @@ impl World {
             && (self.use_sign(id, slot, pos, clicked)
                 || self.open_container(id, pos, clicked)
                 || self.interact(id, pos, clicked)
-                || self.use_farm_block(id, slot, pos, clicked))
+                || self.use_farm_block(id, slot, pos, clicked)
+                || self.use_decorated_pot(id, slot, pos, clicked))
         {
             return self.ack(id, sequence);
         }
@@ -62,6 +63,9 @@ impl World {
             || self.place_hanging(id, slot, pos, face)
             || self.place_armor_stand(id, slot, pos, face)
         {
+            return self.ack(id, sequence);
+        }
+        if !stack.is_empty() && self.start_brushing(id, hand, pos, face, clicked) {
             return self.ack(id, sequence);
         }
         if !stack.is_empty() && self.use_tool_on_block(id, slot, pos, face, clicked) {

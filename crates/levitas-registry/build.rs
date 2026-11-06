@@ -113,6 +113,22 @@ fn main() {
     embed_json_dir(
         &data,
         &out_dir,
+        "loot_table/archaeology",
+        "ARCHAEOLOGY_LOOT_JSON",
+        "Archaeology loot tables as JSON (suspicious sand and gravel): `minecraft:<path>`.",
+        &mut out,
+    );
+    embed_json_dir(
+        &data,
+        &out_dir,
+        "loot_table/pots",
+        "POT_LOOT_JSON",
+        "Decorated pot loot tables as JSON: `minecraft:<path under pots/>`.",
+        &mut out,
+    );
+    embed_json_dir(
+        &data,
+        &out_dir,
         "loot_table/gameplay",
         "GAMEPLAY_LOOT_JSON",
         "Gameplay loot tables as JSON (fishing, ...): `minecraft:<path under gameplay/>` to loot tables.",

@@ -52,7 +52,10 @@ impl World {
             | BlockEntity::Spawner(_)
             | BlockEntity::Sign(_)
             | BlockEntity::Beacon(_)
-            | BlockEntity::Conduit(_) => Vec::new(),
+            | BlockEntity::Conduit(_)
+            | BlockEntity::Brushable(_) => Vec::new(),
+            // A decorated pot is one slot that hoppers fill and empty.
+            BlockEntity::Pot(_) => vec![0],
         }
     }
 
@@ -75,7 +78,10 @@ impl World {
             | BlockEntity::Spawner(_)
             | BlockEntity::Sign(_)
             | BlockEntity::Beacon(_)
-            | BlockEntity::Conduit(_) => Vec::new(),
+            | BlockEntity::Conduit(_)
+            | BlockEntity::Brushable(_) => Vec::new(),
+            // A decorated pot is one slot that hoppers fill and empty.
+            BlockEntity::Pot(_) => vec![0],
         }
     }
 

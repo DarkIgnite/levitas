@@ -23,6 +23,8 @@ pub struct LootTables {
     chests: HashMap<String, Value>,
     /// Gameplay tables (fishing, ...), keyed `minecraft:<path under gameplay/>`.
     gameplay: HashMap<String, Value>,
+    archaeology: HashMap<String, Value>,
+    pots: HashMap<String, Value>,
     item_ids: HashMap<&'static str, i32>,
 }
 
@@ -65,6 +67,12 @@ impl LootTables {
         let gameplay: serde_json::Map<String, Value> =
             serde_json::from_str(levitas_registry::GAMEPLAY_LOOT_JSON)
                 .expect("gameplay loot tables are valid JSON");
+        let archaeology: serde_json::Map<String, Value> =
+            serde_json::from_str(levitas_registry::ARCHAEOLOGY_LOOT_JSON)
+                .expect("archaeology loot tables are valid JSON");
+        let pots: serde_json::Map<String, Value> =
+            serde_json::from_str(levitas_registry::POT_LOOT_JSON)
+                .expect("pot loot tables are valid JSON");
         let item_ids = levitas_registry::ITEMS
             .iter()
             .enumerate()
@@ -82,6 +90,8 @@ impl LootTables {
             entities: tidy(entities),
             chests: tidy(chests),
             gameplay: tidy(gameplay),
+            archaeology: tidy(archaeology),
+            pots: tidy(pots),
             item_ids,
         }
     }
@@ -131,10 +141,7 @@ impl LootTables {
     /// `seed` (0 for any). As in vanilla, the items land in random empty slots, with
     /// some stacks split up to fill more of them. Returns whether the table exists.
     pub fn fill(&self, name: &str, seed: i64, slots: &mut [Stack]) -> bool {
-        let Some(table) = name
-            .strip_prefix("minecraft:chests/")
-            .and_then(|path| self.chests.get(&format!("minecraft:{path}")))
-        else {
+        let Some(table) = self.table(name) else {
             return false;
         };
         let mut rng = if seed == 0 {
@@ -169,6 +176,12 @@ impl LootTables {
         }
         if let Some(gameplay) = path.strip_prefix("gameplay/") {
             return self.gameplay.get(&format!("minecraft:{gameplay}"));
+        }
+        if let Some(found) = path.strip_prefix("archaeology/") {
+            return self.archaeology.get(&format!("minecraft:{found}"));
+        }
+        if let Some(pot) = path.strip_prefix("pots/") {
+            return self.pots.get(&format!("minecraft:{pot}"));
         }
         let block = path.strip_prefix("blocks/")?;
         self.blocks.get(&format!("minecraft:{block}"))

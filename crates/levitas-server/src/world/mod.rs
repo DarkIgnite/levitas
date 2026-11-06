@@ -4,6 +4,7 @@
 
 mod admin;
 mod advancements;
+mod archaeology;
 mod armor_stands;
 mod arrows;
 mod attributes;
@@ -489,6 +490,8 @@ struct Player {
     enchant_seed: i32,
     /// Hand using a spyglass.
     pub using_spyglass: Option<i32>,
+    /// The block being brushed, if any.
+    pub brushing: Option<archaeology::Brushing>,
     /// Dimension and position where the player last died (for recovery compass).
     pub last_death: Option<(&'static str, BlockPos)>,
     /// Maps this player's client has been sent in full.
@@ -568,6 +571,7 @@ impl Player {
             absorption: 0.0,
             enchant_seed: profile_seed,
             using_spyglass: None,
+            brushing: None,
             last_death: None,
             known_maps: HashSet::new(),
             advancements: advancements::Progress::default(),
@@ -1459,6 +1463,7 @@ impl World {
             RELEASE_USE_ITEM => {
                 if let Some(p) = self.players.get_mut(&id) {
                     p.eating = None;
+                    p.brushing = None;
                 }
                 self.lower_shield(id);
                 self.stop_spyglass(id);
@@ -1480,8 +1485,21 @@ impl World {
                 p.stats.add(levitas_registry::stat_type::USED, tool.item, 1);
             }
         }
+        // A decorated pot struck with a sword, axe, ... shatters into its sides.
+        let held = self
+            .players
+            .get(&id)
+            .map_or(0, |p| p.inventory.held(p.held).item);
+        let shards = self.pot_shards(pos, held);
         self.set_block(pos, block::AIR);
         self.remove_block_entity(pos);
+        if let Some(shards) = &shards {
+            if self.players.get(&id).is_some_and(Player::survival) {
+                for &s in shards {
+                    self.drop_at_block(pos, s);
+                }
+            }
+        }
         let effect = Writer::packet(clientbound::LEVEL_EVENT)
             .i32(LEVEL_EVENT_BLOCK_BREAK)
             .position(pos)
@@ -1495,7 +1513,7 @@ impl World {
             p.exhaustion += 0.005;
             let tool = p.inventory.held(p.held).item;
             let held_enchants = p.inventory.held(p.held).enchants;
-            if survival::harvestable(state, tool) {
+            if survival::harvestable(state, tool) && shards.is_none() {
                 let drops = self.loot.block_drops(&mut LootContext {
                     state,
                     tool,
@@ -1682,6 +1700,8 @@ impl World {
         self.tick_furnaces();
         self.tick_campfires();
         self.tick_hoppers();
+        self.tick_brushing();
+        self.tick_brushables();
         self.tick_beacons();
         self.tick_maps();
         self.tick_advancements();
