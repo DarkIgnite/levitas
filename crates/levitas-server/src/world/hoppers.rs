@@ -56,6 +56,7 @@ impl World {
             | BlockEntity::Brushable(_) => Vec::new(),
             // A decorated pot is one slot that hoppers fill and empty.
             BlockEntity::Pot(_) => vec![0],
+            BlockEntity::Crafter(c) => c.insert_slot(stack).into_iter().collect(),
             // An empty jukebox takes a disc.
             BlockEntity::Jukebox(j) => {
                 if j.items[0].is_empty()
@@ -93,6 +94,7 @@ impl World {
             | BlockEntity::Brushable(_) => Vec::new(),
             // A decorated pot is one slot that hoppers fill and empty.
             BlockEntity::Pot(_) => vec![0],
+            BlockEntity::Crafter(c) => (0..c.items.len()).collect(),
             // A disc comes out once its song is over.
             BlockEntity::Jukebox(j) => {
                 if j.done() {

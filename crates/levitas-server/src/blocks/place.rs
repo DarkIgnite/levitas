@@ -267,6 +267,21 @@ fn orient(
 
     // Pointed dripstone and sulfur spikes hang from what they are put under and stand on
     // anything else.
+    // A crafter's front faces the player; looking up or down, its top faces the way
+    // they look.
+    if prop(state, "orientation").is_some() {
+        let front = Dir::from_look(ctx.yaw, ctx.pitch).opposite();
+        let top = if front.is_horizontal() {
+            Dir::Up
+        } else {
+            Dir::from_yaw(ctx.yaw)
+        };
+        state = with(
+            state,
+            "orientation",
+            &format!("{}_{}", front.name(), top.name()),
+        );
+    }
     if prop(state, "vertical_direction").is_some() {
         let dir = if face == Dir::Down { "down" } else { "up" };
         state = with(state, "vertical_direction", dir);

@@ -273,6 +273,12 @@ fn decode(id: i32, packet: &[u8]) -> io::Result<Option<Event>> {
                 carried: hashed_stack(&mut r)?,
             }
         }
+        serverbound::CONTAINER_SLOT_STATE_CHANGED => Event::SlotState {
+            id,
+            slot: r.varint()?,
+            window: r.varint()?,
+            enabled: r.bool()?,
+        },
         serverbound::CONTAINER_BUTTON_CLICK => Event::ContainerButton {
             id,
             window: r.varint()?,

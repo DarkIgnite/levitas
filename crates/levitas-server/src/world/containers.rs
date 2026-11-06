@@ -39,6 +39,7 @@ pub enum BlockEntity {
     Brushable(Box<super::archaeology::Brushable>),
     Pot(Box<super::archaeology::Pot>),
     Jukebox(Box<super::jukebox::Jukebox>),
+    Crafter(Box<super::crafter::Crafter>),
 }
 
 pub struct Plain {
@@ -109,6 +110,7 @@ impl BlockEntity {
             BlockEntity::Brushable(_) => ("minecraft:brushable_block", &[][..]),
             BlockEntity::Pot(_) => ("minecraft:decorated_pot", &[][..]),
             BlockEntity::Jukebox(_) => ("minecraft:jukebox", &[][..]),
+            BlockEntity::Crafter(c) => ("minecraft:crafter", &c.items[..]),
         };
         let mut nbt = Compound::new()
             .with("id", id)
@@ -165,6 +167,9 @@ impl BlockEntity {
         if let BlockEntity::Jukebox(j) = self {
             j.write_nbt(&mut nbt);
         }
+        if let BlockEntity::Crafter(c) = self {
+            c.write_nbt(&mut nbt);
+        }
         nbt
     }
 
@@ -217,6 +222,9 @@ impl BlockEntity {
             }
             "minecraft:jukebox" => {
                 BlockEntity::Jukebox(Box::new(super::jukebox::Jukebox::read_nbt(nbt)))
+            }
+            "minecraft:crafter" => {
+                BlockEntity::Crafter(Box::new(super::crafter::Crafter::read_nbt(nbt)))
             }
             id @ ("minecraft:sign" | "minecraft:hanging_sign") => BlockEntity::Sign(Box::new(
                 super::signs::Sign::read_nbt(id == "minecraft:hanging_sign", nbt),
@@ -303,6 +311,7 @@ impl BlockEntity {
             }
             "minecraft:decorated_pot" => Some(BlockEntity::Pot(Box::default())),
             "minecraft:jukebox" => Some(BlockEntity::Jukebox(Box::default())),
+            "minecraft:crafter" => Some(BlockEntity::Crafter(Box::default())),
             _ => super::signs::sign_kind(state)
                 .map(|hanging| BlockEntity::Sign(Box::new(super::signs::Sign::new(hanging)))),
         }
@@ -327,6 +336,7 @@ impl BlockEntity {
             BlockEntity::Brushable(_) => block_entity_type::BRUSHABLE_BLOCK,
             BlockEntity::Pot(_) => block_entity_type::DECORATED_POT,
             BlockEntity::Jukebox(_) => block_entity_type::JUKEBOX,
+            BlockEntity::Crafter(_) => block_entity_type::CRAFTER,
         }
     }
 
@@ -347,6 +357,7 @@ impl BlockEntity {
             BlockEntity::Brewing(b) => &b.items,
             BlockEntity::Pot(p) => &p.items,
             BlockEntity::Jukebox(j) => &j.items,
+            BlockEntity::Crafter(c) => &c.items,
             BlockEntity::Plain(_)
             | BlockEntity::Spawner(_)
             | BlockEntity::Sign(_)
@@ -364,6 +375,7 @@ impl BlockEntity {
             BlockEntity::Brewing(b) => &mut b.items,
             BlockEntity::Pot(p) => &mut p.items,
             BlockEntity::Jukebox(j) => &mut j.items,
+            BlockEntity::Crafter(c) => &mut c.items,
             BlockEntity::Plain(_)
             | BlockEntity::Spawner(_)
             | BlockEntity::Sign(_)
@@ -387,6 +399,7 @@ impl BlockEntity {
             BlockEntity::Brushable(b) => &mut b.viewers,
             BlockEntity::Pot(p) => &mut p.viewers,
             BlockEntity::Jukebox(j) => &mut j.viewers,
+            BlockEntity::Crafter(c) => &mut c.viewers,
         }
     }
 }
@@ -504,6 +517,11 @@ impl World {
     pub(super) fn open_container(&mut self, id: i32, pos: BlockPos, state: u16) -> bool {
         let (view, menu, title) = match BlockInfo::of(state).name {
             "minecraft:crafting_table" => (View::Crafting, menu::CRAFTING, "Crafting"),
+            "minecraft:crafter" => (
+                View::Chest(pos, super::crafter::GRID),
+                menu::CRAFTER_3X3,
+                "Crafter",
+            ),
             "minecraft:enchanting_table" => (View::Enchanting(pos), menu::ENCHANTMENT, "Enchant"),
             "minecraft:anvil" | "minecraft:chipped_anvil" | "minecraft:damaged_anvil" => {
                 (View::Anvil(pos), menu::ANVIL, "Repair & Name")
@@ -563,6 +581,9 @@ impl World {
             self.stat(id, levitas_registry::stat_type::CUSTOM, stat, 1);
         }
         self.open_view(id, view, menu, title);
+        if BlockInfo::of(state).name == "minecraft:crafter" {
+            self.send_crafter_state(id, pos);
+        }
         true
     }
 

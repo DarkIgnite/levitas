@@ -489,10 +489,16 @@ fn wall_shape(state: u16, pos: BlockPos, get: &mut impl FnMut(BlockPos) -> u16) 
                 && facing(neighbor).is_some_and(|f| f.axis() != dir.axis()))
             || (sturdy(neighbor, dir.opposite()) && !connection_exception(neighbor));
         connected[i] = connects;
-        // A side is tall when the block above covers it.
+        // A side is tall when the block above covers it: a full face, or a wall
+        // above running the same way.
+        let covered = if block_has_tag(above, "minecraft:walls") {
+            prop(above, dir.name()).is_some_and(|h| h != "none")
+        } else {
+            sturdy(above, Dir::Down)
+        };
         let height = if !connects {
             "none"
-        } else if sturdy(above, Dir::Down) || block_has_tag(above, "minecraft:walls") {
+        } else if covered {
             "tall"
         } else {
             "low"
@@ -502,7 +508,11 @@ fn wall_shape(state: u16, pos: BlockPos, get: &mut impl FnMut(BlockPos) -> u16) 
     // The post shows unless the wall runs straight through with nothing on top.
     let [north, south, west, east] = connected;
     let straight = (north && south && !west && !east) || (west && east && !north && !south);
-    let post = !straight || (!is_air(above) && !block_has_tag(above, "minecraft:walls"));
+    // A straight run gets its post back under a wall with a post, or under what
+    // stands on posts (torches, lanterns, signs, ...).
+    let post = !straight
+        || block_has_tag(above, "minecraft:wall_post_override")
+        || (block_has_tag(above, "minecraft:walls") && prop(above, "up") == Some("true"));
     with_bool(s, "up", post)
 }
 

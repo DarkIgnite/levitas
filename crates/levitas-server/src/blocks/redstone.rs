@@ -315,6 +315,7 @@ pub fn reacts(state: u16) -> bool {
             "minecraft:hopper"
                 | "minecraft:dropper"
                 | "minecraft:dispenser"
+                | "minecraft:crafter"
                 | "minecraft:note_block"
                 | "minecraft:bell"
                 | "minecraft:powered_rail"

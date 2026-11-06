@@ -237,6 +237,8 @@ impl World {
             self.react_rail(pos, state);
         } else if n == "minecraft:dropper" || n == "minecraft:dispenser" {
             self.react_dispenser(pos, state);
+        } else if n == "minecraft:crafter" {
+            self.react_crafter(pos, state);
         } else if blocks::is_door(state) {
             if prop(state, "half") == Some("upper") {
                 return; // the lower half decides for both
@@ -375,6 +377,12 @@ impl World {
                 return prop(state, "level").and_then(|l| l.parse().ok());
             }
             "minecraft:lava_cauldron" => return Some(3),
+            "minecraft:crafter" => {
+                return Some(match self.block_entities.get(&pos) {
+                    Some(BlockEntity::Crafter(c)) => c.signal(),
+                    _ => 0,
+                });
+            }
             "minecraft:jukebox" => {
                 return Some(match self.block_entities.get(&pos) {
                     Some(BlockEntity::Jukebox(j)) => j.signal(),
@@ -482,6 +490,8 @@ impl World {
             }
         } else if n == "minecraft:dropper" || n == "minecraft:dispenser" {
             self.dispense(pos, state);
+        } else if n == "minecraft:crafter" {
+            self.crafter_craft(pos, state);
         } else if is_observer(state) {
             if prop(state, "powered") == Some("true") {
                 self.set_block(pos, with_bool(state, "powered", false));

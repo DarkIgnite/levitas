@@ -20,6 +20,7 @@ mod commands;
 mod commands_extra;
 mod conduit;
 mod containers;
+mod crafter;
 mod devices;
 pub mod dimension;
 mod dragon;
@@ -239,6 +240,13 @@ pub enum Event {
         mode: i32,
         changed: Vec<(i16, Stack)>,
         carried: Stack,
+    },
+    /// A crafter slot switched off or on.
+    SlotState {
+        id: i32,
+        window: i32,
+        slot: i32,
+        enabled: bool,
     },
     /// One of a window's buttons, such as an enchanting table's slots.
     ContainerButton {
@@ -947,6 +955,12 @@ impl World {
             } => self.set_beacon(id, primary, secondary),
             Event::RenameItem { id, name } => self.rename_item(id, &name),
             Event::ContainerButton { id, window, button } => self.window_button(id, window, button),
+            Event::SlotState {
+                id,
+                window,
+                slot,
+                enabled,
+            } => self.crafter_slot_state(id, window, slot, enabled),
             Event::HeldSlot { id, slot } => {
                 let mut lower = false;
                 let mut stop_glass = false;

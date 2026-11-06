@@ -520,3 +520,29 @@ fn dry_grass_grows_on_sand_and_terracotta() {
         assert!(can_survive(grass, pos, &mut get), "{ground}");
     }
 }
+
+#[test]
+fn walls_rise_under_what_covers_them() {
+    let mut w = World::new();
+    let wall = state("minecraft:cobblestone_wall");
+    for x in 0..3 {
+        w.set(pos(x, 0, 0), wall);
+    }
+    for x in 0..3 {
+        w.update(pos(x, 0, 0));
+    }
+    // A straight run has no post and low sides.
+    let mid = w.update(pos(1, 0, 0));
+    assert_eq!(prop(mid, "up"), Some("false"));
+    assert_eq!(prop(mid, "east"), Some("low"));
+    // A full block on top makes the sides tall, the run stays post-free.
+    w.set(pos(1, 1, 0), block::STONE);
+    let mid = w.update(pos(1, 0, 0));
+    assert_eq!(prop(mid, "east"), Some("tall"));
+    assert_eq!(prop(mid, "up"), Some("false"));
+    // A torch on top brings the post back.
+    w.set(pos(1, 1, 0), state("minecraft:torch"));
+    let mid = w.update(pos(1, 0, 0));
+    assert_eq!(prop(mid, "up"), Some("true"));
+    assert_eq!(prop(mid, "east"), Some("low"));
+}

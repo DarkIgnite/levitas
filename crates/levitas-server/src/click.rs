@@ -254,7 +254,7 @@ fn is_blaze_powder(stack: &Stack) -> bool {
 }
 
 /// What a crafting ingredient leaves behind in the grid (a bucket from milk, ...).
-fn crafting_remainder(item: i32) -> Option<i32> {
+pub(crate) fn crafting_remainder(item: i32) -> Option<i32> {
     let remainder = match ItemInfo::get(item)?.name {
         "minecraft:milk_bucket"
         | "minecraft:water_bucket"
