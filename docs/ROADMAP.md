@@ -674,8 +674,14 @@ Known gaps are listed under each phase instead of being hidden.
       from vanilla's chest tables when their chunk arrives (`loot.rs`: random slots,
       split stacks, enchanted and worn gear, enchanted books); spawners keep the mob
       the generator gave them. Saved chests from vanilla worlds that were never opened
-      are filled when loaded. Known gaps: decorated pots, suspicious sand and gravel,
-      mineshaft chest minecarts, and potions, maps and names in loot.
+      are filled when loaded. Treasure and explorer maps in chests are drawn to the
+      nearest of their structure (and left out when there is none, as vanilla does);
+      loot sets potions, stew effects, ominous bottle levels, goat horn instruments and
+      enchantments. Suspicious sand and gravel hold archaeology loot that brushing brings
+      out (`world/archaeology.rs`); decorated pots keep their sherds and a stack, and
+      trial chamber pots are filled from their table; mineshafts' chest minecarts come
+      with their loot table, rolled when opened or broken. Known gap: abandoned camp
+      maps (Pumpkin does not generate abandoned camps) and set_name's item names.
 - [x] Nether and End generation, by Pumpkin like the overworld (see Phase 9).
 - [x] Loading existing Leaf/vanilla worlds (pre-generated terrain). Chunks, entities,
       block entities, players, statistics and advancements saved by vanilla or Leaf
@@ -683,8 +689,10 @@ Known gaps are listed under each phase instead of being hidden.
       `grass` to `short_grass`) take their new names (`levitas_registry::current_name`),
       where unknown ones would become air. Opening a world moves it into 26.3's layout,
       Paper and Leaf's `world_nether/DIM-1` and `world_the_end/DIM1` included (checked
-      on a world made by a vanilla 1.21.8 server). Known gaps: worlds older than 1.20.5
-      (items saved without components) lose item data; Pumpkin's terrain at the edge of
+      on a world made by a vanilla 1.21.8 server). Items saved before 1.20.5 (`Count`
+      and `tag`) are read too: damage, enchantments, stored enchantments, repair cost,
+      names, dye colours, potions, maps, trims and lodestone targets. Known gaps:
+      worlds from before 1.13 (numeric IDs) are not read; Pumpkin's terrain at the edge of
       the old world may not line up exactly with what vanilla would have generated;
       Leaf's own plugin data is not read.
 

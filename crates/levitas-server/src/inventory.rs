@@ -117,6 +117,112 @@ impl MapTarget {
     }
 }
 
+/// An item as saved before 1.20.5 (`Count`, and `tag` with `Damage`, `Enchantments`,
+/// `display`, ...) in the components form, as the game's own upgrade does for the
+/// parts Levitas keeps.
+fn upgrade_legacy_item(old: &Compound) -> Compound {
+    let mut item = Compound::new();
+    if let Some(id) = old.str("id") {
+        item.insert("id", id);
+    }
+    item.insert("count", old.int("Count").unwrap_or(1) as i32);
+    let Some(tag) = old.compound("tag") else {
+        return item;
+    };
+    let mut c = Compound::new();
+    if let Some(damage) = tag.int("Damage").filter(|&d| d > 0) {
+        c.insert("minecraft:damage", damage as i32);
+    }
+    if let Some(cost) = tag.int("RepairCost").filter(|&d| d > 0) {
+        c.insert("minecraft:repair_cost", cost as i32);
+    }
+    for (key, component) in [
+        ("Enchantments", "minecraft:enchantments"),
+        ("StoredEnchantments", "minecraft:stored_enchantments"),
+    ] {
+        let mut levels = Compound::new();
+        for e in tag
+            .list(key)
+            .unwrap_or_default()
+            .iter()
+            .filter_map(Tag::as_compound)
+        {
+            if let (Some(id), Some(lvl)) = (e.str("id"), e.int("lvl")) {
+                levels.insert(id, lvl.clamp(1, 255) as i32);
+            }
+        }
+        if !levels.is_empty() {
+            c.insert(component, levels);
+        }
+    }
+    if let Some(display) = tag.compound("display") {
+        if let Some(name) = display.str("Name").and_then(legacy_text) {
+            c.insert("minecraft:custom_name", name.as_str());
+        }
+        if let Some(color) = display.int("color") {
+            c.insert("minecraft:dyed_color", color as i32);
+        }
+    }
+    if let Some(potion) = tag.str("Potion") {
+        c.insert(
+            "minecraft:potion_contents",
+            Compound::new().with("potion", potion),
+        );
+    }
+    if let Some(map) = tag.int("map") {
+        c.insert("minecraft:map_id", map as i32);
+    }
+    if let Some(trim) = tag.compound("Trim") {
+        c.insert("minecraft:trim", trim.clone());
+    }
+    if let Some(pos) = tag.compound("LodestonePos") {
+        let (x, y, z) = (pos.int("X"), pos.int("Y"), pos.int("Z"));
+        let mut tracker = Compound::new().with("tracked", tag.int("LodestoneTracked") != Some(0));
+        if let (Some(x), Some(y), Some(z)) = (x, y, z) {
+            tracker.insert(
+                "target",
+                Compound::new()
+                    .with("pos", vec![x as i32, y as i32, z as i32])
+                    .with(
+                        "dimension",
+                        tag.str("LodestoneDimension")
+                            .unwrap_or("minecraft:overworld"),
+                    ),
+            );
+        }
+        c.insert("minecraft:lodestone_tracker", tracker);
+    }
+    if !c.is_empty() {
+        item.insert("components", c);
+    }
+    item
+}
+
+/// The plain text of a name saved as a JSON text component (`{"text":"Bob"}`).
+fn legacy_text(json: &str) -> Option<String> {
+    fn walk(v: &serde_json::Value, out: &mut String) {
+        match v {
+            serde_json::Value::String(s) => out.push_str(s),
+            serde_json::Value::Array(parts) => parts.iter().for_each(|p| walk(p, out)),
+            serde_json::Value::Object(o) => {
+                if let Some(t) = o.get("text").and_then(|t| t.as_str()) {
+                    out.push_str(t);
+                }
+                if let Some(extra) = o.get("extra") {
+                    walk(extra, out);
+                }
+            }
+            _ => {}
+        }
+    }
+    let mut out = String::new();
+    match serde_json::from_str::<serde_json::Value>(json) {
+        Ok(v) => walk(&v, &mut out),
+        Err(_) => out.push_str(json),
+    }
+    (!out.is_empty()).then_some(out)
+}
+
 /// `map_post` values, as 26.3 numbers them.
 pub const MAP_LOCK: u8 = 0;
 pub const MAP_SCALE: u8 = 1;
@@ -311,6 +417,12 @@ impl Stack {
 
     /// Reads a saved stack; unknown items come back empty.
     pub fn from_nbt(nbt: &Compound) -> Stack {
+        // Items saved before 1.20.5: a `Count` byte and a `tag` compound.
+        if nbt.get("components").is_none()
+            && (nbt.get("Count").is_some() || nbt.get("tag").is_some())
+        {
+            return Stack::from_nbt(&upgrade_legacy_item(nbt));
+        }
         let Some(item) = nbt.str("id").and_then(ItemInfo::id_of_saved) else {
             return Stack::EMPTY;
         };
@@ -888,5 +1000,59 @@ mod tests {
         let sent = write_stack(Writer::packet(0), stack).into_frame();
         let tail = levitas_nbt::to_network(&Tag::Compound(stack.map_target.unwrap().to_nbt()));
         assert!(sent.ends_with(&tail));
+    }
+
+    #[test]
+    fn items_saved_before_1_20_5_keep_their_data() {
+        let old = Compound::new()
+            .with("id", "minecraft:diamond_sword")
+            .with("Count", 1i8)
+            .with(
+                "tag",
+                Compound::new()
+                    .with("Damage", 12)
+                    .with("RepairCost", 3)
+                    .with(
+                        "Enchantments",
+                        vec![Tag::Compound(
+                            Compound::new()
+                                .with("id", "minecraft:sharpness")
+                                .with("lvl", 4i16),
+                        )],
+                    )
+                    .with(
+                        "display",
+                        Compound::new().with("Name", "{\"text\":\"Old\",\"extra\":[\" Blade\"]}"),
+                    ),
+            );
+        let s = Stack::from_nbt(&old);
+        assert_eq!(s.item, item("minecraft:diamond_sword"));
+        assert_eq!((s.count, s.damage, s.repair_cost), (1, 12, 3));
+        assert_eq!(s.enchants.level_of("minecraft:sharpness"), 4);
+        assert_eq!(s.name, Some("Old Blade"));
+        let book = Compound::new()
+            .with("id", "minecraft:enchanted_book")
+            .with("Count", 1i8)
+            .with(
+                "tag",
+                Compound::new().with(
+                    "StoredEnchantments",
+                    vec![Tag::Compound(
+                        Compound::new()
+                            .with("id", "minecraft:mending")
+                            .with("lvl", 1i16),
+                    )],
+                ),
+            );
+        assert_eq!(
+            Stack::from_nbt(&book)
+                .enchants
+                .level_of("minecraft:mending"),
+            1
+        );
+        let stack = Compound::new()
+            .with("id", "minecraft:cobblestone")
+            .with("Count", 37i8);
+        assert_eq!(Stack::from_nbt(&stack).count, 37);
     }
 }

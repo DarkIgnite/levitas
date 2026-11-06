@@ -402,6 +402,8 @@ pub enum View {
     Cartography(BlockPos),
     /// A beacon: one payment slot.
     Beacon(BlockPos),
+    /// The chest of the minecart with this entity ID.
+    CartChest(i32),
 }
 
 impl View {
@@ -420,6 +422,7 @@ impl View {
             View::Brewing(_) => super::brewing::SLOTS,
             View::Merchant(_) => 3,
             View::Beacon(_) => 1,
+            View::CartChest(_) => super::minecarts::CART_CHEST_SLOTS,
         }
     }
 
@@ -439,7 +442,8 @@ impl View {
             | View::Stonecutter(_)
             | View::Smithing(_)
             | View::Cartography(_)
-            | View::Merchant(_) => Vec::new(),
+            | View::Merchant(_)
+            | View::CartChest(_) => Vec::new(),
         }
     }
 
@@ -449,7 +453,9 @@ impl View {
             View::Inventory => click::Layout::Inventory,
             View::Crafting => click::Layout::Crafting,
             View::Furnace(_, kind) => click::Layout::Furnace(kind),
-            View::Chest(..) | View::DoubleChest(..) => click::Layout::Chest(self.container_len()),
+            View::Chest(..) | View::DoubleChest(..) | View::CartChest(_) => {
+                click::Layout::Chest(self.container_len())
+            }
             View::Enchanting(_) => click::Layout::Enchanting,
             View::Anvil(_) => click::Layout::Anvil,
             View::Grindstone(_) => click::Layout::Grindstone,
@@ -542,6 +548,12 @@ impl World {
         if let Some(stat) = super::stats::opened(BlockInfo::of(state).name) {
             self.stat(id, levitas_registry::stat_type::CUSTOM, stat, 1);
         }
+        self.open_view(id, view, menu, title);
+        true
+    }
+
+    /// Opens a container window on `view` for the player.
+    pub(super) fn open_view(&mut self, id: i32, view: View, menu: i32, title: &str) {
         self.close_container(id);
         let mut first_viewer = false;
         for (part, _) in view.parts() {
@@ -614,7 +626,6 @@ impl World {
         if first_viewer {
             self.container_opened(view, true);
         }
-        true
     }
 
     /// The server's view of every slot in a window.
@@ -652,6 +663,11 @@ impl World {
                 let open = p.open.as_ref().expect("window is open");
                 open.grid[..1].to_vec()
             }
+            View::CartChest(cart) => self
+                .carts
+                .get(&cart)
+                .and_then(|c| c.chest.as_ref())
+                .map_or_else(|| vec![Stack::EMPTY; view.container_len()], |c| c.to_vec()),
             View::Chest(..) | View::Furnace(..) | View::DoubleChest(..) | View::Brewing(..) => {
                 let mut slots = vec![Stack::EMPTY; view.container_len()];
                 for (part, first) in view.parts() {
@@ -715,6 +731,11 @@ impl World {
                 let p = self.players.get_mut(&id).expect("player exists");
                 let open = p.open.as_mut().expect("window is open");
                 open.grid[..1].copy_from_slice(&slots[..1]);
+            }
+            View::CartChest(cart) => {
+                if let Some(chest) = self.carts.get_mut(&cart).and_then(|c| c.chest.as_mut()) {
+                    chest.copy_from_slice(&slots[..n]);
+                }
             }
             View::Chest(..) | View::Furnace(..) | View::DoubleChest(..) | View::Brewing(..) => {
                 // Taking a furnace's result pays out the experience its cooking earned.
@@ -1184,7 +1205,7 @@ impl World {
                     self.container_opened(open.view, false);
                 }
             }
-            View::Inventory => {}
+            View::Inventory | View::CartChest(_) => {}
         }
         self.return_to_inventory(id, returned);
     }

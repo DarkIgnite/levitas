@@ -1665,6 +1665,16 @@ impl World {
     /// Spawns the villagers, and any other mobs Levitas knows, a structure placed.
     pub(super) fn spawn_structure_mobs(&mut self, entities: &[Compound]) {
         for nbt in entities {
+            // Mineshafts' chest minecarts, with their loot table still to roll.
+            if let Some(cart) = super::minecarts::Cart::from_nbt(nbt, &mut self.rng) {
+                self.mob_chunks.insert(cart.chunk());
+                let id = next_entity_id();
+                for packet in super::minecarts::spawn_packets(id, &cart) {
+                    self.broadcast(packet, None);
+                }
+                self.carts.insert(id, cart);
+                continue;
+            }
             if let Some(mob) = Mob::read(nbt, &mut self.rng) {
                 self.mobs.insert(next_entity_id(), mob);
             }

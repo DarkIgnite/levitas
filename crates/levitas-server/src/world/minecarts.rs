@@ -46,7 +46,15 @@ pub struct Cart {
     damage: f32,
     hurt_direction: i32,
     sent_pos: [f64; 3],
+    /// A chest minecart's 27 slots.
+    pub chest: Option<Box<[Stack]>>,
+    /// The loot table a structure's chest minecart still has to be filled from, and
+    /// its seed.
+    pub loot: Option<(String, i64)>,
 }
+
+/// Slots in a chest minecart.
+pub const CART_CHEST_SLOTS: usize = 27;
 
 /// One end of a rail piece: the side it leaves the block by, and whether that end is
 /// the raised end of a slope.
@@ -121,7 +129,14 @@ impl Cart {
             damage: 0.0,
             hurt_direction: 1,
             sent_pos: pos,
+            chest: None,
+            loot: None,
         }
+    }
+
+    fn with_chest(mut self) -> Self {
+        self.chest = Some(vec![Stack::EMPTY; CART_CHEST_SLOTS].into_boxed_slice());
+        self
     }
 
     pub fn chunk(&self) -> (i32, i32) {
@@ -138,8 +153,13 @@ impl Cart {
             (self.uuid >> 32) as i32,
             self.uuid as i32,
         ];
-        Compound::new()
-            .with("id", "minecraft:minecart")
+        let id = if self.chest.is_some() {
+            "minecraft:chest_minecart"
+        } else {
+            "minecraft:minecart"
+        };
+        let mut nbt = Compound::new()
+            .with("id", id)
             .with("UUID", uuid.to_vec())
             .with(
                 "Pos",
@@ -149,18 +169,48 @@ impl Cart {
                 "Motion",
                 self.vel.iter().map(|&v| Tag::Double(v)).collect::<Vec<_>>(),
             )
-            .with("Rotation", vec![Tag::Float(self.yaw), Tag::Float(0.0)])
+            .with("Rotation", vec![Tag::Float(self.yaw), Tag::Float(0.0)]);
+        if let Some(items) = &self.chest {
+            nbt.insert(
+                "Items",
+                crate::inventory::items_to_nbt(items.iter().copied().enumerate()),
+            );
+        }
+        if let Some((table, seed)) = &self.loot {
+            nbt.insert("LootTable", table.as_str());
+            if *seed != 0 {
+                nbt.insert("LootTableSeed", *seed);
+            }
+        }
+        nbt
     }
 
     pub fn from_nbt(nbt: &Compound, rng: &mut Rng) -> Option<Cart> {
-        if nbt.str("id")? != "minecraft:minecart" {
-            return None;
-        }
+        let chest = match nbt.str("id")? {
+            "minecraft:minecart" => false,
+            "minecraft:chest_minecart" => true,
+            _ => return None,
+        };
         let read = |key: &str| -> Option<[f64; 3]> {
             let v: Vec<f64> = nbt.list(key)?.iter().filter_map(Tag::as_f64).collect();
             Some([*v.first()?, *v.get(1)?, *v.get(2)?])
         };
         let mut cart = Cart::new(read("Pos")?, rng);
+        if chest {
+            cart = cart.with_chest();
+            if let Some(items) = cart.chest.as_mut() {
+                for (slot, stack) in
+                    crate::inventory::items_from_nbt(nbt.list("Items").unwrap_or_default())
+                {
+                    if let Some(s) = items.get_mut(slot) {
+                        *s = stack;
+                    }
+                }
+            }
+            cart.loot = nbt
+                .str("LootTable")
+                .map(|t| (t.to_owned(), nbt.int("LootTableSeed").unwrap_or(0)));
+        }
         cart.vel = read("Motion").unwrap_or([0.0; 3]);
         if let Some(&[a, b, c, d]) = nbt.int_array("UUID") {
             cart.uuid = (u128::from(a as u32) << 96)
@@ -176,7 +226,11 @@ pub fn spawn_packets(id: i32, cart: &Cart) -> Vec<Writer> {
     let mut packets = vec![Writer::packet(clientbound::ADD_ENTITY)
         .varint(id)
         .uuid(cart.uuid)
-        .varint(entity_type::MINECART)
+        .varint(if cart.chest.is_some() {
+            entity_type::CHEST_MINECART
+        } else {
+            entity_type::MINECART
+        })
         .f64(cart.pos[0])
         .f64(cart.pos[1])
         .f64(cart.pos[2])
@@ -230,16 +284,21 @@ impl World {
             return false;
         };
         let stack = p.inventory.slots[slot];
-        if ItemInfo::get(stack.item).is_none_or(|i| i.name != "minecraft:minecart") {
-            return false;
-        }
+        let chest = match ItemInfo::get(stack.item).map_or("", |i| i.name) {
+            "minecraft:minecart" => false,
+            "minecraft:chest_minecart" => true,
+            _ => return false,
+        };
         let survival = p.survival();
         let state = self.block(pos);
         if !is_rail(state) {
             return false;
         }
         let at = center(pos, shape_of(state));
-        let cart = Cart::new(at, &mut self.rng);
+        let mut cart = Cart::new(at, &mut self.rng);
+        if chest {
+            cart = cart.with_chest();
+        }
         let cart_id = next_entity_id();
         for packet in spawn_packets(cart_id, &cart) {
             self.broadcast(packet, None);
@@ -264,6 +323,13 @@ impl World {
             return true;
         };
         let near = distance(p.pos, cart.pos) <= 6.0;
+        // A chest minecart opens instead.
+        if cart.chest.is_some() {
+            if near && p.alive {
+                self.open_cart_chest(id, target);
+            }
+            return true;
+        }
         if cart.rider.is_some() || !p.alive || p.sneaking || !near || p.riding.is_some() {
             return true;
         }
@@ -322,16 +388,70 @@ impl World {
             if let Some(rider) = self.carts.get(&target).and_then(|c| c.rider) {
                 self.get_off(rider);
             }
-            if let Some(cart) = self.carts.remove(&target) {
+            self.close_cart_viewers(target);
+            if let Some(mut cart) = self.carts.remove(&target) {
                 self.broadcast(items::remove_entity(target), None);
+                // Its contents spill out (loot not yet rolled is rolled first).
+                self.roll_cart_loot(&mut cart);
+                for &s in cart.chest.iter().flat_map(|c| c.iter()) {
+                    if !s.is_empty() {
+                        self.scatter_item(cart.pos, s);
+                    }
+                }
                 if !creative {
                     if let Some(item) = ItemInfo::id_of("minecraft:minecart") {
                         self.scatter_item(cart.pos, Stack::new(item, 1));
+                    }
+                    if cart.chest.is_some() {
+                        if let Some(chest) = ItemInfo::id_of("minecraft:chest") {
+                            self.scatter_item(cart.pos, Stack::new(chest, 1));
+                        }
                     }
                 }
             }
         }
         true
+    }
+
+    /// Fills a structure's chest minecart from its loot table, the first time.
+    fn roll_cart_loot(&mut self, cart: &mut Cart) {
+        if let (Some((table, seed)), Some(items)) = (cart.loot.take(), cart.chest.as_mut()) {
+            self.loot.fill(&table, seed, items);
+        }
+    }
+
+    /// Opens a chest minecart's 27 slots.
+    fn open_cart_chest(&mut self, id: i32, cart_id: i32) {
+        if let Some(mut cart) = self.carts.remove(&cart_id) {
+            self.roll_cart_loot(&mut cart);
+            self.carts.insert(cart_id, cart);
+        }
+        self.open_view(
+            id,
+            super::containers::View::CartChest(cart_id),
+            levitas_registry::menu::GENERIC_9X3,
+            "Minecart with Chest",
+        );
+    }
+
+    /// Players looking into a chest minecart that is gone have the window closed.
+    fn close_cart_viewers(&mut self, cart_id: i32) {
+        let viewers: Vec<(i32, i32)> = self
+            .players
+            .iter()
+            .filter_map(|(&pid, p)| {
+                let open = p.open.as_ref()?;
+                (open.view == super::containers::View::CartChest(cart_id))
+                    .then_some((pid, open.window))
+            })
+            .collect();
+        for (pid, window) in viewers {
+            self.close_container(pid);
+            self.send(
+                pid,
+                Writer::packet(clientbound::CONTAINER_CLOSE).varint(window),
+            );
+        }
     }
 
     pub(super) fn tick_minecarts(&mut self) {
@@ -769,5 +889,58 @@ mod tests {
             w.tick_minecarts();
         }
         assert!(w.carts[&id].pos[0] < 3.0, "{:?}", w.carts[&id].pos);
+    }
+
+    #[test]
+    fn mineshaft_chest_minecarts_roll_their_loot_when_opened_and_spill_when_broken() {
+        let mut w = world();
+        let nbt = Compound::new()
+            .with("id", "minecraft:chest_minecart")
+            .with(
+                "Pos",
+                vec![Tag::Double(4.5), Tag::Double(-60.0), Tag::Double(4.5)],
+            )
+            .with("LootTable", "minecraft:chests/abandoned_mineshaft")
+            .with("LootTableSeed", 11i64);
+        w.spawn_structure_mobs(&[nbt]);
+        let (&cart_id, cart) = w.carts.iter().next().expect("the cart came out");
+        assert!(cart.loot.is_some() && cart.chest.is_some());
+        // Saved as it is, loot still to roll.
+        let saved = cart.to_nbt();
+        assert_eq!(saved.str("id"), Some("minecraft:chest_minecart"));
+        assert!(saved.str("LootTable").is_some());
+
+        let (out, _frames) = tokio::sync::mpsc::channel(100_000);
+        let profile = crate::connection::Profile {
+            name: "Miner".to_owned(),
+            uuid: 9,
+            properties: Vec::new(),
+        };
+        let pid = next_entity_id();
+        w.players
+            .insert(pid, Player::new(profile, out, [4.5, -60.0, 6.0]));
+        assert!(w.board_cart(pid, cart_id));
+        let cart = &w.carts[&cart_id];
+        assert!(cart.loot.is_none());
+        let filled = cart
+            .chest
+            .as_ref()
+            .unwrap()
+            .iter()
+            .filter(|s| !s.is_empty())
+            .count();
+        assert!(filled > 0, "the loot was rolled");
+        assert_eq!(
+            w.players[&pid].open.as_ref().map(|o| o.view),
+            Some(super::super::containers::View::CartChest(cart_id))
+        );
+
+        // Broken: the window closes and everything drops, chest and minecart too.
+        for _ in 0..10 {
+            w.hit_cart(pid, cart_id);
+        }
+        assert!(!w.carts.contains_key(&cart_id));
+        assert!(w.players[&pid].open.is_none());
+        assert!(w.items.len() >= filled + 2);
     }
 }
