@@ -584,6 +584,8 @@ pub struct Mob {
     pub viewers: HashSet<i32>,
     /// A villager's profession, trades and workstation.
     pub villager: Option<Box<super::villagers::Villager>>,
+    /// The boat or minecart it sits in.
+    pub vehicle: Option<i32>,
     /// Iron golems: the monster being fought, and whether a player built it.
     pub prey: Option<i32>,
     pub player_created: bool,
@@ -674,6 +676,7 @@ impl Mob {
             sent_pos: pos,
             sent_angles: (0, 0),
             viewers: HashSet::new(),
+            vehicle: None,
             villager: match kind {
                 MobKind::Villager | MobKind::ZombieVillager => Some(Box::new(
                     super::villagers::Villager::new("minecraft:plains"),
@@ -1549,7 +1552,9 @@ impl World {
             if mob.kind.swims() && !self.in_water(mob.pos) && self.tick.is_multiple_of(20) {
                 self.hurt_mob(id, &mut mob, 1.0, "minecraft:dry_out");
             }
-            if mob.kind.swims() && self.in_water(mob.pos) {
+            if self.ride_along(&mut mob) {
+                // Sitting in a boat or minecart: carried, not walking.
+            } else if mob.kind.swims() && self.in_water(mob.pos) {
                 self.swim_mob(&mut mob);
             } else if mob.kind.flies() {
                 self.fly_mob(&mut mob);
@@ -1561,6 +1566,33 @@ impl World {
             self.mobs.insert(id, mob);
         }
         self.track_mobs();
+    }
+
+    /// A mob in a vehicle goes where it goes. Returns whether it is riding.
+    fn ride_along(&self, mob: &mut Mob) -> bool {
+        let Some(v) = mob.vehicle else {
+            return false;
+        };
+        let at = self
+            .boats
+            .get(&v)
+            .map(|b| b.pos)
+            .or_else(|| self.carts.get(&v).map(|c| c.pos));
+        match at {
+            Some(pos) => {
+                mob.pos = pos;
+                mob.vel = [0.0; 3];
+                mob.target = None;
+                mob.path.clear();
+                mob.on_ground = true;
+                mob.fall_distance = 0.0;
+                true
+            }
+            None => {
+                mob.vehicle = None;
+                false
+            }
+        }
     }
 
     fn tick_mob_effects(&mut self, id: i32, mob: &mut Mob) {

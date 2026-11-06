@@ -37,10 +37,21 @@ pub struct Boat {
     yaw: f32,
     fall: f64,
     pub rider: Option<i32>,
+    /// A second player, in the back seat.
+    pub second: Option<i32>,
+    /// Mobs sitting in it (picked up as they wander in).
+    pub mobs: Vec<i32>,
+    /// A chest boat's 27 slots.
+    pub chest: Option<Box<[Stack]>>,
     damage: f32,
     hurt_direction: i32,
     sent_pos: [f64; 3],
 }
+
+/// Slots of a chest boat.
+const CHEST_SLOTS: usize = 27;
+/// Mobs wider than this do not fit in a boat.
+const BOAT_WIDTH: f64 = 1.375;
 
 /// The boat a placed item makes, if it is one this server places.
 fn boat_kind(item: &str) -> Option<&'static str> {
@@ -48,8 +59,7 @@ fn boat_kind(item: &str) -> Option<&'static str> {
         .iter()
         .map(|i| i.name)
         .find(|&n| n == item)?;
-    let plain = (kind.ends_with("_boat") || kind.ends_with("_raft")) && !kind.contains("chest");
-    plain.then_some(kind)
+    (kind.ends_with("_boat") || kind.ends_with("_raft")).then_some(kind)
 }
 
 fn entity_type_of(kind: &str) -> i32 {
@@ -68,10 +78,37 @@ impl Boat {
             yaw,
             fall: 0.0,
             rider: None,
+            second: None,
+            mobs: Vec::new(),
+            chest: kind
+                .contains("chest")
+                .then(|| vec![Stack::EMPTY; CHEST_SLOTS].into_boxed_slice()),
             damage: 0.0,
             hurt_direction: 1,
             sent_pos: pos,
         }
+    }
+
+    /// Seats: two, one in a chest boat.
+    fn seats(&self) -> usize {
+        if self.chest.is_some() {
+            1
+        } else {
+            2
+        }
+    }
+
+    fn taken(&self) -> usize {
+        usize::from(self.rider.is_some()) + usize::from(self.second.is_some()) + self.mobs.len()
+    }
+
+    /// Everyone aboard, the driver first.
+    fn aboard(&self) -> Vec<i32> {
+        self.rider
+            .into_iter()
+            .chain(self.second)
+            .chain(self.mobs.iter().copied())
+            .collect()
     }
 
     pub fn chunk(&self) -> (i32, i32) {
@@ -97,6 +134,13 @@ impl Boat {
             )
             .with("Motion", vec![Tag::Double(0.0); 3])
             .with("Rotation", vec![Tag::Float(self.yaw), Tag::Float(0.0)])
+            .with(
+                "Items",
+                self.chest
+                    .as_ref()
+                    .map(|c| crate::inventory::items_to_nbt(c.iter().copied().enumerate()))
+                    .unwrap_or_default(),
+            )
     }
 
     pub fn from_nbt(nbt: &Compound, rng: &mut Rng) -> Option<Boat> {
@@ -110,6 +154,15 @@ impl Boat {
             _ => 0.0,
         };
         let mut boat = Boat::new(kind, [x, y, z], yaw, rng);
+        if let Some(items) = boat.chest.as_mut() {
+            for (slot, stack) in
+                crate::inventory::items_from_nbt(nbt.list("Items").unwrap_or_default())
+            {
+                if let Some(s) = items.get_mut(slot) {
+                    *s = stack;
+                }
+            }
+        }
         if let Some(&[a, b, c, d]) = nbt.int_array("UUID") {
             boat.uuid = (u128::from(a as u32) << 96)
                 | (u128::from(b as u32) << 64)
@@ -133,18 +186,21 @@ pub fn spawn_packets(id: i32, boat: &Boat) -> Vec<Writer> {
         .u8(angle(boat.yaw))
         .u8(angle(boat.yaw))
         .varint(0)];
-    if let Some(rider) = boat.rider {
-        packets.push(passengers(id, Some(rider)));
+    if boat.taken() > 0 {
+        packets.push(passengers(id, boat));
     }
     packets
 }
 
-fn passengers(boat: i32, rider: Option<i32>) -> Writer {
-    let packet = Writer::packet(clientbound::SET_PASSENGERS).varint(boat);
-    match rider {
-        Some(r) => packet.varint(1).varint(r),
-        None => packet.varint(0),
+fn passengers(id: i32, boat: &Boat) -> Writer {
+    let aboard = boat.aboard();
+    let mut packet = Writer::packet(clientbound::SET_PASSENGERS)
+        .varint(id)
+        .varint(aboard.len() as i32);
+    for e in aboard {
+        packet = packet.varint(e);
     }
+    packet
 }
 
 fn position_sync(id: i32, boat: &Boat) -> Writer {
@@ -216,13 +272,30 @@ impl World {
             return true;
         };
         let d: f64 = (0..3).map(|i| (p.pos[i] - boat.pos[i]).powi(2)).sum();
-        if boat.rider.is_some() || !p.alive || p.sneaking || d > 36.0 || p.riding.is_some() {
+        // Sneaking at a chest boat opens its chest.
+        if p.sneaking && boat.chest.is_some() && d <= 36.0 && p.alive {
+            self.open_view(
+                id,
+                super::containers::View::CartChest(target, CHEST_SLOTS),
+                levitas_registry::menu::GENERIC_9X3,
+                "Boat with Chest",
+            );
+            return true;
+        }
+        let full = boat.taken() >= boat.seats();
+        if full || !p.alive || p.sneaking || d > 36.0 || p.riding.is_some() {
             return true;
         }
         let at = boat.pos;
-        self.boats.get_mut(&target).expect("checked above").rider = Some(id);
+        let boat = self.boats.get_mut(&target).expect("checked above");
+        if boat.rider.is_none() {
+            boat.rider = Some(id);
+        } else {
+            boat.second = Some(id);
+        }
+        let packet = passengers(target, boat);
         self.players.get_mut(&id).expect("checked above").riding = Some(target);
-        self.broadcast(passengers(target, Some(id)), None);
+        self.broadcast(packet, None);
         self.move_player(id, Some(at), None, true);
         true
     }
@@ -238,9 +311,15 @@ impl World {
         let Some(boat) = self.boats.get_mut(&boat_id) else {
             return;
         };
-        boat.rider = None;
+        if boat.rider == Some(id) {
+            // The back-seat player moves up to steer.
+            boat.rider = boat.second.take();
+        } else if boat.second == Some(id) {
+            boat.second = None;
+        }
         let at = [boat.pos[0], boat.pos[1] + 0.6, boat.pos[2]];
-        self.broadcast(passengers(boat_id, None), None);
+        let packet = passengers(boat_id, boat);
+        self.broadcast(packet, None);
         if self.players.get(&id).is_some_and(|p| p.alive) {
             self.teleport(id, at);
         }
@@ -254,6 +333,10 @@ impl World {
         let Some(boat) = self.boats.get_mut(&boat_id) else {
             return;
         };
+        // Only the driver steers.
+        if boat.rider != Some(id) {
+            return;
+        }
         let d: f64 = (0..3).map(|i| (pos[i] - boat.pos[i]).powi(2)).sum();
         if d > MAX_MOVE * MAX_MOVE || pos.iter().any(|v| !v.is_finite()) {
             // Too far: the client is put back where the server has the boat.
@@ -270,8 +353,12 @@ impl World {
         boat.yaw = yaw;
         boat.sent_pos = pos;
         let sync = position_sync(boat_id, boat);
+        let second = boat.second;
         self.broadcast(sync, Some(id));
         self.move_player(id, Some(pos), None, true);
+        if let Some(back) = second {
+            self.move_player(back, Some(pos), None, true);
+        }
     }
 
     /// The rider's paddles, shown to everyone else.
@@ -328,14 +415,30 @@ impl World {
     }
 
     fn remove_boat(&mut self, boat_id: i32, drop: bool) {
-        let rider = self.boats.get(&boat_id).and_then(|b| b.rider);
-        if let Some(rider) = rider {
-            self.get_off(rider);
+        for player in [
+            self.boats.get(&boat_id).and_then(|b| b.second),
+            self.boats.get(&boat_id).and_then(|b| b.rider),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            self.get_off(player);
         }
+        self.close_cart_viewers(boat_id);
         let Some(boat) = self.boats.remove(&boat_id) else {
             return;
         };
+        for m in &boat.mobs {
+            if let Some(mob) = self.mobs.get_mut(m) {
+                mob.vehicle = None;
+            }
+        }
         self.broadcast(items::remove_entity(boat_id), None);
+        for &s in boat.chest.iter().flat_map(|c| c.iter()) {
+            if !s.is_empty() {
+                self.scatter_item(boat.pos, s);
+            }
+        }
         if drop {
             if let Some(item) = ItemInfo::id_of(boat.kind) {
                 self.scatter_item(boat.pos, Stack::new(item, 1));
@@ -352,6 +455,22 @@ impl World {
             if boat.rider.is_none() && self.chunks.contains_key(&boat.chunk()) {
                 self.drift(&mut boat);
             }
+            // Mobs that wander in sit down, while there is a seat.
+            if boat.taken() < boat.seats() && self.tick.is_multiple_of(4) {
+                let boarding = self.mob_boarding(boat.pos, BOAT_WIDTH, &boat.mobs);
+                if let Some(mob_id) = boarding {
+                    boat.mobs.push(mob_id);
+                    if let Some(m) = self.mobs.get_mut(&mob_id) {
+                        m.vehicle = Some(id);
+                    }
+                    self.broadcast(passengers(id, &boat), None);
+                }
+            }
+            boat.mobs.retain(|m| {
+                self.mobs
+                    .get(m)
+                    .is_some_and(|m| m.alive() && m.vehicle == Some(id))
+            });
             if boat.pos[1] < f64::from(MIN_Y - 64) {
                 self.broadcast(items::remove_entity(id), None);
                 continue;
@@ -415,6 +534,24 @@ impl World {
             y = next;
         }
         boat.pos[1] = y;
+    }
+
+    /// A mob close enough to `at` to get in (narrower than `width`, not swimming or
+    /// flying, not a golem, not already riding).
+    pub(super) fn mob_boarding(&self, at: [f64; 3], width: f64, aboard: &[i32]) -> Option<i32> {
+        self.mobs.iter().find_map(|(&id, m)| {
+            let (w, _) = m.size();
+            let near =
+                (m.pos[0] - at[0]).hypot(m.pos[2] - at[2]) < 0.9 && (m.pos[1] - at[1]).abs() < 0.7;
+            let fits = w < width
+                && !m.kind.swims()
+                && !m.kind.flies()
+                && m.kind != super::mobs::MobKind::IronGolem
+                && m.alive()
+                && m.vehicle.is_none()
+                && m.villager.as_ref().is_none_or(|v| v.customer.is_none());
+            (near && fits && !aboard.contains(&id)).then_some(id)
+        })
     }
 
     pub(super) fn boat_packets(&self) -> Vec<Writer> {
@@ -518,7 +655,7 @@ mod tests {
     }
 
     #[test]
-    fn only_plain_boats_are_placed() {
+    fn boats_and_rafts_are_placed() {
         assert_eq!(
             boat_kind("minecraft:birch_boat"),
             Some("minecraft:birch_boat")
@@ -527,11 +664,98 @@ mod tests {
             boat_kind("minecraft:bamboo_raft"),
             Some("minecraft:bamboo_raft")
         );
-        assert_eq!(boat_kind("minecraft:oak_chest_boat"), None);
+        assert_eq!(
+            boat_kind("minecraft:oak_chest_boat"),
+            Some("minecraft:oak_chest_boat")
+        );
         assert_eq!(boat_kind("minecraft:oak_planks"), None);
         assert_ne!(
             entity_type_of("minecraft:bamboo_raft"),
             entity_type::OAK_BOAT
         );
+    }
+
+    #[test]
+    fn boats_seat_two_chest_boats_open_and_mobs_get_in() {
+        let dir = std::env::temp_dir().join(format!("levitas-boat2-{}", std::process::id()));
+        let (mut w, _) = World::new(
+            dir,
+            NewWorld {
+                kind: WorldKind::Flat,
+                seed: Some(0),
+            },
+        );
+        w.chunk(0, 0);
+        let player = |w: &mut World, name: &str| {
+            let (out, frames) = mpsc::channel(100_000);
+            std::mem::forget(frames);
+            let id = next_entity_id();
+            let profile = crate::connection::Profile {
+                name: name.to_owned(),
+                uuid: id as u128,
+                properties: Vec::new(),
+            };
+            w.players
+                .insert(id, Player::new(profile, out, [2.0, -60.0, 2.0]));
+            id
+        };
+        let alice = player(&mut w, "Alice");
+        let bob = player(&mut w, "Bob");
+        let carol = player(&mut w, "Carol");
+        let boat = next_entity_id();
+        w.boats.insert(
+            boat,
+            Boat::new("minecraft:oak_boat", [2.5, -60.0, 2.5], 0.0, &mut w.rng),
+        );
+        assert!(w.board_boat(alice, boat));
+        assert!(w.board_boat(bob, boat));
+        assert!(w.board_boat(carol, boat));
+        assert_eq!(w.boats[&boat].rider, Some(alice));
+        assert_eq!(w.boats[&boat].second, Some(bob));
+        assert!(w.players[&carol].riding.is_none(), "only two seats");
+        // The driver gets off: the back seat moves up.
+        w.get_off(alice);
+        assert_eq!(w.boats[&boat].rider, Some(bob));
+
+        // A chest boat: sneaking opens its chest, which is saved with it.
+        let chest_boat = next_entity_id();
+        let mut cb = Boat::new(
+            "minecraft:oak_chest_boat",
+            [6.5, -60.0, 2.5],
+            0.0,
+            &mut w.rng,
+        );
+        let dirt = ItemInfo::id_of("minecraft:dirt").unwrap();
+        cb.chest.as_mut().unwrap()[3] = Stack::new(dirt, 9);
+        let back = Boat::from_nbt(&cb.to_nbt(), &mut w.rng).unwrap();
+        assert_eq!(back.chest.as_ref().unwrap()[3].count, 9);
+        w.boats.insert(chest_boat, cb);
+        w.players.get_mut(&carol).unwrap().pos = [6.0, -60.0, 2.0];
+        w.players.get_mut(&carol).unwrap().sneaking = true;
+        assert!(w.board_boat(carol, chest_boat));
+        assert!(w.players[&carol].open.is_some(), "the chest opened");
+
+        // A pig wandering into an empty boat sits down and goes along.
+        let empty = next_entity_id();
+        w.boats.insert(
+            empty,
+            Boat::new("minecraft:oak_boat", [10.5, -60.0, 10.5], 0.0, &mut w.rng),
+        );
+        let pig = next_entity_id();
+        let mob = super::super::mobs::Mob::new(
+            super::super::mobs::MobKind::Pig,
+            [10.6, -60.0, 10.4],
+            &mut w.rng,
+        );
+        w.mobs.insert(pig, mob);
+        for _ in 0..8 {
+            w.tick += 1;
+            w.tick_boats();
+        }
+        assert_eq!(w.boats[&empty].mobs, vec![pig]);
+        assert_eq!(w.mobs[&pig].vehicle, Some(empty));
+        // Breaking the boat lets it out.
+        w.remove_boat(empty, false);
+        assert_eq!(w.mobs[&pig].vehicle, None);
     }
 }

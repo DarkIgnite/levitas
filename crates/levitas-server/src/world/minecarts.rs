@@ -44,6 +44,8 @@ pub struct Cart {
     vel: [f64; 3],
     yaw: f32,
     pub rider: Option<i32>,
+    /// A mob riding it.
+    pub mob: Option<i32>,
     damage: f32,
     hurt_direction: i32,
     sent_pos: [f64; 3],
@@ -212,6 +214,7 @@ impl Cart {
             vel: [0.0; 3],
             yaw: 0.0,
             rider: None,
+            mob: None,
             damage: 0.0,
             hurt_direction: 1,
             sent_pos: pos,
@@ -338,7 +341,7 @@ pub fn spawn_packets(id: i32, cart: &Cart) -> Vec<Writer> {
         .u8(0)
         .u8(0)
         .varint(0)];
-    if let Some(rider) = cart.rider {
+    if let Some(rider) = cart.rider.or(cart.mob) {
         packets.push(passengers(id, Some(rider)));
     }
     if cart.kind == CartKind::Furnace && cart.fuel > 0 {
@@ -595,7 +598,7 @@ impl World {
     }
 
     /// Players looking into a chest minecart that is gone have the window closed.
-    fn close_cart_viewers(&mut self, cart_id: i32) {
+    pub(super) fn close_cart_viewers(&mut self, cart_id: i32) {
         let viewers: Vec<(i32, i32)> = self
             .players
             .iter()
@@ -687,6 +690,14 @@ impl World {
     /// on, a TNT one burns its fuse, a hopper one moves items, and a powered activator
     /// rail lights TNT, stops hoppers and puts riders off. Returns whether it blew up.
     fn cart_chores(&mut self, id: i32, cart: &mut Cart) -> bool {
+        // A mob that died or left is no longer aboard.
+        if cart.mob.is_some_and(|m| {
+            self.mobs
+                .get(&m)
+                .is_none_or(|mob| !mob.alive() || mob.vehicle != Some(id))
+        }) {
+            cart.mob = None;
+        }
         let activated = self.rail_under(cart.pos).is_some_and(|(_, s)| {
             blocks::name(s) == "minecraft:activator_rail"
                 && blocks::prop(s, "powered") == Some("true")
@@ -705,6 +716,19 @@ impl World {
                 }
                 if cart.fuel == 0 {
                     self.broadcast(furnace_lit(id, false), None);
+                }
+            }
+            CartKind::Ride if cart.rider.is_none() && cart.mob.is_none() => {
+                // A mob it runs into gets in.
+                let moving = cart.vel[0].hypot(cart.vel[2]) > 0.01;
+                if moving {
+                    if let Some(m) = self.mob_boarding(cart.pos, 1.0, &[]) {
+                        cart.mob = Some(m);
+                        if let Some(mob) = self.mobs.get_mut(&m) {
+                            mob.vehicle = Some(id);
+                        }
+                        self.broadcast(passengers(id, Some(m)), None);
+                    }
                 }
             }
             CartKind::Tnt => {
@@ -738,6 +762,13 @@ impl World {
                 }
             }
             CartKind::Ride if activated => {
+                if let Some(m) = cart.mob.take() {
+                    if let Some(mob) = self.mobs.get_mut(&m) {
+                        mob.vehicle = None;
+                        mob.pos[1] += 0.6;
+                    }
+                    self.broadcast(passengers(id, None), None);
+                }
                 if let Some(rider) = cart.rider.take() {
                     self.players.get_mut(&rider).map(|p| p.riding.take());
                     self.broadcast(passengers(id, None), None);
@@ -1490,5 +1521,32 @@ mod tests {
         }
         let gap = (w.carts[&b].pos[0] - w.carts[&a].pos[0]).abs();
         assert!(gap > 0.6, "they moved apart: {gap}");
+    }
+
+    #[test]
+    fn a_moving_minecart_picks_up_a_mob() {
+        let mut w = world();
+        for x in 0..=10 {
+            w.set_block(
+                BlockPos::new(x, -60, 2),
+                rail("minecraft:rail", "east_west"),
+            );
+        }
+        let pig = next_entity_id();
+        let mob = super::super::mobs::Mob::new(
+            super::super::mobs::MobKind::Pig,
+            [3.5, -60.0, 2.5],
+            &mut w.rng,
+        );
+        w.mobs.insert(pig, mob);
+        let mut cart = Cart::new([2.5, -60.0, 2.5], &mut w.rng);
+        cart.vel = [0.2, 0.0, 0.0];
+        let id = next_entity_id();
+        w.carts.insert(id, cart);
+        for _ in 0..10 {
+            w.tick_minecarts();
+        }
+        assert_eq!(w.carts[&id].mob, Some(pig));
+        assert_eq!(w.mobs[&pig].vehicle, Some(id));
     }
 }

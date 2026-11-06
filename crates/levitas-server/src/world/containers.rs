@@ -667,6 +667,7 @@ impl World {
                 .carts
                 .get(&cart)
                 .and_then(|c| c.chest.as_ref())
+                .or_else(|| self.boats.get(&cart).and_then(|b| b.chest.as_ref()))
                 .map_or_else(|| vec![Stack::EMPTY; view.container_len()], |c| c.to_vec()),
             View::Chest(..) | View::Furnace(..) | View::DoubleChest(..) | View::Brewing(..) => {
                 let mut slots = vec![Stack::EMPTY; view.container_len()];
@@ -734,6 +735,9 @@ impl World {
             }
             View::CartChest(cart, _) => {
                 if let Some(chest) = self.carts.get_mut(&cart).and_then(|c| c.chest.as_mut()) {
+                    chest.copy_from_slice(&slots[..n]);
+                } else if let Some(chest) = self.boats.get_mut(&cart).and_then(|b| b.chest.as_mut())
+                {
                     chest.copy_from_slice(&slots[..n]);
                 }
             }

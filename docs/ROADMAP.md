@@ -225,27 +225,35 @@ Known gaps are listed under each phase instead of being hidden.
       with gravity and block collisions, and are saved in vanilla `entities/` region
       files. Dropped items and falling blocks are tracked the same way: shown to the
       players with their chunk loaded, checked every third tick.
-- [ ] Minecarts, boats, item frames, paintings, armor stands, experience orbs.
-      Experience orbs work. Boats and rafts of every wood (`world/boats.rs`) are
-      placed on water or ground, ridden (the rider's client steers, the server checks
-      each move and shows it to others, paddles included), left by sneaking, broken
-      by hits into their item, float up to the surface when empty, and are saved
-      with the chunk's entities. Minecarts (`world/minecarts.rs`) are placed on
-      rails, ridden and left, broken into their item, and moved by the server along
-      straight rails, curves and slopes, pushed by powered rails (and off a wall
-      from standing), braked by unpowered ones, and nudged by a rider holding
-      forward; off the rails they fall and slide to a stop; saved like boats.
-      Item frames and glow item frames (`world/hanging.rs`) hang on any face, take
-      the held item, turn it an eighth per click, give it back when hit and break on
-      the next hit. Paintings pick at random among the biggest placeable ones that
-      fit the wall. Both fall off when their wall goes and are saved in vanilla's
-      form. Missing: chest boats, two seats, mobs riding, chest, hopper, furnace and
-      TNT minecarts, carts bumping into each other, maps in frames, comparators
-      reading frames. Armor stands (`world/armor_stands.rs`) are placed facing the
-      player, dressed with armor (swapping what was worn), undressed by clicking the
-      part with an empty hand, broken by two quick hits (dropping what they wore),
-      fall when unsupported and are saved with their equipment; no arms, poses or
-      small stands yet.
+- [x] Minecarts, boats, item frames, paintings, armor stands, experience orbs.
+      Experience orbs work. Boats, rafts and chest boats of every wood (`world/boats.rs`)
+      are placed on water or ground, ridden by two (the driver's client steers, the server
+      checks each move and shows it to others, paddles included; the back seat moves up
+      when the driver gets off), left by sneaking, broken by hits into their item, float up
+      to the surface when empty, and are saved with the chunk's entities; chest boats have
+      one seat and 27 slots, opened by sneaking. Mobs that wander into a boat with a free
+      seat sit down (not water mobs, flyers, golems or the too wide), and get out when it
+      breaks. Minecarts (`world/minecarts.rs`) are placed on rails, ridden and left,
+      broken into their item, and moved by the server along straight rails, curves and
+      slopes, pushed by powered rails (and off a wall from standing), braked by unpowered
+      ones, and nudged by a rider holding forward; off the rails they fall and slide to a
+      stop; they push each other apart when they run into each other, pick up mobs they
+      run into, and are saved like boats. Chest minecarts (27 slots, loot from mineshafts),
+      hopper minecarts (5 slots, taking from the container above and the items on them;
+      stopped by a powered activator rail), furnace minecarts (coal for fuel, pushing
+      themselves along) and TNT minecarts (lit by an activator rail, fire or lava, blowing
+      up harder the faster they go) work; hoppers fill and empty chest and hopper
+      minecarts, and a powered activator rail puts riders off. Item frames and glow item
+      frames (`world/hanging.rs`) hang on any face, take the held item, turn it an eighth
+      per click, give it back when hit and break on the next hit; maps in them are drawn,
+      and comparators read their rotation. Paintings pick at random among the biggest
+      placeable ones that fit the wall. Both fall off when their wall goes and are saved in
+      vanilla's form. Armor stands (`world/armor_stands.rs`) are placed facing the player,
+      dressed with armor (swapping what was worn), undressed by clicking the part with an
+      empty hand, broken by two quick hits (dropping what they wore), fall when unsupported
+      and are saved with their equipment; saved stands show their arms, size, base plate,
+      marker and pose, and stands with arms hold any item. Known gaps: mobs riding a
+      vehicle are saved standing beside it; command block minecarts.
 - [x] TNT and explosions. Explosions (`world/explosion.rs`) cast rays like vanilla,
       break blocks by blast resistance (dropping them 1 in `power` times, containers
       spilling), and damage and push entities; creepers use them. TNT (`world/tnt.rs`)
