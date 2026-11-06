@@ -150,7 +150,70 @@ pub fn spawn_packets(id: i32, stand: &ArmorStand) -> Vec<Writer> {
         .u8(angle)
         .varint(0)];
     packets.push(equipment_packet(id, stand));
+    if let Some(data) = stand_data(id, stand) {
+        packets.push(data);
+    }
     packets
+}
+
+/// Entity data of a stand's looks as saved: small, with arms, without its base plate,
+/// a marker, invisible, and the pose of each part.
+fn stand_data(id: i32, stand: &ArmorStand) -> Option<Writer> {
+    const DATA_SHARED: u8 = 0;
+    const DATA_FLAGS: u8 = 15;
+    const SERIALIZER_BYTE: i32 = 0;
+    const SERIALIZER_ROTATIONS: i32 = 9;
+    let nbt = &stand.saved;
+    let on = |key: &str| nbt.int(key).unwrap_or(0) != 0;
+    let flags = u8::from(on("Small"))
+        | if on("ShowArms") { 0x04 } else { 0 }
+        | if on("NoBasePlate") { 0x08 } else { 0 }
+        | if on("Marker") { 0x10 } else { 0 };
+    let pose = nbt.compound("Pose");
+    let parts = ["Head", "Body", "LeftArm", "RightArm", "LeftLeg", "RightLeg"];
+    let posed = pose.is_some_and(|p| parts.iter().any(|k| p.get(k).is_some()));
+    if flags == 0 && !posed && !on("Invisible") {
+        return None;
+    }
+    let mut packet = Writer::packet(clientbound::SET_ENTITY_DATA)
+        .varint(id)
+        .u8(DATA_FLAGS)
+        .varint(SERIALIZER_BYTE)
+        .u8(flags);
+    if on("Invisible") {
+        packet = packet.u8(DATA_SHARED).varint(SERIALIZER_BYTE).u8(0x20);
+    }
+    if let Some(pose) = pose {
+        for (i, part) in parts.iter().enumerate() {
+            let angles: Vec<f32> = pose
+                .list(part)
+                .unwrap_or_default()
+                .iter()
+                .filter_map(|t| t.as_f64().map(|v| v as f32))
+                .collect();
+            if let [x, y, z] = angles[..] {
+                packet = packet
+                    .u8(16 + i as u8)
+                    .varint(SERIALIZER_ROTATIONS)
+                    .f32(x)
+                    .f32(y)
+                    .f32(z);
+            }
+        }
+    }
+    Some(packet.u8(0xFF))
+}
+
+impl ArmorStand {
+    /// Whether the stand has arms to hold items.
+    fn has_arms(&self) -> bool {
+        self.saved.int("ShowArms").unwrap_or(0) != 0
+    }
+
+    /// Whether it is a marker: no hitbox, nothing to click or hit.
+    fn is_marker(&self) -> bool {
+        self.saved.int("Marker").unwrap_or(0) != 0
+    }
 }
 
 /// Every slot of the stand, worn or empty.
@@ -279,19 +342,33 @@ impl World {
         let Some(p) = self.players.get(&id) else {
             return true;
         };
-        if !super::hanging::reaches(p, stand.pos) {
+        if !super::hanging::reaches(p, stand.pos) || stand.is_marker() {
             return true;
         }
         let hand_slot = p.hand_slot(hand);
         let held = p.inventory.slots[hand_slot];
+        // A small stand is half the size.
+        let y = if stand.saved.int("Small").unwrap_or(0) != 0 {
+            y * 2.0
+        } else {
+            y
+        };
         let slot = if held.is_empty() {
             clicked_slot(stand, y)
         } else {
-            // Stands without arms only wear armor.
-            let Some(slot) = worn_slot(held.item) else {
-                return true;
-            };
-            slot
+            match worn_slot(held.item) {
+                Some(slot) => slot,
+                // A stand with arms holds anything else in its hand (the one used).
+                None if stand.has_arms() => {
+                    if hand == 1 {
+                        OFFHAND
+                    } else {
+                        MAINHAND
+                    }
+                }
+                // Stands without arms only wear armor.
+                None => return true,
+            }
         };
         let worn = stand.equipment[slot];
         if held.is_empty() && worn.is_empty() {
@@ -510,5 +587,54 @@ mod tests {
         w.tick = 103;
         w.hit_armor_stand(alice, sid);
         assert!(!w.armor_stands.contains_key(&sid));
+    }
+
+    #[test]
+    fn stands_with_arms_hold_items_and_show_their_pose() {
+        let dir = std::env::temp_dir().join(format!("levitas-stand2-{}", std::process::id()));
+        let (mut w, _) = World::new(
+            dir,
+            NewWorld {
+                kind: WorldKind::Flat,
+                seed: Some(0),
+            },
+        );
+        w.chunk(0, 0);
+        let nbt = Compound::new()
+            .with("id", "minecraft:armor_stand")
+            .with(
+                "Pos",
+                vec![Tag::Double(3.5), Tag::Double(-60.0), Tag::Double(3.5)],
+            )
+            .with("ShowArms", true)
+            .with("Small", true)
+            .with(
+                "Pose",
+                Compound::new().with(
+                    "RightArm",
+                    vec![Tag::Float(-90.0), Tag::Float(0.0), Tag::Float(0.0)],
+                ),
+            );
+        let mut stand = ArmorStand::from_nbt(&nbt, &mut w.rng).unwrap();
+        let packets = spawn_packets(7, &stand);
+        assert_eq!(packets.len(), 3, "spawn, equipment and looks");
+        let (out, frames) = mpsc::channel(100_000);
+        std::mem::forget(frames);
+        let alice = next_entity_id();
+        let profile = Profile {
+            name: "Alice".to_owned(),
+            uuid: 1,
+            properties: Vec::new(),
+        };
+        w.players
+            .insert(alice, Player::new(profile, out, [2.5, -60.0, 2.5]));
+        stand.pos = [3.5, -60.0, 3.5];
+        let sid = next_entity_id();
+        w.armor_stands.insert(sid, stand);
+        let hand = w.players[&alice].hand_slot(0);
+        let sword = ItemInfo::id_of("minecraft:iron_sword").unwrap();
+        w.players.get_mut(&alice).unwrap().inventory.slots[hand] = Stack::new(sword, 1);
+        w.use_armor_stand(alice, sid, 0, 0.5);
+        assert_eq!(w.armor_stands[&sid].equipment[MAINHAND].item, sword);
     }
 }
