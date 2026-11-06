@@ -42,6 +42,8 @@ const SKELETON_INACCURACY: f64 = 6.0;
 const DATA_FLAGS: u8 = 0;
 const ON_FIRE: u8 = 0x01;
 const DATA_CREEPER_SWELL: u8 = 16;
+const DATA_CREEPER_POWERED: u8 = 17;
+const SERIALIZER_BOOLEAN: i32 = 8;
 const SERIALIZER_BYTE: i32 = 0;
 const SERIALIZER_INT: i32 = 1;
 
@@ -204,7 +206,12 @@ impl World {
                 *fuse += 1;
                 if *fuse >= FUSE_TICKS {
                     self.send_to_viewers(mob, items::remove_entity(id));
-                    self.explode(mob.pos, CREEPER_POWER, "Creeper");
+                    let power = if mob.powered {
+                        CREEPER_POWER * 2.0
+                    } else {
+                        CREEPER_POWER
+                    };
+                    self.explode(mob.pos, power, "Creeper");
                     return true;
                 }
             }
@@ -889,6 +896,16 @@ fn blaze_glowing(id: i32, glowing: bool) -> Writer {
         .u8(16)
         .varint(SERIALIZER_BYTE)
         .u8(u8::from(glowing))
+        .u8(0xFF)
+}
+
+/// A creeper charged (or not) by lightning.
+pub(super) fn creeper_powered(id: i32, powered: bool) -> Writer {
+    Writer::packet(clientbound::SET_ENTITY_DATA)
+        .varint(id)
+        .u8(DATA_CREEPER_POWERED)
+        .varint(SERIALIZER_BOOLEAN)
+        .bool(powered)
         .u8(0xFF)
 }
 

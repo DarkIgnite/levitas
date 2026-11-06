@@ -347,6 +347,11 @@ impl World {
             if BlockInfo::of(state).first_state != tick.block {
                 continue;
             }
+            if block_has_tag(state, "minecraft:lightning_rods")
+                && prop(state, "powered") == Some("true")
+            {
+                self.set_block_updating(tick.pos, with_bool(state, "powered", false));
+            }
             if block_has_tag(state, "minecraft:buttons") && prop(state, "powered") == Some("true") {
                 self.set_block_updating(tick.pos, with_bool(state, "powered", false));
                 self.play_sound(&button_sound(blocks::name(state), false), tick.pos, None);

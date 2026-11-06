@@ -26,6 +26,10 @@ pub struct ItemEntity {
 }
 
 impl ItemEntity {
+    pub(super) fn pos(&self) -> [f64; 3] {
+        self.pos
+    }
+
     #[cfg(test)]
     pub fn stack(&self) -> Stack {
         self.stack

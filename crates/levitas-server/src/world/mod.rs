@@ -61,6 +61,7 @@ mod time;
 mod tnt;
 pub mod travel;
 mod villagers;
+mod weather;
 mod wolves;
 
 use std::collections::{HashMap, HashSet};
@@ -663,6 +664,8 @@ struct World {
     thrown: HashMap<i32, thrown::Thrown>,
     /// Fishing bobbers out, by entity ID.
     bobbers: HashMap<i32, fishing::Bobber>,
+    /// Lightning bolts on show: their entity IDs and the tick they go.
+    bolts: Vec<(i32, u64)>,
     pub area_effect_clouds: HashMap<i32, clouds::AreaEffectCloud>,
     pub raids: HashMap<u32, raids::Raid>,
     pub evoker_fangs: HashMap<i32, raids::EvokerFang>,
@@ -795,6 +798,7 @@ impl World {
             fireballs: HashMap::new(),
             thrown: HashMap::new(),
             bobbers: HashMap::new(),
+            bolts: Vec::new(),
             area_effect_clouds: HashMap::new(),
             raids: HashMap::new(),
             evoker_fangs: HashMap::new(),
@@ -1643,6 +1647,7 @@ impl World {
         if self.dimension.has_sky() {
             self.tick_time();
         }
+        self.tick_weather_effects();
         self.tick_falling_blocks();
         self.tick_tnt();
         self.tick_mobs();

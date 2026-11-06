@@ -81,6 +81,7 @@ pub enum Damage {
     /// Poison and instant damage.
     Magic,
     Wither,
+    Lightning,
 }
 
 impl Damage {
@@ -106,6 +107,7 @@ impl Damage {
             Damage::Fireball(_) => "minecraft:fireball",
             Damage::Magic => "minecraft:magic",
             Damage::Wither => "minecraft:wither",
+            Damage::Lightning => "minecraft:lightning_bolt",
         }
     }
 
@@ -143,6 +145,7 @@ impl Damage {
             Damage::Fireball(by) => format!("{name} was fireballed by {by}"),
             Damage::Magic => format!("{name} was killed by magic"),
             Damage::Wither => format!("{name} withered away"),
+            Damage::Lightning => format!("{name} was struck by lightning"),
         }
     }
 

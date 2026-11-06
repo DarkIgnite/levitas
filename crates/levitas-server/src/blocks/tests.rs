@@ -478,6 +478,25 @@ fn blocks_new_in_26_3_place_and_hold_on_like_their_kin() {
     assert!(is_stalactite(hanging));
     let standing = w.place(spike, on_ground(22, 0, 0.0)).unwrap()[0].1;
     assert!(is_stalagmite(standing));
+    // A column of spikes thins towards its tip.
+    w.set(pos(24, 5, 0), block::STONE);
+    for y in (1..5).rev() {
+        let below = pos(24, y + 1, 0);
+        let placed = w.place(spike, on_side(below, Dir::Down, 0.0, 0.0)).unwrap();
+        for (p, s) in placed {
+            w.set(p, s);
+        }
+        for yy in y..5 {
+            let p = pos(24, yy, 0);
+            let s = w.update(p);
+            w.set(p, s);
+        }
+    }
+    let thick = |w: &mut World, y: i32| prop(w.update(pos(24, y, 0)), "thickness").unwrap();
+    assert_eq!(thick(&mut w, 1), "tip");
+    assert_eq!(thick(&mut w, 2), "frustum");
+    assert_eq!(thick(&mut w, 3), "middle");
+    assert_eq!(thick(&mut w, 4), "base");
     // Only dripstone makes a fall onto it worse.
     assert!(!is_sharp_stalagmite(standing));
     assert!(is_sharp_stalagmite(with(

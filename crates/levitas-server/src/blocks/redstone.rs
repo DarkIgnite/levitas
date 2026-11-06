@@ -84,6 +84,7 @@ pub fn is_source(state: u16) -> bool {
         || is_wire(state)
         || n == "minecraft:daylight_detector"
         || n == "minecraft:detector_rail"
+        || block_has_tag(state, "minecraft:lightning_rods")
 }
 
 /// Whether a block carries strong power to the dust around it: solid, opaque, and not
@@ -102,6 +103,13 @@ pub fn weak(state: u16, to: Dir) -> u8 {
     let n = name(state);
     if n == "minecraft:redstone_block" {
         return MAX_POWER;
+    }
+    if block_has_tag(state, "minecraft:lightning_rods") {
+        return if is_on(state, "powered") {
+            MAX_POWER
+        } else {
+            0
+        };
     }
     if n == "minecraft:lever" || block_has_tag(state, "minecraft:buttons") {
         return if is_on(state, "powered") {
@@ -162,6 +170,14 @@ pub fn weak(state: u16, to: Dir) -> u8 {
 /// Strong power `state` gives the block in direction `to`, which passes on to dust.
 pub fn strong(state: u16, to: Dir) -> u8 {
     let n = name(state);
+    // A struck lightning rod powers the block it stands on or hangs from.
+    if block_has_tag(state, "minecraft:lightning_rods") {
+        return if super::facing(state).is_some_and(|f| f.opposite() == to) {
+            weak(state, to)
+        } else {
+            0
+        };
+    }
     if n == "minecraft:lever" || block_has_tag(state, "minecraft:buttons") {
         return if Some(to) == attached_to(state) {
             weak(state, to)

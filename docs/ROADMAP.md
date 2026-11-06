@@ -50,7 +50,10 @@ disagreed, a throwaway vanilla 26.3 server settled it (see
       gas and, over magma or lava, becomes a geyser that throws players up
       (`world/sulfur.rs`). Plants are placed by 26.3's support tags
       (`supports_vegetation`, ...), since grass is no longer in the `dirt` tag.
-      Known gaps: sulfur spikes (like dripstone) do not grow yet; the poplar's shape
+      Sulfur spikes and pointed dripstone take their thickness from the column (tip,
+      frustum, middle, base, tip_merge), and geysers keep the wiki's rhythm (15 to 60
+      seconds by depth, each block its own). Known gaps: sulfur spikes (like dripstone)
+      do not grow yet; the poplar's shape
       and the geyser's push are approximations; mobs are not thrown by geysers
 - [x] Every end-to-end test passes against the new protocol
 - [x] Tried in a real 26.3 client: the owner joins and plays (2026-10-30)
@@ -329,9 +332,17 @@ Known gaps are listed under each phase instead of being hidden.
       away, its owner dies or is 32 blocks off.
 - [x] Day/night cycle, weather (rain, thunder), sleeping in beds (`world/time.rs`):
       time and weather saved in level.dat, `/time` and `/weather`, beds set the
-      respawn point and skip the night once everyone has slept 100 ticks.
-      Known gaps: no lightning bolts, rain does not put out fires or fill cauldrons,
-      and sleeping ignores nearby monsters (there are none yet).
+      respawn point and skip the night once everyone has slept 100 ticks, and not with
+      monsters nearby. Rain puts out fires. Weather acts on the world (`world/weather.rs`):
+      each loaded chunk gets a precipitation tick 1 in 16 ticks on a random column, where in
+      a cold biome (temperature below 0.15, falling 0.00125 a block above y 80) water
+      freezes and snow settles up to `max_snow_accumulation_height`, and rain (5%) or snow
+      (10%) fills cauldrons. Thunderstorms strike each chunk 1 in 100,000 ticks: the bolt
+      goes to the nearest lightning rod within 128 blocks at the top of its column (which
+      gives off redstone power for 8 ticks and loses its patina), or to a living thing in
+      the open nearby; it sets fires on Normal and Hard, does 5 damage and 8 seconds of
+      fire, burns up items, charges creepers (a blast twice as strong, saved as `powered`)
+      and turns pigs into zombified piglins and villagers into witches.
 - [x] Random ticks: crops grow, saplings become trees, grass and mycelium spread.
       Done (`world/nature.rs`): three random ticks per section per tick; wheat,
       carrots, potatoes and beetroots ripen by the wiki's growth formula; oak, birch,
@@ -343,7 +354,9 @@ Known gaps are listed under each phase instead of being hidden.
       stage a fifth of the time; kelp grows up through still water to age 25; bamboo
       shoots become stalks that grow to 16 blocks; vines grow down (`spread_vines`);
       mushrooms spread where it is dark or onto mycelium and podzol, up to five in a
-      9x3x9 area. Known gaps: vines do not spread up or sideways.
+      9x3x9 area. Vines spread as the wiki describes: down into air or onto the vine
+      below, up and sideways along and round walls and under ceilings while fewer than
+      four others are within the 9x3x9 area.
 - [x] Bone meal (crops, saplings, grass), hoes tilling farmland, seeds and crops that
       plant under another name. Bone meal also grows stems, cocoa, sweet berries, kelp
       and bamboo. Sweet berries are picked by hand (bushes grown two stages and up).

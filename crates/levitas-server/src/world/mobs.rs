@@ -575,6 +575,8 @@ pub struct Mob {
     pub fly_goal: Option<[f64; 3]>,
     pub charge: i32,
     pub volley: u8,
+    /// A creeper charged by lightning: its blast is twice as strong.
+    pub powered: bool,
     /// What players were last told.
     sent_pos: [f64; 3],
     sent_angles: (u8, u8),
@@ -661,6 +663,7 @@ impl Mob {
                 0
             },
             sheared: false,
+            powered: false,
             egg_ticks: 6000 + rng.below(6000),
             anger: 0,
             slime_size,
@@ -802,6 +805,9 @@ impl Mob {
         if self.kind == MobKind::IronGolem {
             packets.push(super::golems::golem_data(id, self.player_created));
         }
+        if self.powered {
+            packets.push(super::monsters::creeper_powered(id, true));
+        }
         if matches!(self.kind, MobKind::Wolf | MobKind::Cat) {
             packets.push(super::wolves::wolf_data(self, id));
         }
@@ -928,6 +934,7 @@ impl Mob {
                 nbt.insert("Sheared", self.sheared);
             }
             MobKind::Chicken => nbt.insert("EggLayTime", self.egg_ticks as i32),
+            MobKind::Creeper if self.powered => nbt.insert("powered", true),
             MobKind::MagmaCube | MobKind::Slime => {
                 nbt.insert("Size", i32::from(self.slime_size) - 1);
             }
@@ -1040,6 +1047,7 @@ impl Mob {
             return None;
         }
         mob.on_ground = nbt.int("OnGround").unwrap_or(1) != 0;
+        mob.powered = kind == MobKind::Creeper && nbt.int("powered").unwrap_or(0) != 0;
         if kind == MobKind::Sheep {
             mob.color = nbt.int("Color").unwrap_or(0).clamp(0, 15) as u8;
             mob.sheared = nbt.int("Sheared").unwrap_or(0) != 0;

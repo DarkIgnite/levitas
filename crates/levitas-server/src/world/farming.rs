@@ -97,7 +97,7 @@ impl World {
             }
             "minecraft:vine" => {
                 if crate::rules::bool("spread_vines") && self.rng.below(4) == 0 {
-                    self.spread_vine_down(pos, state);
+                    self.spread_vine(pos, state);
                 }
             }
             "minecraft:brown_mushroom" | "minecraft:red_mushroom" => {
@@ -186,10 +186,123 @@ impl World {
         true
     }
 
+    /// A vine spreads one way, picked at random, as the wiki describes: down into air or
+    /// onto the vine below, up into air when the area is not crowded, or sideways onto
+    /// a solid block next to it, into the air beside it (round a corner, too).
+    fn spread_vine(&mut self, pos: BlockPos, vine: u16) {
+        let dir = Dir::ALL[self.rng.below(6) as usize];
+        match dir {
+            Dir::Down => self.spread_vine_down(pos, vine),
+            Dir::Up => {
+                let above = offset(pos, Dir::Up);
+                if above.y > MAX_Y || !is_air(self.block(above)) || self.vines_crowded(pos) {
+                    return;
+                }
+                let Some(empty) = state_of("minecraft:vine") else {
+                    return;
+                };
+                let mut grown = blocks::with_bool(empty, "up", false);
+                let mut any = false;
+                for side in Dir::HORIZONTAL {
+                    let has = prop(vine, side.name()) == Some("true")
+                        && self.rng.below(2) == 0
+                        && blocks::sturdy(self.block(offset(above, side)), side.opposite());
+                    grown = blocks::with_bool(grown, side.name(), has);
+                    any |= has;
+                }
+                if any {
+                    self.set_block(above, grown);
+                }
+            }
+            side => {
+                if prop(vine, side.name()) == Some("true") || self.vines_crowded(pos) {
+                    return;
+                }
+                let target = offset(pos, side);
+                let there = self.block(target);
+                if is_air(there) {
+                    self.vine_into_air(pos, vine, side, target);
+                } else if blocks::sturdy(there, side.opposite()) {
+                    self.set_block(pos, blocks::with_bool(vine, side.name(), true));
+                }
+            }
+        }
+    }
+
+    /// A vine spreading `side` into the air at `target`.
+    fn vine_into_air(&mut self, pos: BlockPos, vine: u16, side: Dir, target: BlockPos) {
+        let Some(empty) = state_of("minecraft:vine") else {
+            return;
+        };
+        let empty = blocks::with_bool(empty, "up", false);
+        let backs = |w: &mut World, at: BlockPos, face: Dir| {
+            let s = w.block(offset(at, face));
+            blocks::sturdy(s, face.opposite())
+        };
+        for turn in [side.clockwise(), side.counter_clockwise()] {
+            if prop(vine, turn.name()) != Some("true") {
+                continue;
+            }
+            // Along the same wall.
+            if backs(self, target, turn) {
+                self.set_block(target, blocks::with_bool(empty, turn.name(), true));
+                return;
+            }
+            // Round the corner of the block it grows on.
+            let corner = offset(target, turn);
+            if is_air(self.block(corner)) && backs(self, pos, turn) {
+                self.set_block(
+                    corner,
+                    blocks::with_bool(empty, side.opposite().name(), true),
+                );
+                return;
+            }
+        }
+        // Under a ceiling.
+        if blocks::sturdy(self.block(offset(target, Dir::Up)), Dir::Down) {
+            self.set_block(target, blocks::with_bool(empty, "up", true));
+        }
+    }
+
+    /// Whether there are 4 or more other vines in the 9x3x9 area around `pos`.
+    fn vines_crowded(&mut self, pos: BlockPos) -> bool {
+        let mut count = 0;
+        for dx in -4..=4 {
+            for dy in -1..=1 {
+                for dz in -4..=4 {
+                    if (dx, dy, dz) == (0, 0, 0) {
+                        continue;
+                    }
+                    let at = BlockPos::new(pos.x + dx, pos.y + dy, pos.z + dz);
+                    if blocks::name(self.block(at)) == "minecraft:vine" {
+                        count += 1;
+                        if count >= 4 {
+                            return true;
+                        }
+                    }
+                }
+            }
+        }
+        false
+    }
+
     /// Vines grow down into the air below them, each side half of the time.
     fn spread_vine_down(&mut self, pos: BlockPos, vine: u16) {
         let below = offset(pos, Dir::Down);
-        if !is_air(self.block(below)) {
+        let under = self.block(below);
+        if blocks::name(under) == "minecraft:vine" {
+            let mut grown = under;
+            for side in ["north", "east", "south", "west"] {
+                if prop(vine, side) == Some("true") && self.rng.below(2) == 0 {
+                    grown = blocks::with_bool(grown, side, true);
+                }
+            }
+            if grown != under {
+                self.set_block(below, grown);
+            }
+            return;
+        }
+        if !is_air(under) {
             return;
         }
         let Some(empty) = state_of("minecraft:vine") else {
@@ -444,6 +557,52 @@ mod tests {
     fn use_at(w: &mut World, id: i32, pos: BlockPos) -> bool {
         let state = w.block(pos);
         w.use_farm_block(id, HOTBAR, pos, state)
+    }
+
+    #[test]
+    fn vines_spread_up_along_and_around_walls() {
+        let mut w = world();
+        // A wall of stone, x = 5, from y -60 to -50, z 0 to 6; a vine on its west face.
+        let stone = state("minecraft:stone");
+        for y in -60..=-50 {
+            for z in 0..=6 {
+                w.set_block(BlockPos::new(5, y, z), stone);
+            }
+        }
+        let vine = blocks::with_bool(
+            blocks::with_bool(state("minecraft:vine"), "east", true),
+            "up",
+            false,
+        );
+        let start = BlockPos::new(4, -55, 3);
+        w.set_block(start, vine);
+        for _ in 0..400 {
+            let s = w.block(start);
+            w.spread_vine(start, s);
+        }
+        let vines = |w: &mut World| {
+            let mut n = Vec::new();
+            for y in -60..=-50 {
+                for z in 0..=6 {
+                    let p = BlockPos::new(4, y, z);
+                    if blocks::name(w.block(p)) == "minecraft:vine" {
+                        n.push(p);
+                    }
+                }
+            }
+            n
+        };
+        let found = vines(&mut w);
+        // It went up and along the wall, and stopped when the area got crowded.
+        assert!(found.iter().any(|p| p.y > start.y), "{found:?}");
+        assert!(
+            found.iter().any(|p| p.y == start.y && p.z != start.z),
+            "{found:?}"
+        );
+        assert!(found.len() <= 6, "{found:?}");
+        for p in &found {
+            assert_eq!(prop(w.block(*p), "east"), Some("true"));
+        }
     }
 
     #[test]

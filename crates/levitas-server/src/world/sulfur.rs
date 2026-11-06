@@ -18,11 +18,30 @@ const MAX_DEPTH: i32 = 4;
 const GAS_RADIUS: i32 = 3;
 /// Nausea from the gas, renewed while one stays in the water.
 const NAUSEA_TICKS: i32 = 80;
-/// A magma-fed geyser erupts for `ERUPT_TICKS` of every `GEYSER_CYCLE` ticks.
-const GEYSER_CYCLE: u64 = 200;
-const ERUPT_TICKS: u64 = 60;
-/// The upward push of an erupting geyser, in blocks per tick.
-const GEYSER_PUSH: f64 = 1.2;
+/// Gravity on a player, in blocks per tick squared, for working out a geyser's push.
+const GRAVITY: f64 = 0.08;
+
+/// A magma-fed geyser's rhythm, from the wiki: each block has a dormant value (15 to 30)
+/// and an eruption value (1 or 2) of its own, and with `depth` blocks of water it rests
+/// for 10 x (depth - 1) + dormant seconds, then erupts for (depth - 1) + eruption seconds.
+/// Returns the cycle and the eruption's length, in ticks.
+fn geyser_rhythm(pos: BlockPos, depth: i32) -> (u64, u64) {
+    let hash = (pos.x.wrapping_mul(73_428_767)
+        ^ pos.z.wrapping_mul(912_931)
+        ^ pos.y.wrapping_mul(438_289)) as u32;
+    let dormant_value = 15 + u64::from(hash % 16);
+    let eruption_value = 1 + u64::from((hash >> 8) % 2);
+    let extra = u64::from((depth - 1).max(0) as u32);
+    let dormant = (10 * extra + dormant_value) * 20;
+    let erupting = (extra + eruption_value) * 20;
+    (dormant + erupting, erupting)
+}
+
+/// The upward push that throws a player about 5 blocks per block of water, as high as
+/// the wiki says a geyser reaches.
+fn geyser_push(depth: i32) -> f64 {
+    (2.0 * GRAVITY * 5.0 * f64::from(depth)).sqrt()
+}
 
 fn is_potent_sulfur(state: u16) -> bool {
     blocks::name(state) == "minecraft:potent_sulfur"
@@ -58,9 +77,9 @@ impl World {
         if fluid_at(above).is_none_or(|f| f.fluid != Fluid::Water) {
             return "dry";
         }
-        if self.sulfur_water_depth(pos).is_none() {
+        let Some(depth) = self.sulfur_water_depth(pos) else {
             return "wet";
-        }
+        };
         let below = self
             .loaded_block_at(offset(pos, Dir::Down))
             .unwrap_or(block::AIR);
@@ -69,9 +88,10 @@ impl World {
         }
         if blocks::name(below) == "minecraft:magma_block" {
             // Each geyser keeps its own rhythm.
-            let rhythm = u64::from((pos.x.wrapping_mul(31) ^ pos.z) as u32);
-            let phase = self.tick.wrapping_add(rhythm) % GEYSER_CYCLE;
-            return if phase < ERUPT_TICKS {
+            let (cycle, erupting) = geyser_rhythm(pos, depth);
+            let offset = u64::from((pos.x.wrapping_mul(31) ^ pos.z) as u32);
+            let phase = self.tick.wrapping_add(offset) % cycle;
+            return if phase < erupting {
                 "erupting"
             } else {
                 "dormant"
@@ -136,7 +156,7 @@ impl World {
                             && (dx, dz) == (0, 0)
                             && (at.y + 1..=surface + 2).contains(&feet.y)
                         {
-                            self.push_player(id, [0.0, GEYSER_PUSH, 0.0]);
+                            self.push_player(id, [0.0, geyser_push(depth), 0.0]);
                         }
                     }
                 }
@@ -187,7 +207,15 @@ mod tests {
         assert_eq!(w.sulfur_state(sulfur), "continuous");
         // Magma: it erupts some of the time and rests the rest.
         w.set_block(offset(sulfur, Dir::Down), state("minecraft:magma_block"));
-        let states: std::collections::HashSet<&str> = (0..GEYSER_CYCLE)
+        // 15 to 30 seconds of rest and 1 to 2 of eruption under one block of water,
+        // 45 to 60 and 4 to 5 under four.
+        let (shallow, shallow_burst) = geyser_rhythm(sulfur, 1);
+        assert!((320..=640).contains(&shallow) && (20..=40).contains(&shallow_burst));
+        let (deep, deep_burst) = geyser_rhythm(sulfur, 4);
+        assert!((980..=1300).contains(&deep) && (80..=100).contains(&deep_burst));
+        let depth = w.sulfur_water_depth(sulfur).unwrap();
+        let (cycle, _) = geyser_rhythm(sulfur, depth);
+        let states: std::collections::HashSet<&str> = (0..cycle)
             .map(|t| {
                 w.tick = t;
                 w.sulfur_state(sulfur)

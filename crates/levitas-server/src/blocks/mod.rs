@@ -404,6 +404,9 @@ pub fn can_survive(state: u16, pos: BlockPos, get: &mut impl FnMut(BlockPos) -> 
 /// Recomputes properties that depend on neighbours: fence, pane and wall connections,
 /// stair corners, double chests and the upper half of doors.
 pub fn connect(state: u16, pos: BlockPos, get: &mut impl FnMut(BlockPos) -> u16) -> u16 {
+    if block_has_tag(state, "minecraft:speleothems") {
+        return speleothem_thickness(state, pos, get);
+    }
     if block_has_tag(state, "minecraft:fences") {
         let mut s = state;
         for dir in Dir::HORIZONTAL {
@@ -619,6 +622,35 @@ pub fn is_stalagmite(state: u16) -> bool {
 /// sulfur spikes' do not.
 pub fn is_sharp_stalagmite(state: u16) -> bool {
     is_stalagmite(state) && name(state) == "minecraft:pointed_dripstone"
+}
+
+/// A pointed dripstone's or sulfur spike's thickness from the column it is in: `tip` at
+/// the point (`tip_merge` where it meets one pointing the other way), `frustum` behind
+/// the tip, `base` where the column starts and `middle` between.
+fn speleothem_thickness(state: u16, pos: BlockPos, get: &mut impl FnMut(BlockPos) -> u16) -> u16 {
+    let down = prop(state, "vertical_direction") == Some("down");
+    let (toward, back) = if down {
+        (Dir::Down, Dir::Up)
+    } else {
+        (Dir::Up, Dir::Down)
+    };
+    let same = |other: u16, pointing: &str| {
+        name(other) == name(state) && prop(other, "vertical_direction") == Some(pointing)
+    };
+    let (this_way, other_way) = if down { ("down", "up") } else { ("up", "down") };
+    let ahead = get(offset(pos, toward));
+    let thickness = if same(ahead, other_way) {
+        "tip_merge"
+    } else if !same(ahead, this_way) {
+        "tip"
+    } else if matches!(prop(ahead, "thickness"), Some("tip" | "tip_merge")) {
+        "frustum"
+    } else if !same(get(offset(pos, back)), this_way) {
+        "base"
+    } else {
+        "middle"
+    };
+    with(state, "thickness", thickness)
 }
 
 /// Whether a falling block can fall through (or into) this block.

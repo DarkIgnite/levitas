@@ -367,8 +367,6 @@ their server.
   forwarder per dimension). Still open, all small:
   - Beacon and conduit effects are not marked ambient (grey HUD border instead of blue).
   - Armor stands can be placed inside other entities.
-  - Geysers use a fixed 10 s cycle instead of 15-60 s growing with depth.
-  - Sulfur spikes never update `thickness` (all stay `tip`).
   - A cartography result thrown with Q keeps the old map ID (the material is used up).
   - Lodestone compasses keep pointing at a broken lodestone.
   - Maps held in the Nether draw the bedrock roof instead of static.
