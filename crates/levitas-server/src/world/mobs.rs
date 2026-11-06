@@ -693,10 +693,10 @@ impl Mob {
             leader: None,
             panic_ticks: 0,
             owner: None,
-            variant: if kind == MobKind::Cat {
-                rng.below(cat_variants().max(1)) as u8
-            } else {
-                0
+            variant: match kind {
+                MobKind::Cat => rng.below(cat_variants().max(1)) as u8,
+                MobKind::Wolf => wolf_variant_id("minecraft:pale").unwrap_or(0),
+                _ => 0,
             },
             sitting: false,
             collar: super::wolves::DEFAULT_COLLAR,
@@ -933,10 +933,13 @@ impl Mob {
             }
             MobKind::ZombifiedPiglin => nbt.insert("AngerTime", self.anger as i32),
             MobKind::Wolf | MobKind::Cat => {
-                if self.kind == MobKind::Cat {
-                    if let Some(name) = cat_variant_name(self.variant) {
-                        nbt.insert("variant", name);
-                    }
+                let name = if self.kind == MobKind::Cat {
+                    cat_variant_name(self.variant)
+                } else {
+                    wolf_variant_name(self.variant)
+                };
+                if let Some(name) = name {
+                    nbt.insert("variant", name);
                 }
                 nbt.insert("Sitting", self.sitting);
                 nbt.insert("CollarColor", self.collar as i8);
@@ -1010,10 +1013,13 @@ impl Mob {
             mob.slime_size = (size.clamp(0, 3) as u8 + 1).next_power_of_two().min(4);
         }
         mob.anger = nbt.int("AngerTime").unwrap_or(0).max(0) as u32;
-        if kind == MobKind::Cat {
-            if let Some(v) = nbt.str("variant").and_then(cat_variant_id) {
-                mob.variant = v;
-            }
+        let variant = match kind {
+            MobKind::Cat => nbt.str("variant").and_then(cat_variant_id),
+            MobKind::Wolf => nbt.str("variant").and_then(wolf_variant_id),
+            _ => None,
+        };
+        if let Some(v) = variant {
+            mob.variant = v;
         }
         if matches!(kind, MobKind::Wolf | MobKind::Cat) {
             mob.sitting = nbt.int("Sitting").unwrap_or(0) != 0;
@@ -1261,7 +1267,10 @@ impl World {
                     if !self.mob_fits(kind, pos) {
                         continue;
                     }
-                    let mob = Mob::new(kind, pos, &mut self.rng);
+                    let mut mob = Mob::new(kind, pos, &mut self.rng);
+                    if kind == MobKind::Wolf {
+                        mob.variant = wolf_variant_for(&biome);
+                    }
                     self.mobs.insert(next_entity_id(), mob);
                 }
             }
@@ -2906,6 +2915,46 @@ fn cat_variant_name(id: u8) -> Option<&'static str> {
 
 fn cat_variant_id(name: &str) -> Option<u8> {
     cat_variant_registry()?.id_of(name).map(|i| i as u8)
+}
+
+fn wolf_variant_registry() -> Option<&'static SyncedRegistry> {
+    SyncedRegistry::get("minecraft:wolf_variant")
+}
+
+fn wolf_variant_name(id: u8) -> Option<&'static str> {
+    wolf_variant_registry()?
+        .entries
+        .get(usize::from(id))
+        .copied()
+}
+
+fn wolf_variant_id(name: &str) -> Option<u8> {
+    wolf_variant_registry()?.id_of(name).map(|i| i as u8)
+}
+
+/// The wolf a biome grows, as 26.3's wolf variants' spawn conditions say: woods in
+/// forests, ashen in snowy taigas, rusty in jungles, and so on; pale anywhere else.
+pub(super) fn wolf_variant_for(biome: &str) -> u8 {
+    let in_tag = |tag: &str| {
+        let Some(id) = SyncedRegistry::get("minecraft:worldgen/biome").and_then(|r| r.id_of(biome))
+        else {
+            return false;
+        };
+        levitas_registry::TagRegistry::get("minecraft:worldgen/biome")
+            .is_some_and(|t| t.members(tag).contains(&(id as i64)))
+    };
+    let name = match biome {
+        "minecraft:snowy_taiga" => "minecraft:ashen",
+        "minecraft:old_growth_pine_taiga" => "minecraft:black",
+        "minecraft:old_growth_spruce_taiga" => "minecraft:chestnut",
+        "minecraft:grove" => "minecraft:snowy",
+        "minecraft:forest" => "minecraft:woods",
+        _ if in_tag("minecraft:is_jungle") => "minecraft:rusty",
+        _ if in_tag("minecraft:is_savanna") => "minecraft:spotted",
+        _ if in_tag("minecraft:is_badlands") => "minecraft:striped",
+        _ => "minecraft:pale",
+    };
+    wolf_variant_id(name).unwrap_or(0)
 }
 
 pub(super) fn yaw_towards(from: [f64; 3], to: [f64; 3]) -> f32 {

@@ -17,6 +17,9 @@ const DATA_TAME_FLAGS: u8 = 18;
 const DATA_OWNER: u8 = 19;
 const DATA_COLLAR: u8 = 21;
 const DATA_ANGER: u8 = 22;
+/// The coat (an ID in `wolf_variant`).
+const DATA_WOLF_VARIANT: u8 = 23;
+const SERIALIZER_WOLF_VARIANT: i32 = 25;
 const SERIALIZER_BYTE: i32 = 0;
 const SERIALIZER_VARINT: i32 = 1;
 const SERIALIZER_VARLONG: i32 = 2;
@@ -121,6 +124,9 @@ pub fn wolf_data(mob: &Mob, id: i32) -> Writer {
         } else {
             -1
         })
+        .u8(DATA_WOLF_VARIANT)
+        .varint(SERIALIZER_WOLF_VARIANT)
+        .varint(i32::from(mob.variant))
         .u8(0xFF)
 }
 
@@ -584,7 +590,15 @@ mod tests {
         assert_eq!(r.varint().unwrap(), i32::from(DEFAULT_COLLAR));
         assert_eq!((r.u8().unwrap(), r.varint().unwrap()), (22, 2));
         assert_eq!(r.varlong().unwrap(), -1);
+        // The coat: pale unless the biome grows another.
+        assert_eq!((r.u8().unwrap(), r.varint().unwrap()), (23, 25));
+        let pale = super::super::mobs::wolf_variant_for("minecraft:plains");
+        assert_eq!(r.varint().unwrap(), i32::from(pale));
         assert_eq!(r.u8().unwrap(), 0xFF);
+        let woods = super::super::mobs::wolf_variant_for("minecraft:forest");
+        let rusty = super::super::mobs::wolf_variant_for("minecraft:sparse_jungle");
+        let striped = super::super::mobs::wolf_variant_for("minecraft:eroded_badlands");
+        assert!(woods != pale && rusty != pale && striped != pale && woods != rusty);
     }
 
     #[test]
