@@ -849,6 +849,7 @@ impl World {
         }
         self.save_portals();
         self.save_fight();
+        self.save_raids();
         if self.dimension != super::dimension::Dimension::Overworld {
             return; // level.dat is the overworld's to write
         }

@@ -820,6 +820,8 @@ impl World {
             tick: level.time.max(0) as u64,
             maps: HashMap::new(),
         };
+        let mut world = world;
+        world.load_raids();
         (world, generated)
     }
 

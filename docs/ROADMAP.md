@@ -536,6 +536,9 @@ Known gaps are listed under each phase instead of being hidden.
       celebrating villagers, and awarding Hero of the Village (`mob_effect::HERO_OF_THE_VILLAGE`, 40 minutes),
       which grants substantial trade discounts (`special_price` in `MERCHANT_OFFERS`, `world/villagers.rs`).
       If all villagers die, Defeat is declared and raiders celebrate.
+      Raids are saved in the overworld's `levitas_raids.dat` (state, wave, omen, boss bar and the
+      UUIDs of the living raiders); raiders whose chunk unloads are away, not dead, and join their
+      raid again when it loads, after a restart too. Not in vanilla's `raids.dat` format yet.
 
 ## Phase 11: Everything else
 

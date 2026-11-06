@@ -9,7 +9,9 @@
 //! If all villagers perish, the raid is lost and the raiders celebrate.
 
 use std::collections::HashSet;
+use std::fs;
 
+use levitas_nbt::{Compound, Tag};
 use levitas_protocol::{angle, BlockPos, Writer};
 use levitas_registry::packet::play::clientbound;
 use levitas_registry::{entity_type, mob_effect, Effect};
@@ -68,6 +70,9 @@ pub struct Raid {
     /// Players who killed a raider of this raid: the heroes, when it is won.
     pub raider_killers: HashSet<i32>,
     pub spawned_wave: bool,
+    /// Living raiders whose chunks are not loaded (by UUID): the wave is not over
+    /// while they are out there.
+    pub away: HashSet<u128>,
 }
 
 #[derive(Debug, Clone)]
@@ -263,6 +268,7 @@ impl World {
             participating_players: HashSet::new(),
             raider_killers: HashSet::new(),
             spawned_wave: false,
+            away: HashSet::new(),
         };
 
         let in_range_players: Vec<i32> = self
@@ -564,7 +570,7 @@ impl World {
                         return;
                     };
                     (
-                        r.raiders.is_empty(),
+                        r.raiders.is_empty() && r.away.is_empty(),
                         r.wave,
                         r.total_waves,
                         r.bad_omen_level,
@@ -787,6 +793,192 @@ impl World {
     }
 }
 
+/// Where the overworld keeps its raids (Levitas's own file, next to its regions).
+const RAIDS_FILE: &str = "levitas_raids.dat";
+
+fn state_to_nbt(state: RaidState) -> Compound {
+    let (name, ticks) = match state {
+        RaidState::Warmup { ticks } => ("warmup", ticks),
+        RaidState::Active => ("active", 0),
+        RaidState::Intermission { ticks } => ("intermission", ticks),
+        RaidState::Victory { ticks } => ("victory", ticks),
+        RaidState::Defeat { ticks } => ("defeat", ticks),
+        RaidState::Over => ("over", 0),
+    };
+    Compound::new()
+        .with("name", name)
+        .with("ticks", ticks as i32)
+}
+
+fn state_from_nbt(c: &Compound) -> RaidState {
+    let ticks = c.int("ticks").unwrap_or(0).max(0) as u32;
+    match c.str("name").unwrap_or("") {
+        "warmup" => RaidState::Warmup { ticks },
+        "active" => RaidState::Active,
+        "intermission" => RaidState::Intermission { ticks },
+        "victory" => RaidState::Victory { ticks },
+        "defeat" => RaidState::Defeat { ticks },
+        _ => RaidState::Over,
+    }
+}
+
+fn uuid_ints(u: u128) -> Vec<i32> {
+    vec![
+        (u >> 96) as i32,
+        (u >> 64) as i32,
+        (u >> 32) as i32,
+        u as i32,
+    ]
+}
+
+fn uuid_of(ints: &[i32]) -> Option<u128> {
+    let &[a, b, c, d] = ints else {
+        return None;
+    };
+    Some(
+        (u128::from(a as u32) << 96)
+            | (u128::from(b as u32) << 64)
+            | (u128::from(c as u32) << 32)
+            | u128::from(d as u32),
+    )
+}
+
+impl World {
+    /// Saves the raids under way, with the UUIDs of their living raiders (who are saved
+    /// with their chunks and join again when those load).
+    pub(super) fn save_raids(&self) {
+        if self.dimension != Dimension::Overworld {
+            return;
+        }
+        let raids: Vec<Tag> = self
+            .raids
+            .values()
+            .filter(|r| r.state != RaidState::Over)
+            .map(|r| {
+                let mut raiders: Vec<Tag> = r
+                    .raiders
+                    .iter()
+                    .filter_map(|id| self.mobs.get(id))
+                    .map(|m| Tag::from(uuid_ints(m.uuid)))
+                    .collect();
+                raiders.extend(r.away.iter().map(|&u| Tag::from(uuid_ints(u))));
+                Tag::Compound(
+                    Compound::new()
+                        .with("Id", r.id as i32)
+                        .with(
+                            "Center",
+                            r.center.iter().map(|&v| Tag::Double(v)).collect::<Vec<_>>(),
+                        )
+                        .with("BossBar", uuid_ints(r.boss_bar))
+                        .with("Wave", r.wave as i32)
+                        .with("TotalWaves", r.total_waves as i32)
+                        .with("Omen", r.bad_omen_level as i32)
+                        .with("State", state_to_nbt(r.state))
+                        .with("WaveSize", r.initial_wave_raiders as i32)
+                        .with("SpawnedWave", r.spawned_wave)
+                        .with("Raiders", raiders),
+                )
+            })
+            .collect();
+        let nbt = Compound::new()
+            .with("NextId", self.next_raid_id as i32)
+            .with("Raids", raids);
+        let folder = self.dimension.folder(&self.dir);
+        let result = fs::create_dir_all(&folder).and_then(|()| {
+            super::storage::write_atomic(&folder.join(RAIDS_FILE), &levitas_nbt::to_gzip("", &nbt))
+        });
+        if let Err(e) = result {
+            tracing::error!("could not save the raids: {e}");
+        }
+    }
+
+    /// Reads the raids saved by `save_raids`. Their raiders are away until their chunks
+    /// load.
+    pub(super) fn load_raids(&mut self) {
+        let path = self.dimension.folder(&self.dir).join(RAIDS_FILE);
+        let Ok(bytes) = fs::read(&path) else {
+            return;
+        };
+        let Ok((_, nbt)) = levitas_nbt::from_gzip(&bytes) else {
+            tracing::error!("{} is unreadable", path.display());
+            return;
+        };
+        self.next_raid_id = nbt.int("NextId").unwrap_or(1).max(1) as u32;
+        for t in nbt.list("Raids").unwrap_or_default() {
+            let Some(c) = t.as_compound() else { continue };
+            let Some(id) = c.int("Id").map(|i| i as u32) else {
+                continue;
+            };
+            let center: Vec<f64> = c
+                .list("Center")
+                .unwrap_or_default()
+                .iter()
+                .filter_map(Tag::as_f64)
+                .collect();
+            let &[x, y, z] = &center[..] else { continue };
+            let raid = Raid {
+                id,
+                center: [x, y, z],
+                boss_bar: c
+                    .int_array("BossBar")
+                    .and_then(uuid_of)
+                    .unwrap_or(u128::from(id)),
+                wave: c.int("Wave").unwrap_or(1).max(1) as u32,
+                total_waves: c.int("TotalWaves").unwrap_or(5).max(1) as u32,
+                bad_omen_level: c.int("Omen").unwrap_or(0).max(0) as u32,
+                state: c.compound("State").map_or(RaidState::Over, state_from_nbt),
+                raiders: HashSet::new(),
+                away: c
+                    .list("Raiders")
+                    .unwrap_or_default()
+                    .iter()
+                    .filter_map(|t| match t {
+                        Tag::IntArray(ints) => uuid_of(ints),
+                        _ => None,
+                    })
+                    .collect(),
+                initial_wave_raiders: c.int("WaveSize").unwrap_or(0).max(0) as usize,
+                participating_players: HashSet::new(),
+                raider_killers: HashSet::new(),
+                spawned_wave: c.int("SpawnedWave").unwrap_or(0) != 0,
+            };
+            self.next_raid_id = self.next_raid_id.max(id + 1);
+            self.raids.insert(id, raid);
+        }
+    }
+
+    /// A raider whose chunk loaded joins its raid again; one whose raid is gone is an
+    /// ordinary monster.
+    pub(super) fn rejoin_raid(&mut self, id: i32) {
+        let Some((raid, uuid)) = self.mobs.get(&id).and_then(|m| Some((m.raid_id?, m.uuid))) else {
+            return;
+        };
+        match self.raids.get_mut(&raid) {
+            Some(r) => {
+                r.away.remove(&uuid);
+                r.raiders.insert(id);
+            }
+            None => {
+                if let Some(m) = self.mobs.get_mut(&id) {
+                    m.raid_id = None;
+                }
+            }
+        }
+    }
+
+    /// A raider's chunk is unloading: it is away, not dead, until the chunk loads again.
+    pub(super) fn raider_unloaded(&mut self, id: i32) {
+        let Some((raid, uuid)) = self.mobs.get(&id).and_then(|m| Some((m.raid_id?, m.uuid))) else {
+            return;
+        };
+        if let Some(r) = self.raids.get_mut(&raid) {
+            if r.raiders.remove(&id) {
+                r.away.insert(uuid);
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -794,7 +986,12 @@ mod tests {
     use tokio::sync::mpsc;
 
     fn test_world() -> World {
-        let dir = std::env::temp_dir().join(format!("levitas-raid-test-{}", std::process::id()));
+        // Each test its own folder: raids are saved and read back from it.
+        let dir = std::env::temp_dir().join(format!(
+            "levitas-raid-test-{}-{}",
+            std::process::id(),
+            next_entity_id()
+        ));
         let (w, _) = World::new(
             dir,
             NewWorld {
@@ -864,6 +1061,48 @@ mod tests {
         assert_eq!(raid.wave, 1);
         assert_eq!(raid.bad_omen_level, 0);
         assert!(raid.id > 0);
+    }
+
+    #[test]
+    fn raids_and_their_raiders_survive_unloading_and_restarts() {
+        let mut w = test_world();
+        let pid = 100;
+        add_test_player(&mut w, pid, [0.0, -60.0, 0.0]);
+        w.mobs.insert(
+            200,
+            Mob::new(MobKind::Villager, [0.0, -60.0, 0.0], &mut w.rng),
+        );
+        let raid_id = w.start_raid([0.0, -60.0, 0.0], 0);
+        w.spawn_raid_wave(raid_id);
+        let raiders: Vec<i32> = w.raids[&raid_id].raiders.iter().copied().collect();
+        assert!(!raiders.is_empty());
+        // A raider whose chunk unloads is away, not dead: the wave goes on.
+        let first = raiders[0];
+        let uuid = w.mobs[&first].uuid;
+        w.raider_unloaded(first);
+        let mob = w.mobs.remove(&first).unwrap();
+        assert!(w.raids[&raid_id].away.contains(&uuid));
+        // Saved and read back, as after a restart.
+        w.save_raids();
+        let saved = w.raids.remove(&raid_id).unwrap();
+        w.load_raids();
+        let back = &w.raids[&raid_id];
+        assert_eq!(
+            (back.wave, back.total_waves),
+            (saved.wave, saved.total_waves)
+        );
+        assert_eq!(
+            back.away.len(),
+            raiders.len(),
+            "every living raider is waiting to come back"
+        );
+        assert!(w.next_raid_id > raid_id);
+        // The raider comes back with its chunk and joins again.
+        let id = next_entity_id();
+        w.mobs.insert(id, mob);
+        w.rejoin_raid(id);
+        assert!(w.raids[&raid_id].raiders.contains(&id));
+        assert!(!w.raids[&raid_id].away.contains(&uuid));
     }
 
     #[test]

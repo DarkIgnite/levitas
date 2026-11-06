@@ -1033,9 +1033,8 @@ impl Mob {
         }
         mob.player_created = nbt.int("PlayerCreated").unwrap_or(0) != 0;
         mob.is_patrol_leader = nbt.int("PatrolLeader").unwrap_or(0) != 0;
-        // Raids are not saved yet, so the raid a raider belonged to is gone after a
-        // restart: it comes back as an ordinary monster.
-        mob.raid_id = None;
+        // Joins its raid again when loaded, if that raid still exists (`rejoin_raid`).
+        mob.raid_id = nbt.int("RaidId").map(|r| r as u32);
         mob.name = nbt
             .get("CustomName")
             .map(crate::names::plain_text)
@@ -2667,6 +2666,7 @@ impl World {
         self.kept_entities.remove(&(x, z));
         self.unreadable_entities.remove(&(x, z));
         for id in ids {
+            self.raider_unloaded(id);
             let mob = self.mobs.remove(&id).expect("listed");
             self.send_to_viewers(&mob, items::remove_entity(id));
         }
@@ -2756,7 +2756,9 @@ impl World {
             }
             if let Some(mob) = Mob::from_nbt(entity, &mut self.rng) {
                 self.mob_chunks.insert(mob.chunk());
-                self.mobs.insert(next_entity_id(), mob);
+                let id = next_entity_id();
+                self.mobs.insert(id, mob);
+                self.rejoin_raid(id);
                 continue;
             }
             // An entity Levitas does not handle yet: it goes back on disk unchanged.

@@ -373,6 +373,11 @@ their server.
   - Lodestone compasses keep pointing at a broken lodestone.
   - Maps held in the Nether draw the bedrock roof instead of static.
   - Jumps count towards fly_one_cm and fall_one_cm (unclear what vanilla does; check before changing).
+- Raids are saved (2026-11-06): `World::save_raids`/`load_raids` in `world/raids.rs` keep them in
+  `dimensions/minecraft/overworld/levitas_raids.dat`. A raid's `away` set holds the UUIDs of raiders whose
+  chunks are not loaded; a wave is over only when `raiders` and `away` are both empty. `rejoin_raid` runs in
+  `load_mobs`, `raider_unloaded` in `unload_mobs`. The players who killed raiders (the heroes) are not saved.
+
 
 ## 9. Testing pattern
 
