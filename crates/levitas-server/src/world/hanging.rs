@@ -495,6 +495,9 @@ impl World {
             rotation,
         };
         self.broadcast(frame_data(target, item, rotation), None);
+        if let Some(h) = self.hanging.get(&target) {
+            self.redstone_dirty.push(h.block);
+        }
         self.play_sound(sound, block, None);
         true
     }
@@ -530,6 +533,9 @@ impl World {
                     rotation: 0,
                 };
                 self.broadcast(frame_data(target, Stack::EMPTY, 0), None);
+                if let Some(h) = self.hanging.get(&target) {
+                    self.redstone_dirty.push(h.block);
+                }
                 self.play_sound("minecraft:entity.item_frame.remove_item", block, None);
                 return true;
             }

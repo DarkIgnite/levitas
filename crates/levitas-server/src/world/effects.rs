@@ -67,6 +67,12 @@ impl Player {
     }
 
     /// The level of an effect, counting from 1, or 0 when the player does not have it.
+    /// Most health the player can have: 20, and 4 more a level of Health Boost.
+    pub fn max_health(&self) -> f32 {
+        let boost = self.effect_level(mob_effect::HEALTH_BOOST);
+        MAX_HEALTH + 4.0 * boost as f32
+    }
+
     pub fn effect_level(&self, id: i32) -> u32 {
         self.effect(id).map_or(0, |e| u32::from(e.amplifier) + 1)
     }
@@ -203,8 +209,8 @@ impl World {
         let Some(p) = self.players.get_mut(&id) else {
             return;
         };
-        if p.alive && p.health < MAX_HEALTH {
-            p.health = (p.health + amount).min(MAX_HEALTH);
+        if p.alive && p.health < p.max_health() {
+            p.health = (p.health + amount).min(p.max_health());
             p.health_dirty = true;
         }
     }

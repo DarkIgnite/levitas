@@ -528,7 +528,7 @@ pub struct Mob {
     pub pos: [f64; 3],
     pub(super) vel: [f64; 3],
     /// Sideways speed from knockback and explosions, fading with friction.
-    knockback: [f64; 2],
+    pub(super) knockback: [f64; 2],
     pub yaw: f32,
     pub head_yaw: f32,
     on_ground: bool,

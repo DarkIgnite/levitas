@@ -18,6 +18,9 @@ pub(super) const SERIALIZER_BYTE: i32 = 0;
 pub(super) const HAND_ACTIVE: u8 = 0x01;
 pub(super) const OFFHAND_ACTIVE: u8 = 0x02;
 
+/// How hard a shield pushes back a melee attacker it blocks.
+const SHIELD_KNOCKBACK: f64 = 0.5;
+
 fn is_shield(stack: Stack) -> bool {
     ItemInfo::get(stack.item).is_some_and(|i| i.name == "minecraft:shield")
 }
@@ -59,23 +62,12 @@ impl World {
         axe: bool,
     ) -> bool {
         let tick = self.tick;
-        let Some(p) = self.players.get(&id) else {
+        if !self.shield_faces(id, from) {
             return false;
-        };
-        let Some((hand, since)) = p.blocking else {
-            return false;
-        };
+        }
+        let p = &self.players[&id];
+        let (hand, _) = p.blocking.expect("checked by shield_faces");
         let slot = p.hand_slot(hand);
-        if tick < since + RAISE_TICKS || !is_shield(p.inventory.slots[slot]) {
-            return false;
-        }
-        // Only hits from in front: the way to the source lies along the player's view.
-        let yaw = f64::from(p.yaw).to_radians();
-        let look = [-yaw.sin(), yaw.cos()];
-        let to = [from[0] - p.pos[0], from[2] - p.pos[2]];
-        if to[0] * look[0] + to[1] * look[1] <= 0.0 {
-            return false;
-        }
         let survival = p.survival();
         self.broadcast(entity_event(id, ENTITY_EVENT_SHIELD_BLOCK), None);
         if amount >= 3.0 && survival {
@@ -100,6 +92,49 @@ impl World {
             );
         }
         true
+    }
+
+    /// Whether the player holds a raised shield towards `from` (raised long enough).
+    pub(super) fn shield_faces(&self, id: i32, from: [f64; 3]) -> bool {
+        let Some(p) = self.players.get(&id) else {
+            return false;
+        };
+        let Some((hand, since)) = p.blocking else {
+            return false;
+        };
+        let slot = p.hand_slot(hand);
+        if self.tick < since + RAISE_TICKS || !is_shield(p.inventory.slots[slot]) {
+            return false;
+        }
+        // Only hits from in front: the way to the source lies along the player's view.
+        let yaw = f64::from(p.yaw).to_radians();
+        let look = [-yaw.sin(), yaw.cos()];
+        let to = [from[0] - p.pos[0], from[2] - p.pos[2]];
+        to[0] * look[0] + to[1] * look[1] > 0.0
+    }
+
+    /// A melee attacker whose blow a shield stopped is pushed back.
+    pub(super) fn shield_knockback(&mut self, id: i32, attacker: i32) {
+        let Some(at) = self.players.get(&id).map(|p| p.pos) else {
+            return;
+        };
+        let push = |from: [f64; 3]| {
+            let d = [from[0] - at[0], from[2] - at[2]];
+            let len = d[0].hypot(d[1]).max(1e-6);
+            [
+                d[0] / len * SHIELD_KNOCKBACK,
+                0.2,
+                d[1] / len * SHIELD_KNOCKBACK,
+            ]
+        };
+        if let Some(m) = self.mobs.get_mut(&attacker) {
+            let v = push(m.pos);
+            m.push(v);
+        } else if let Some(from) = self.players.get(&attacker).map(|p| p.pos) {
+            if attacker != id {
+                self.push_player(attacker, push(from));
+            }
+        }
     }
 
     /// Where an entity that caused damage is, and whether it swung an axe.
@@ -186,5 +221,54 @@ mod tests {
         w.tick += DISABLED_TICKS;
         w.raise_shield(alice, 1);
         assert!(w.players[&alice].blocking.is_some());
+    }
+
+    #[test]
+    fn blocked_blows_push_back_and_boosts_and_chorus_work() {
+        let dir = std::env::temp_dir().join(format!("levitas-shield2-{}", std::process::id()));
+        let (mut w, _) = World::new(
+            dir,
+            NewWorld {
+                kind: WorldKind::Flat,
+                seed: Some(0),
+            },
+        );
+        w.chunk(0, 0);
+        let alice = player(&mut w, "Alice", [0.5, -60.0, 0.5]);
+        w.players.get_mut(&alice).unwrap().inventory.slots[OFFHAND] = item("shield");
+        assert!(w.raise_shield(alice, 1));
+        w.tick += RAISE_TICKS;
+        let zombie = next_entity_id();
+        let m = super::super::mobs::Mob::new(
+            super::super::mobs::MobKind::Zombie,
+            [0.5, -60.0, 2.0],
+            &mut w.rng,
+        );
+        w.mobs.insert(zombie, m);
+        assert!(!w.damage_from(alice, 3.0, Damage::Mob("Zombie"), Some(zombie)));
+        assert!(
+            w.mobs[&zombie].knockback[1] > 0.0,
+            "the zombie is pushed away"
+        );
+
+        // Health Boost II: 8 more health to fill.
+        w.add_effect(
+            alice,
+            levitas_registry::Effect {
+                id: levitas_registry::mob_effect::HEALTH_BOOST,
+                duration: 200,
+                amplifier: 1,
+            },
+        );
+        assert_eq!(w.players[&alice].max_health(), 28.0);
+        w.heal(alice, 100.0);
+        assert_eq!(w.players[&alice].health, 28.0);
+
+        // Chorus fruit lands the eater somewhere else, on their feet.
+        let before = w.players[&alice].pos;
+        w.teleport_randomly(alice, 16.0);
+        let after = w.players[&alice].pos;
+        assert!(before != after);
+        assert!((after[0] - before[0]).abs() <= 8.0 && (after[2] - before[2]).abs() <= 8.0);
     }
 }

@@ -111,6 +111,7 @@ fn base_value(id: i32) -> f64 {
         attribute::SUBMERGED_MINING_SPEED => 0.2,
         attribute::SNEAKING_SPEED => 0.3,
         attribute::BURNING_TIME => 1.0,
+        attribute::MAX_HEALTH => 20.0,
         _ => 0.0,
     }
 }
@@ -162,6 +163,17 @@ fn modifiers(p: &Player) -> Modifiers {
             list.push((format!("{}/{slot}", e.id), amount, e.operation));
         }
     }
+    // Health Boost: 4 more health a level, under vanilla's modifier name.
+    let boost = p.effect_level(levitas_registry::mob_effect::HEALTH_BOOST);
+    let mut health = Vec::new();
+    if boost > 0 {
+        health.push((
+            "minecraft:effect.health_boost".to_owned(),
+            4.0 * f64::from(boost),
+            0,
+        ));
+    }
+    out.push((attribute::MAX_HEALTH, health));
     out
 }
 

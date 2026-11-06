@@ -259,6 +259,9 @@ impl World {
         if let Some((from, axe)) = source.and_then(|s| self.attacker(s)) {
             let axe = axe && matches!(kind, Damage::Player(_));
             if kind.blockable() && self.shield_blocks(id, amount, from, axe) {
+                if let (Some(attacker), Damage::Mob(_) | Damage::Player(_)) = (source, kind) {
+                    self.shield_knockback(id, attacker);
+                }
                 return false;
             }
         }
@@ -607,6 +610,47 @@ impl World {
         self.send(id, super::player_data(id, &self.players[&id]));
     }
 
+    /// Chorus fruit: the eater goes to a random spot within `diameter` blocks across
+    /// where they can stand (ground under two free blocks), trying 16 times.
+    pub(super) fn teleport_randomly(&mut self, id: i32, diameter: f64) {
+        let Some(from) = self.players.get(&id).map(|p| p.pos) else {
+            return;
+        };
+        for _ in 0..16 {
+            let x = from[0] + (self.rng.f64() - 0.5) * diameter;
+            let z = from[2] + (self.rng.f64() - 0.5) * diameter;
+            let y_top = (from[1] + (self.rng.f64() - 0.5) * diameter).floor() as i32;
+            let (bx, bz) = (x.floor() as i32, z.floor() as i32);
+            let free = |w: &mut World, y: i32| {
+                let s = w.block(BlockPos::new(bx, y, bz));
+                levitas_registry::collision_boxes(s).is_empty()
+                    && crate::blocks::fluid::fluid_at(s).is_none()
+            };
+            let mut y = y_top.clamp(MIN_Y + 1, MAX_Y - 2);
+            // Down to the ground.
+            while y > MIN_Y + 1 && free(self, y - 1) {
+                y -= 1;
+            }
+            if y <= MIN_Y + 1 || !free(self, y) || !free(self, y + 1) {
+                continue;
+            }
+            let to = [x, f64::from(y), z];
+            self.play_sound_at("minecraft:item.chorus_fruit.teleport", from, 1.0, 1.0, None);
+            self.teleport(id, to);
+            self.play_sound_at("minecraft:item.chorus_fruit.teleport", to, 1.0, 1.0, None);
+            if let Some(p) = self.players.get_mut(&id) {
+                p.fall_distance = 0.0;
+            }
+            self.send(
+                id,
+                Writer::packet(clientbound::COOLDOWN)
+                    .string("minecraft:chorus_fruit")
+                    .varint(20),
+            );
+            return;
+        }
+    }
+
     pub(super) fn use_spyglass(&mut self, id: i32, hand: i32) -> bool {
         let Some(p) = self.players.get_mut(&id) else {
             return false;
@@ -787,6 +831,7 @@ impl World {
         {
             self.add_effect(id, effect);
         }
+        let mut chorus = false;
         for effect in consumable.effects {
             match effect {
                 OnConsume::Apply {
@@ -807,8 +852,11 @@ impl World {
                         self.remove_effect(id, e);
                     }
                 }
-                OnConsume::TeleportRandomly => {}
+                OnConsume::TeleportRandomly => chorus = true,
             }
+        }
+        if chorus {
+            self.teleport_randomly(id, 16.0);
         }
         if info.name == "minecraft:ominous_bottle" {
             let pos = self.players.get(&id).map(|p| p.pos).unwrap_or_default();
@@ -863,8 +911,8 @@ impl World {
             let regenerates = crate::rules::bool("natural_health_regeneration");
             if difficulty == Difficulty::Peaceful {
                 // No hunger in peaceful: health and food come back on their own.
-                if regenerates && p.health < MAX_HEALTH && tick.is_multiple_of(20) {
-                    p.health = (p.health + 1.0).min(MAX_HEALTH);
+                if regenerates && p.health < p.max_health() && tick.is_multiple_of(20) {
+                    p.health = (p.health + 1.0).min(p.max_health());
                     p.health_dirty = true;
                 }
                 if p.food < 20 && tick.is_multiple_of(10) {
@@ -883,19 +931,25 @@ impl World {
                 p.health_dirty = true;
             }
             p.food_timer += 1;
-            let hurt = p.health < MAX_HEALTH;
+            let max = p.max_health();
+            let hurt = p.health < max;
+            // Health beyond the most allowed (a Health Boost that ran out) goes.
+            if p.health > max {
+                p.health = max;
+                p.health_dirty = true;
+            }
             if hurt && regenerates && p.food >= 20 && p.saturation > 0.0 {
                 // Fast regeneration from saturation.
                 if p.food_timer >= 10 {
                     let spent = p.saturation.min(6.0);
-                    p.health = (p.health + spent / 6.0).min(MAX_HEALTH);
+                    p.health = (p.health + spent / 6.0).min(max);
                     p.exhaustion += spent;
                     p.food_timer = 0;
                     p.health_dirty = true;
                 }
             } else if hurt && regenerates && p.food >= 18 {
                 if p.food_timer >= 80 {
-                    p.health = (p.health + 1.0).min(MAX_HEALTH);
+                    p.health = (p.health + 1.0).min(max);
                     p.exhaustion += 6.0;
                     p.food_timer = 0;
                     p.health_dirty = true;

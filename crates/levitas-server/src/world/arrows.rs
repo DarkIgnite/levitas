@@ -168,6 +168,26 @@ impl World {
                     self.arrows.insert(id, arrow);
                 }
                 Some(hit) => {
+                    // A shield turns the arrow away: it bounces back and falls.
+                    if let Hit::Player(pid) = hit {
+                        let from = [
+                            arrow.pos[0] - arrow.vel[0] * 4.0,
+                            arrow.pos[1],
+                            arrow.pos[2] - arrow.vel[2] * 4.0,
+                        ];
+                        if self.shield_faces(pid, from) {
+                            self.arrow_hits(&arrow, hit);
+                            arrow.vel = arrow.vel.map(|v| v * -0.1);
+                            arrow.pos = [
+                                arrow.pos[0] + arrow.vel[0] * 5.0,
+                                arrow.pos[1],
+                                arrow.pos[2] + arrow.vel[2] * 5.0,
+                            ];
+                            arrow.critical = false;
+                            self.arrows.insert(id, arrow);
+                            continue;
+                        }
+                    }
                     self.arrow_hits(&arrow, hit);
                     self.broadcast(items::remove_entity(id), None);
                 }
@@ -268,10 +288,14 @@ impl World {
         };
         match hit {
             Hit::Player(id) => {
+                let hurt =
+                    self.damage_from(id, damage, Damage::Arrow(shooter_name), Some(arrow.shooter));
+                if !hurt {
+                    return;
+                }
                 if arrow.flaming {
                     self.ignite_player(id, 100);
                 }
-                self.damage_from(id, damage, Damage::Arrow(shooter_name), Some(arrow.shooter));
                 let punch = 0.3 + 0.6 * f64::from(arrow.punch);
                 self.push_player(id, [away[0] * punch, 0.1, away[1] * punch]);
                 if arrow.slowness {

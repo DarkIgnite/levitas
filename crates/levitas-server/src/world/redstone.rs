@@ -396,6 +396,19 @@ impl World {
         })
     }
 
+    /// An item frame in `pos` facing `facing`, as a comparator reads it: its item's
+    /// rotation plus one, or 0 when empty.
+    fn frame_signal(&self, pos: BlockPos, facing: Dir) -> Option<u8> {
+        self.hanging.values().find_map(|h| match h.what {
+            super::hanging::What::Frame { item, rotation, .. }
+                if h.block == pos && h.facing == facing =>
+            {
+                Some(if item.is_empty() { 0 } else { rotation % 8 + 1 })
+            }
+            _ => None,
+        })
+    }
+
     /// What a comparator should give out: its back input, compared with or less its
     /// side input.
     fn comparator_target(&self, pos: BlockPos, state: u16) -> u8 {
@@ -406,11 +419,18 @@ impl World {
         let behind_state = self.state_at(behind);
         // A container behind it, or behind the solid block behind it, is read for how
         // full it is.
-        let read = self.container_signal(behind).or_else(|| {
-            is_conductor(behind_state)
-                .then(|| self.container_signal(offset(behind, back)))
-                .flatten()
-        });
+        let read = self
+            .container_signal(behind)
+            .or_else(|| self.frame_signal(behind, back))
+            .or_else(|| {
+                is_conductor(behind_state)
+                    .then(|| {
+                        let further = offset(behind, back);
+                        self.container_signal(further)
+                            .or_else(|| self.frame_signal(further, back))
+                    })
+                    .flatten()
+            });
         let input = read.unwrap_or_else(|| self.power_from(behind, back.opposite(), true));
         let side = self.side_input(pos, state, false);
         if prop(state, "mode") == Some("subtract") {
