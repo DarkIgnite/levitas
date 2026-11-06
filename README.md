@@ -25,8 +25,8 @@ needs, with a plugin API for survival-economy servers on top.
 
 > **Status: playable.** You can join a generated world and play survival: mine, craft,
 > farm, fight monsters, enchant, brew, build redstone, trade with villagers, and go to
-> the Nether and the End to fight the dragon. Raids, minecarts and plugins are still to
-> come. Overall progress: **about 77%** of the [roadmap](docs/ROADMAP.md).
+> the Nether and the End to fight the dragon, fish, and tame wolves and cats. Plugins
+> and the economy are still to come. Overall progress: **about 76%** of the [roadmap](docs/ROADMAP.md).
 >
 > **Now on 26.3.** The server speaks Minecraft 26.3 (protocol 777), saves worlds in the
 > 26.3 layout, upgrades 1.21.8 worlds when it opens them, and the blocks new in 26.3
@@ -43,21 +43,21 @@ what is missing in each one.
 | Phase | Progress | |
 |---|---|---|
 | 0. Migration to Minecraft 26.3 | 100% | `██████████` |
-| 1. Persistence (saving worlds, players, chunks) | 72% | `███████▏░░` |
+| 1. Persistence (saving worlds, players, chunks) | 80% | `████████░░` |
 | 2. Blocks behave correctly | 81% | `████████▏░` |
 | 3. Fluids, gravity and light | 80% | `████████░░` |
-| 4. Combat and basic entities | 88% | `████████▊░` |
-| 5. Mobs | 73% | `███████▎░░` |
-| 6. Farming, nature and time | 95% | `█████████▌` |
+| 4. Combat and basic entities | 89% | `████████▉░` |
+| 5. Mobs | 78% | `███████▊░░` |
+| 6. Farming, nature and time | 97% | `█████████▋` |
 | 7. Redstone | 68% | `██████▊░░░` |
 | 8. Progression (enchanting, brewing, ...) | 97% | `█████████▋` |
 | 9. Dimensions (Nether, End) | 60% | `██████░░░░` |
-| 10. Villagers and raids | 93% | `█████████▎` |
-| 11. Everything else (commands, config, ...) | 64% | `██████▍░░░` |
+| 10. Villagers and raids | 95% | `█████████▌` |
+| 11. Everything else (commands, config, ...) | 69% | `██████▉░░░` |
 | 12. World generation | 95% | `█████████▌` |
 | 13. Plugins and economy | 0% | `░░░░░░░░░░` |
-| Infrastructure (CI, parallel ticking, benchmarks) | 0% | `░░░░░░░░░░` |
-| **Overall** | **~77%** | `███████▋░░` |
+| Infrastructure (CI, parallel ticking, benchmarks) | 33% | `███▎░░░░░░` |
+| **Overall** | **~76%** | `███████▌░░` |
 
 ## What works today
 

@@ -264,6 +264,10 @@ Known gaps are listed under each phase instead of being hidden.
       Pups of tamed wolves are tamed. Missing: biome wolf variants and sound variants
       (all pale and classic), wolves hunting sheep, skeletons and rabbits, armour,
       shaking dry, wagging tails and health-based growls, cats, parrots and horses.
+      Wolves wear their biome's coat (26.3's wolf variants). Cats: tamed with raw cod or
+      salmon, sit, collars, random coats, follow and teleport, bred with fish; wild ones keep
+      away from players; strays turn up next to villagers. Missing for cats: lying on beds
+      and chests, scaring creepers and phantoms, morning gifts, ocelots.
       Rabbits: 3 health, bolt from players within 5 blocks, breed on carrots, golden
       carrots and dandelions, spawn from the biomes' creature lists, drop by their loot
       table. Missing: biome coat variants (all brown), hopping animation timing, the
@@ -655,6 +659,7 @@ Known gaps are listed under each phase instead of being hidden.
 
 ## Infrastructure
 
-- [ ] CI: fmt, clippy and tests on every push (needs the data generator in CI)
+- [x] CI: fmt, clippy and tests on every push (`.github/workflows/ci.yml` runs the data
+      generator with Java 25, caching `generated/`, then fmt, clippy and the tests)
 - [ ] Region-based parallel ticking (see ARCHITECTURE.md)
 - [ ] Benchmarks against Leaf: memory per player, tick time, chunk throughput
