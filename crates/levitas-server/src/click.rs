@@ -421,11 +421,15 @@ pub fn cartography_recipe(map: Stack, material: Stack, state: Option<(u8, bool)>
     let is_glass_pane = mat_name == "minecraft:glass_pane";
     let (scale, locked) = state.unwrap_or((0, false));
 
+    // Cloning: any map in #clonable_maps (explorer maps too) and an empty map make two.
+    let clonable = levitas_registry::TagRegistry::get("minecraft:item").is_some_and(|t| {
+        t.members("minecraft:clonable_maps")
+            .contains(&i64::from(map.item))
+    });
+    if clonable && map.map_id.is_some() && mat_name == "minecraft:map" {
+        return map.with_count(2);
+    }
     if map_name == "minecraft:filled_map" {
-        // Cloning: filled map + empty map -> 2 copies of filled map
-        if mat_name == "minecraft:map" {
-            return map.with_count(2);
-        }
         // Locking and zooming out: the result shows what will happen; taking it makes
         // the new map (see `World::finish_map_posts`).
         if is_glass_pane && !locked {

@@ -16,14 +16,14 @@ use levitas_world::{
 use pumpkin_config::lighting::LightingEngineConfig;
 use pumpkin_data::chunk::Biome;
 use pumpkin_data::dimension::Dimension;
-use pumpkin_data::structures::StructureSet;
+use pumpkin_data::structures::{StructureKeys, StructurePlacementType, StructureSet};
 use pumpkin_data::{BlockStateId, Mirror, Rotation};
 use pumpkin_util::world_seed::Seed;
 use pumpkin_world::chunk::format::LightContainer;
 use pumpkin_world::chunk_system::generation_cache::Cache;
 use pumpkin_world::chunk_system::{Chunk as PumpkinChunk, StagedChunkEnum};
 use pumpkin_world::generation::generator::structure_finder::{
-    find_nearest_structure, StructureSearch,
+    find_nearest_structure, find_nearest_structure_start, StructureSearch,
 };
 use pumpkin_world::generation::generator::WorldGenerator;
 use pumpkin_world::generation::get_world_gen;
@@ -101,6 +101,26 @@ impl PumpkinTerrain {
             StructureSearch::NotFound => Ok(None),
             StructureSearch::Pending => Err(()),
         }
+    }
+
+    /// The nearest `structure` (`ocean_monument`, `mansion`, `trial_chambers`, ...) to
+    /// block (`x`, `z`) whose site really holds one (its biome allows it), looking
+    /// `radius` rings of placement regions out. Explorer maps point here.
+    pub fn structure_near(&self, structure: &str, x: i32, z: i32, radius: i32) -> Option<[i32; 3]> {
+        let key =
+            StructureKeys::from_name(structure.strip_prefix("minecraft:").unwrap_or(structure))?;
+        let set = StructureSet::ALL
+            .iter()
+            .find(|set| set.structures.iter().any(|entry| entry.structure == key))?;
+        if !matches!(
+            set.placement.placement_type,
+            StructurePlacementType::RandomSpread(_)
+        ) {
+            return None;
+        }
+        let origin = pumpkin_util::math::position::BlockPos::new(x, 64, z);
+        let (pos, _) = find_nearest_structure_start(origin, set, &[key], radius, &self.generator)?;
+        Some([pos.0.x, pos.0.y, pos.0.z])
     }
 
     fn of(seed: i64, dimension: Dimension, span: Span) -> Self {
@@ -524,6 +544,23 @@ mod tests {
         let [x, _, z] = found.expect("a stronghold");
         let distance = f64::from(x).hypot(f64::from(z));
         assert!((1000.0..3200.0).contains(&distance), "{distance}");
+    }
+
+    #[test]
+    fn explorer_map_structures_are_found() {
+        let overworld = PumpkinTerrain::new(1);
+        for structure in ["village_plains", "monument", "mansion", "trial_chambers"] {
+            let start = std::time::Instant::now();
+            let found = overworld.structure_near(structure, 0, 0, 100);
+            eprintln!("{structure}: {found:?} in {:?}", start.elapsed());
+            let [x, _, z] = found.unwrap_or_else(|| panic!("no {structure} near spawn"));
+            assert!(
+                x.abs() <= 3200 && z.abs() <= 3200,
+                "{structure} too far: {x} {z}"
+            );
+        }
+        // Strongholds are placed in rings, not found this way.
+        assert_eq!(overworld.structure_near("stronghold", 0, 0, 100), None);
     }
 
     #[test]

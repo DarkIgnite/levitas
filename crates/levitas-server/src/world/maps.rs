@@ -632,6 +632,22 @@ impl World {
                         icons.push((map_decoration::FRAME, x, z, d));
                     }
                 }
+                // An explorer map's destination, from the map item held.
+                let target = holders.iter().find_map(|pid| {
+                    let p = &self.players[pid];
+                    [HOTBAR + p.held, OFFHAND].iter().find_map(|&s| {
+                        let stack = p.inventory.slots[s];
+                        (stack.map_id == Some(id))
+                            .then_some(stack.map_target)
+                            .flatten()
+                    })
+                });
+                if let Some(t) = target {
+                    let at = [f64::from(t.x) + 0.5, 0.0, f64::from(t.z) + 0.5];
+                    if let Some((x, z, _)) = marker(map, at, 180.0) {
+                        icons.push((i32::from(t.decoration), x, z, 8));
+                    }
+                }
                 for &(block, color) in &map.banners {
                     if let Some((x, z, _)) = marker(map, centre(block), 180.0) {
                         icons.push((map_decoration::BANNER_WHITE + i32::from(color), x, z, 8));

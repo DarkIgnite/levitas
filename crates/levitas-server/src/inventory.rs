@@ -50,6 +50,53 @@ pub struct Stack {
     /// A cartography table's pending change to a map (the `minecraft:map_post_processing`
     /// component): `MAP_LOCK` or `MAP_SCALE`. The world turns it into a new map.
     pub map_post: Option<u8>,
+    /// An explorer map's destination marker (the `minecraft:map_decorations` component).
+    pub map_target: Option<MapTarget>,
+}
+
+/// The marker an explorer map shows where its structure is: a map decoration type and
+/// the block it stands on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MapTarget {
+    pub decoration: u8,
+    pub x: i32,
+    pub z: i32,
+}
+
+impl MapTarget {
+    fn decoration_name(self) -> &'static str {
+        levitas_registry::map_decoration::NAMES
+            .get(usize::from(self.decoration))
+            .copied()
+            .unwrap_or("minecraft:red_x")
+    }
+
+    /// The component's value: one decoration under the key vanilla uses for targets.
+    fn to_nbt(self) -> Compound {
+        Compound::new().with(
+            "+",
+            Compound::new()
+                .with("type", self.decoration_name())
+                .with("x", f64::from(self.x))
+                .with("z", f64::from(self.z))
+                .with("rotation", 180.0f32),
+        )
+    }
+
+    fn from_nbt(c: &Compound) -> Option<MapTarget> {
+        let (_, Tag::Compound(d)) = c.iter().next()? else {
+            return None;
+        };
+        let name = d.str("type")?;
+        let decoration = levitas_registry::map_decoration::NAMES
+            .iter()
+            .position(|&n| n == name)? as u8;
+        Some(MapTarget {
+            decoration,
+            x: d.float("x")?.floor() as i32,
+            z: d.float("z")?.floor() as i32,
+        })
+    }
 }
 
 /// `map_post` values, as 26.3 numbers them.
@@ -105,6 +152,7 @@ impl Stack {
         lodestone: None,
         map_id: None,
         map_post: None,
+        map_target: None,
     };
 
     pub fn new(item: i32, count: i32) -> Self {
@@ -137,6 +185,7 @@ impl Stack {
             && self.lodestone == other.lodestone
             && self.map_id == other.map_id
             && self.map_post == other.map_post
+            && self.map_target == other.map_target
     }
 
     pub fn is_empty(&self) -> bool {
@@ -207,6 +256,9 @@ impl Stack {
         }
         if let Some(post) = self.map_post {
             components.insert("minecraft:map_post_processing", i32::from(post));
+        }
+        if let Some(target) = self.map_target {
+            components.insert("minecraft:map_decorations", target.to_nbt());
         }
         if !components.is_empty() {
             nbt.insert("components", components);
@@ -301,6 +353,9 @@ impl Stack {
             lodestone,
             map_id,
             map_post,
+            map_target: components
+                .and_then(|c| c.compound("minecraft:map_decorations"))
+                .and_then(MapTarget::from_nbt),
         }
     }
 }
@@ -354,6 +409,7 @@ fn write_components(packet: Writer, stack: &Stack) -> Writer {
     let lodestone = stack.lodestone.is_some();
     let mapped = stack.map_id.is_some();
     let processing = stack.map_post.is_some();
+    let targeted = stack.map_target.is_some();
     let added = i32::from(damaged)
         + i32::from(processing)
         + i32::from(dyed)
@@ -363,7 +419,8 @@ fn write_components(packet: Writer, stack: &Stack) -> Writer {
         + i32::from(brewed)
         + i32::from(named)
         + i32::from(lodestone)
-        + i32::from(mapped);
+        + i32::from(mapped)
+        + i32::from(targeted);
     let mut packet = packet.varint(added).varint(0);
     if damaged {
         packet = packet.varint(component::DAMAGE).varint(stack.damage);
@@ -424,6 +481,11 @@ fn write_components(packet: Writer, stack: &Stack) -> Writer {
         packet = packet
             .varint(component::MAP_POST_PROCESSING)
             .varint(i32::from(post));
+    }
+    if let Some(target) = stack.map_target {
+        packet = packet
+            .varint(component::MAP_DECORATIONS)
+            .bytes(&levitas_nbt::to_network(&Tag::Compound(target.to_nbt())));
     }
     packet
 }
@@ -719,5 +781,28 @@ mod tests {
             .varint(0) // lock
             .into_frame();
         assert_eq!(sent, expected);
+    }
+
+    #[test]
+    fn explorer_map_target_saves_and_is_sent() {
+        let map = item("minecraft:ocean_monument_map");
+        let mut stack = Stack::new(map, 1);
+        stack.map_id = Some(7);
+        stack.map_target = Some(MapTarget {
+            decoration: levitas_registry::map_decoration::MONUMENT as u8,
+            x: -300,
+            z: 812,
+        });
+        let nbt = stack.to_nbt();
+        let deco = nbt
+            .compound("components")
+            .and_then(|c| c.compound("minecraft:map_decorations"))
+            .and_then(|c| c.compound("+"))
+            .unwrap();
+        assert_eq!(deco.str("type"), Some("minecraft:monument"));
+        assert_eq!(Stack::from_nbt(&nbt), stack);
+        let sent = write_stack(Writer::packet(0), stack).into_frame();
+        let tail = levitas_nbt::to_network(&Tag::Compound(stack.map_target.unwrap().to_nbt()));
+        assert!(sent.ends_with(&tail));
     }
 }

@@ -9,7 +9,7 @@
 //! not of the generated data, so their table is written out here from the wiki.
 
 use levitas_nbt::{Compound, Tag};
-use levitas_registry::{menu, villager_profession, villager_type, TagRegistry};
+use levitas_registry::{map_decoration, menu, villager_profession, villager_type, TagRegistry};
 use serde_json::Value;
 
 use super::containers::{View, MAX_WINDOW_ID};
@@ -544,7 +544,7 @@ impl Villager {
     fn add_trades(&mut self, rng: &mut Rng) {
         let mut pool: Vec<&Spec> = table(self.profession)
             .iter()
-            .filter(|s| s.level == self.level)
+            .filter(|s| s.level == self.level && s.offered_by(self.kind))
             .collect();
         for _ in 0..2 {
             if pool.is_empty() {
@@ -607,6 +607,9 @@ enum Kind {
     Enchanted(i32),
     /// An enchanted book for emeralds and a book.
     Book,
+    /// An explorer map, offered only by villagers of these kinds (all when empty). The
+    /// map is drawn when the trade is made (see `World::draw_explorer_maps`).
+    Explorer(&'static [&'static str]),
 }
 
 /// A line of the trade table.
@@ -684,6 +687,80 @@ const fn book(level: i32, xp: i32) -> Spec {
 }
 
 const E: &str = "emerald";
+
+/// An explorer map for emeralds and a compass.
+const fn explorer(
+    level: i32,
+    emeralds: i32,
+    sell: &'static str,
+    xp: i32,
+    kinds: &'static [&'static str],
+) -> Spec {
+    Spec {
+        level,
+        buy: (E, emeralds),
+        buy_b: ("compass", 1),
+        sell: (sell, 1),
+        max_uses: 12,
+        xp,
+        kind: Kind::Explorer(kinds),
+    }
+}
+
+/// The structure each explorer map leads to (a `#minecraft:on_*_maps` tag's member) and
+/// the marker it shows there.
+const EXPLORER_MAPS: &[(&str, &str, i32)] = &[
+    (
+        "jungle_pyramid_map",
+        "jungle_pyramid",
+        map_decoration::JUNGLE_TEMPLE,
+    ),
+    ("swamp_hut_map", "swamp_hut", map_decoration::SWAMP_HUT),
+    (
+        "desert_village_map",
+        "village_desert",
+        map_decoration::VILLAGE_DESERT,
+    ),
+    (
+        "plains_village_map",
+        "village_plains",
+        map_decoration::VILLAGE_PLAINS,
+    ),
+    (
+        "savanna_village_map",
+        "village_savanna",
+        map_decoration::VILLAGE_SAVANNA,
+    ),
+    (
+        "snowy_village_map",
+        "village_snowy",
+        map_decoration::VILLAGE_SNOWY,
+    ),
+    (
+        "taiga_village_map",
+        "village_taiga",
+        map_decoration::VILLAGE_TAIGA,
+    ),
+    (
+        "buried_trial_chambers_map",
+        "trial_chambers",
+        map_decoration::TRIAL_CHAMBERS,
+    ),
+    ("ocean_monument_map", "monument", map_decoration::MONUMENT),
+    ("woodland_mansion_map", "mansion", map_decoration::MANSION),
+];
+
+/// The structure and marker of an explorer map item.
+fn explorer_target(item: i32) -> Option<(&'static str, i32)> {
+    let name = ItemInfo::get(item)?.name.strip_prefix("minecraft:")?;
+    EXPLORER_MAPS
+        .iter()
+        .find(|(n, _, _)| *n == name)
+        .map(|&(_, structure, decoration)| (structure, decoration))
+}
+
+/// How far explorer maps look for their structure, in chunks.
+const EXPLORER_SEARCH: i32 = 100;
 
 const FARMER: &[Spec] = &[
     t(1, ("wheat", 20), (E, 1), 16, 2),
@@ -780,10 +857,38 @@ const CARTOGRAPHER: &[Spec] = &[
     t(1, ("paper", 24), (E, 1), 16, 2),
     t(1, (E, 7), ("map", 1), 12, 1),
     t(2, ("glass_pane", 11), (E, 1), 16, 10),
+    explorer(
+        2,
+        8,
+        "jungle_pyramid_map",
+        5,
+        &["swamp", "savanna", "desert"],
+    ),
+    explorer(2, 8, "swamp_hut_map", 5, &["taiga", "snow", "jungle"]),
+    explorer(2, 8, "desert_village_map", 5, &["savanna", "jungle"]),
+    explorer(
+        2,
+        8,
+        "plains_village_map",
+        5,
+        &["taiga", "snow", "savanna", "desert"],
+    ),
+    explorer(
+        2,
+        8,
+        "savanna_village_map",
+        5,
+        &["plains", "jungle", "desert"],
+    ),
+    explorer(2, 8, "snowy_village_map", 5, &["taiga", "swamp"]),
+    explorer(2, 8, "taiga_village_map", 5, &["swamp", "snow", "plains"]),
     t(3, ("compass", 1), (E, 1), 12, 20),
+    explorer(3, 12, "buried_trial_chambers_map", 10, &[]),
+    explorer(3, 13, "ocean_monument_map", 10, &[]),
     t(4, (E, 7), ("item_frame", 1), 12, 15),
     t(4, (E, 3), ("white_banner", 1), 12, 15),
     t(5, (E, 8), ("globe_banner_pattern", 1), 12, 30),
+    explorer(5, 14, "woodland_mansion_map", 30, &[]),
 ];
 
 const CLERIC: &[Spec] = &[
@@ -927,6 +1032,16 @@ fn item(name: &str, count: i32) -> Option<Stack> {
 }
 
 impl Spec {
+    /// Whether a villager of `kind` (`minecraft:plains`, ...) offers this trade.
+    fn offered_by(&self, kind: &str) -> bool {
+        match self.kind {
+            Kind::Explorer(kinds) => {
+                kinds.is_empty() || kinds.contains(&kind.trim_start_matches("minecraft:"))
+            }
+            _ => true,
+        }
+    }
+
     fn offer(&self, rng: &mut Rng) -> Option<Offer> {
         let mut buy = item(self.buy.0, self.buy.1)?;
         let mut buy_b = item(self.buy_b.0, self.buy_b.1)?;
@@ -934,6 +1049,7 @@ impl Spec {
         let mut multiplier = 0.05;
         match self.kind {
             Kind::Plain => {}
+            Kind::Explorer(_) => multiplier = 0.2,
             Kind::Enchanted(base) => {
                 let level = 5 + rng.below(15);
                 for (id, l) in enchanting::select(rng, sell.item, level) {
@@ -991,6 +1107,49 @@ pub fn kind_for_biome(biome: &str) -> &'static str {
 }
 
 impl World {
+    /// Draws the maps of a villager's new explorer map trades: each finds the nearest
+    /// of its structure within 100 chunks, and a map (scale 2) is started there, marked
+    /// with the structure. A trade whose structure is nowhere near is dropped, as vanilla
+    /// does; so are they all outside the Overworld.
+    pub(super) fn draw_explorer_maps(&mut self, v: &mut Villager, at: [f64; 3]) {
+        let overworld = self.dimension == Dimension::Overworld;
+        let mut i = 0;
+        while i < v.offers.len() {
+            let sell = v.offers[i].sell;
+            let Some((structure, decoration)) = explorer_target(sell.item) else {
+                i += 1;
+                continue;
+            };
+            if sell.map_id.is_some() {
+                i += 1;
+                continue;
+            }
+            let found = overworld
+                .then(|| {
+                    self.terrain.structure_near(
+                        structure,
+                        at[0].floor() as i32,
+                        at[2].floor() as i32,
+                        EXPLORER_SEARCH,
+                    )
+                })
+                .flatten();
+            let Some([x, _, z]) = found else {
+                v.offers.remove(i);
+                continue;
+            };
+            let id = self.create_map(x, z, 2);
+            let sell = &mut v.offers[i].sell;
+            sell.map_id = Some(id);
+            sell.map_target = Some(crate::inventory::MapTarget {
+                decoration: decoration as u8,
+                x,
+                z,
+            });
+            i += 1;
+        }
+    }
+
     /// Villagers' daily life: finding work, losing it, and restocking.
     pub(super) fn tick_villager(&mut self, id: i32, mob: &mut Mob) {
         let tick = self.tick;
@@ -1076,6 +1235,7 @@ impl World {
         if v.profession == Profession::None {
             v.profession = job;
             v.add_trades(&mut self.rng);
+            self.draw_explorer_maps(v, pos);
             let sound = format!(
                 "minecraft:entity.villager.work_{}",
                 job.name().trim_start_matches("minecraft:")
@@ -1334,6 +1494,15 @@ impl World {
             }
             mob.pos
         };
+        if levelled {
+            let v = self.mobs.get_mut(&target).and_then(|m| m.villager.take());
+            if let Some(mut v) = v {
+                self.draw_explorer_maps(&mut v, pos);
+                if let Some(m) = self.mobs.get_mut(&target) {
+                    m.villager = Some(v);
+                }
+            }
+        }
         let sound = if is_trader {
             "minecraft:entity.wandering_trader.yes"
         } else {
@@ -1662,5 +1831,47 @@ mod tests {
             assert!(offer.sell.item != 0);
             assert!(offer.max_uses > 0);
         }
+    }
+
+    #[test]
+    fn explorer_maps_go_by_villager_kind_and_need_their_structure() {
+        let plains_map = ItemInfo::id_of("minecraft:plains_village_map").unwrap();
+        let level2: Vec<&Spec> = CARTOGRAPHER.iter().filter(|s| s.level == 2).collect();
+        let offered = |kind: &str| {
+            level2
+                .iter()
+                .filter(|s| s.offered_by(kind))
+                .filter_map(|s| item(s.sell.0, 1))
+                .any(|i| i.item == plains_map)
+        };
+        // A plains cartographer never sells a map to a plains village.
+        assert!(!offered("minecraft:plains"));
+        assert!(offered("minecraft:taiga"));
+        assert_eq!(
+            explorer_target(ItemInfo::id_of("minecraft:woodland_mansion_map").unwrap()),
+            Some(("mansion", map_decoration::MANSION))
+        );
+
+        // A flat world has no structures: the trade is dropped.
+        let dir = std::env::temp_dir().join(format!("levitas-explorer-{}", std::process::id()));
+        let (mut w, _) = World::new(
+            dir.clone(),
+            NewWorld {
+                kind: WorldKind::Flat,
+                seed: Some(0),
+            },
+        );
+        let mut rng = Rng::new(1);
+        let mut v = Villager::new("minecraft:plains");
+        v.profession = Profession::Cartographer;
+        v.offers.push(CARTOGRAPHER[1].offer(&mut rng).unwrap());
+        let monument = CARTOGRAPHER
+            .iter()
+            .find(|s| s.sell.0 == "ocean_monument_map")
+            .unwrap();
+        v.offers.push(monument.offer(&mut rng).unwrap());
+        w.draw_explorer_maps(&mut v, [0.0, 0.0, 0.0]);
+        assert_eq!(v.offers.len(), 1);
+        let _ = std::fs::remove_dir_all(dir);
     }
 }

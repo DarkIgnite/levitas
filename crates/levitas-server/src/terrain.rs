@@ -40,6 +40,11 @@ pub trait Terrain: Send + Sync {
     fn stronghold_near(&self, _x: i32, _z: i32) -> Result<Option<[i32; 3]>, ()> {
         Ok(None)
     }
+
+    /// The nearest start of `structure` within `radius` chunks, for explorer maps.
+    fn structure_near(&self, _structure: &str, _x: i32, _z: i32, _radius: i32) -> Option<[i32; 3]> {
+        None
+    }
 }
 
 impl Terrain for PumpkinTerrain {
@@ -61,6 +66,10 @@ impl Terrain for PumpkinTerrain {
 
     fn stronghold_near(&self, x: i32, z: i32) -> Result<Option<[i32; 3]>, ()> {
         PumpkinTerrain::stronghold_near(self, x, z)
+    }
+
+    fn structure_near(&self, structure: &str, x: i32, z: i32, radius: i32) -> Option<[i32; 3]> {
+        PumpkinTerrain::structure_near(self, structure, x, z, radius)
     }
 }
 

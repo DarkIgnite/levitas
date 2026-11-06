@@ -448,24 +448,29 @@ Known gaps are listed under each phase instead of being hidden.
       prismarine/sea lantern frame blocks, grant Conduit Power (underwater breathing, night vision,
       mining speed) to nearby players in water or rain, and attack hostile mobs with 4 magic damage
       every 40 ticks when fully framed (42 blocks).
-- [ ] Maps, compasses, recovery compasses, clocks, spyglass. `inventory.rs` serializes and saves
-      `minecraft:lodestone_tracker` and `minecraft:map_id` item components. Right-clicking a lodestone
-      with a compass binds it (`item.lodestone_compass.lock`) to that position and dimension. Dying
-      records `LastDeathLocation: {dimension, pos}` in player NBT and sends it in login and respawn
-      packets so recovery compasses point to the player's last death. Maps (`world/maps.rs`):
-      using an empty map starts a filled map of the grid square the player stands in; while
-      held it draws the terrain within 128 blocks (64 in the Nether) from the highest block
-      maps can see, shaded by height against the pixel to the north and water by depth, a
-      share of the columns each tick, and sends the changed pixels with the holders' markers.
-      Maps are saved as `data/minecraft/map_<id>.dat`; their IDs (`idcounts.dat`) are shared by
-      all dimensions. Cartography tables clone maps, and locking (glass pane) or zooming out
-      (paper) makes a new map, as vanilla does (`minecraft:map_post_processing` marks the
-      result until it is taken). Using a spyglass raises living flags and plays
-      `item.spyglass.use`; releasing, switching slots, or dying stops usage. Clocks and
-      compasses are drawn by the client. Missing: banner and item frame markers, maps shown
-      in item frames to players who never held them, explorer maps, mixing colours over a
-      zoomed-out pixel's area (one block per pixel is sampled); the marker's direction is
-      untested in a real client.
+- [x] Maps, compasses, recovery compasses, clocks, spyglass. `inventory.rs` serializes and saves
+      `minecraft:lodestone_tracker`, `minecraft:map_id` and `minecraft:map_decorations` item
+      components. Right-clicking a lodestone with a compass binds it (`item.lodestone_compass.lock`)
+      to that position and dimension. Dying records `LastDeathLocation: {dimension, pos}` in player
+      NBT and sends it in login and respawn packets so recovery compasses point to the player's
+      last death. Maps (`world/maps.rs`): using an empty map starts a filled map of the grid square
+      the player stands in; while held it draws the terrain within 128 blocks (64 in the Nether)
+      from the highest block maps can see, shaded by height against the pixel to the north and
+      water by depth, mixing the colours of a zoomed-out pixel's area, a share of the columns each
+      tick, and sends the changed pixels with the markers: holders, item frames holding the map,
+      banners marked by using the map on them, and an explorer map's destination. Maps in frames
+      are sent to players within 64 blocks. Maps are saved as `data/minecraft/maps/<id>.dat` with
+      `maps/last_id.dat`, as 26.3 does; their IDs are shared by all dimensions. Cartography tables
+      clone maps (any in `#clonable_maps`), and locking (glass pane) or zooming out (paper) makes a
+      new map, as vanilla does (`minecraft:map_post_processing` marks the result until it is
+      taken). Explorer maps (26.3's own items: `ocean_monument_map`, `woodland_mansion_map`,
+      `buried_trial_chambers_map`, the jungle, swamp and five village maps) are sold by
+      cartographers from the data-generated trade lists, by villager kind; the nearest structure
+      within 100 chunks is found with Pumpkin's structure placement, the map (scale 2) is started
+      there and marked, and a trade with no structure in reach is dropped. Using a spyglass raises
+      living flags and plays `item.spyglass.use`; releasing, switching slots, or dying stops usage.
+      Clocks and compasses are drawn by the client. Not done: explorer maps' biome preview (the map
+      fills in once explored).
 
 ## Phase 9: Dimensions
 
@@ -521,7 +526,7 @@ Known gaps are listed under each phase instead of being hidden.
       loses its profession with its workstation. Picking a trade pulls the payment
       from the inventory. Saved in vanilla's format. Missing: gossip and prices that
       change with demand or reputation, breeding, sleeping in beds, schedules and
-      walking to work, explorer maps, iron golems and cats.
+      walking to work, iron golems and cats.
 - [x] Wandering traders, iron golems, zombie villagers and curing. Iron golems
       (`world/golems.rs`) come with villages and are built from four iron blocks
       and a carved pumpkin; they go after monsters (not creepers) within 16 blocks
