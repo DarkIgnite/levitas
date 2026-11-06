@@ -127,10 +127,9 @@ impl World {
         if blocks::name(state) != "minecraft:jukebox" {
             return false;
         }
-        if !self.block_entities.contains_key(&pos) {
-            self.block_entities
-                .insert(pos, BlockEntity::Jukebox(Box::default()));
-        }
+        self.block_entities
+            .entry(pos)
+            .or_insert_with(|| BlockEntity::Jukebox(Box::default()));
         let Some(BlockEntity::Jukebox(j)) = self.block_entities.get_mut(&pos) else {
             return false;
         };
