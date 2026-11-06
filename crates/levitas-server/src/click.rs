@@ -548,6 +548,10 @@ fn take_result(w: &mut Window) -> Stack {
         if s.is_empty() {
             continue;
         }
+        // Book cloning leaves the original book in the grid.
+        if s.is_written_book() && result.is_written_book() {
+            continue;
+        }
         w.slots[i] = match crafting_remainder(s.item) {
             Some(remainder) if s.count == 1 => Stack::new(remainder, 1),
             _ => s.with_count(s.count - 1),

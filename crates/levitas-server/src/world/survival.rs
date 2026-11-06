@@ -749,6 +749,7 @@ impl World {
             || self.place_boat(id, hand)
             || self.fill_bottle(id, hand)
             || self.start_ranged(id, hand)
+            || self.open_book(id, hand)
             || self.start_drawing(id, hand)
             || self.throw_held(id, hand)
             || self.use_fishing_rod(id, hand)

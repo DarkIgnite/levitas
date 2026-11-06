@@ -273,6 +273,25 @@ fn decode(id: i32, packet: &[u8]) -> io::Result<Option<Event>> {
                 carried: hashed_stack(&mut r)?,
             }
         }
+        serverbound::EDIT_BOOK => {
+            let slot = r.varint()?;
+            let count = r.varint()?.clamp(0, 100);
+            let mut pages = Vec::new();
+            for _ in 0..count {
+                pages.push(r.string(8192)?.to_owned());
+            }
+            let title = if r.bool()? {
+                Some(r.string(128)?.to_owned())
+            } else {
+                None
+            };
+            Event::EditBook {
+                id,
+                slot,
+                pages,
+                title,
+            }
+        }
         serverbound::CONTAINER_SLOT_STATE_CHANGED => Event::SlotState {
             id,
             slot: r.varint()?,

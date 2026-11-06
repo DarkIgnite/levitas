@@ -1,6 +1,7 @@
 mod access;
 mod auth;
 mod blocks;
+mod books;
 mod click;
 mod config;
 mod connection;

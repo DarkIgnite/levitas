@@ -64,6 +64,8 @@ pub struct Stack {
     /// A decorated pot's four sides (`minecraft:pot_decorations`): back, left, right,
     /// front, by item ID.
     pub sherds: Option<[i32; 4]>,
+    /// A book's pages (and title), by handle in the book store (`crate::books`).
+    pub book: Option<u32>,
 }
 
 /// What a crossbow is loaded with: an arrow (tipped with a potion, perhaps), as many
@@ -304,6 +306,7 @@ impl Stack {
         instrument: None,
         charged: None,
         sherds: None,
+        book: None,
     };
 
     pub fn new(item: i32, count: i32) -> Self {
@@ -312,6 +315,11 @@ impl Stack {
             count,
             ..Stack::EMPTY
         }
+    }
+
+    /// Whether this is a written (signed) book.
+    pub fn is_written_book(&self) -> bool {
+        ItemInfo::get(self.item).is_some_and(|i| i.name == "minecraft:written_book")
     }
 
     /// The same item with the same components, in another amount.
@@ -342,6 +350,7 @@ impl Stack {
             && self.instrument == other.instrument
             && self.charged == other.charged
             && self.sherds == other.sherds
+            && self.book == other.book
     }
 
     pub fn is_empty(&self) -> bool {
@@ -428,6 +437,20 @@ impl Stack {
         }
         if let Some(amp) = self.ominous {
             components.insert("minecraft:ominous_bottle_amplifier", i32::from(amp));
+        }
+        if let Some(book) = self.book {
+            let contents = crate::books::get(book);
+            if self.is_written_book() {
+                components.insert(
+                    "minecraft:written_book_content",
+                    crate::books::written_nbt(&contents),
+                );
+            } else {
+                components.insert(
+                    "minecraft:writable_book_content",
+                    crate::books::writable_nbt(&contents),
+                );
+            }
         }
         if let Some(sides) = self.sherds {
             let names: Vec<Tag> = sides
@@ -566,6 +589,13 @@ impl Stack {
                         .position(|&n| n == name)?;
                     Some((id as u8, e.int("duration").unwrap_or(160) as i32))
                 }),
+            book: components.and_then(|c| {
+                let (content, written) = match c.compound("minecraft:written_book_content") {
+                    Some(w) => (w, true),
+                    None => (c.compound("minecraft:writable_book_content")?, false),
+                };
+                crate::books::intern(crate::books::from_nbt(content, written))
+            }),
             sherds: components
                 .and_then(|c| c.list("minecraft:pot_decorations"))
                 .map(|l| {
@@ -654,6 +684,7 @@ fn write_components(packet: Writer, stack: &Stack) -> Writer {
     let horned = stack.instrument.is_some();
     let loaded = stack.charged.is_some();
     let decorated = stack.sherds.is_some();
+    let booked = stack.book.is_some();
     let added = i32::from(damaged)
         + i32::from(processing)
         + i32::from(dyed)
@@ -669,7 +700,8 @@ fn write_components(packet: Writer, stack: &Stack) -> Writer {
         + i32::from(ominous)
         + i32::from(horned)
         + i32::from(loaded)
-        + i32::from(decorated);
+        + i32::from(decorated)
+        + i32::from(booked);
     let mut packet = packet.varint(added).varint(0);
     if damaged {
         packet = packet.varint(component::DAMAGE).varint(stack.damage);
@@ -747,6 +779,16 @@ fn write_components(packet: Writer, stack: &Stack) -> Writer {
         packet = packet
             .varint(component::OMINOUS_BOTTLE_AMPLIFIER)
             .varint(i32::from(amp));
+    }
+    if let Some(book) = stack.book {
+        let written = stack.is_written_book();
+        let id = if written {
+            component::WRITTEN_BOOK_CONTENT
+        } else {
+            component::WRITABLE_BOOK_CONTENT
+        };
+        packet =
+            crate::books::write_component(packet.varint(id), &crate::books::get(book), written);
     }
     if let Some(sides) = stack.sherds {
         packet = packet.varint(component::POT_DECORATIONS).varint(4);

@@ -56,6 +56,7 @@ impl World {
                 || self.use_farm_block(id, slot, pos, clicked)
                 || self.use_decorated_pot(id, slot, pos, clicked)
                 || self.use_jukebox(id, slot, pos, clicked)
+                || self.use_lectern(id, slot, pos, clicked)
                 || self.use_flower_pot(id, slot, pos, clicked))
         {
             return self.ack(id, sequence);
@@ -362,6 +363,7 @@ impl World {
             if BlockInfo::of(state).first_state != tick.block {
                 continue;
             }
+            self.lectern_tick(tick.pos, state);
             if block_has_tag(state, "minecraft:lightning_rods")
                 && prop(state, "powered") == Some("true")
             {

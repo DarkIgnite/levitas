@@ -42,6 +42,7 @@ mod hoppers;
 mod huge_mushroom;
 mod items;
 mod jukebox;
+mod lectern;
 mod maps;
 mod minecarts;
 mod mobs;
@@ -240,6 +241,13 @@ pub enum Event {
         mode: i32,
         changed: Vec<(i16, Stack)>,
         carried: Stack,
+    },
+    /// The pages written in a book and quill, and its title when signed.
+    EditBook {
+        id: i32,
+        slot: i32,
+        pages: Vec<String>,
+        title: Option<String>,
     },
     /// A crafter slot switched off or on.
     SlotState {
@@ -955,6 +963,12 @@ impl World {
             } => self.set_beacon(id, primary, secondary),
             Event::RenameItem { id, name } => self.rename_item(id, &name),
             Event::ContainerButton { id, window, button } => self.window_button(id, window, button),
+            Event::EditBook {
+                id,
+                slot,
+                pages,
+                title,
+            } => self.edit_book(id, slot, pages, title),
             Event::SlotState {
                 id,
                 window,

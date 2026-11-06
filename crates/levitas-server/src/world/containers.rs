@@ -40,6 +40,7 @@ pub enum BlockEntity {
     Pot(Box<super::archaeology::Pot>),
     Jukebox(Box<super::jukebox::Jukebox>),
     Crafter(Box<super::crafter::Crafter>),
+    Lectern(Box<super::lectern::Lectern>),
 }
 
 pub struct Plain {
@@ -111,6 +112,7 @@ impl BlockEntity {
             BlockEntity::Pot(_) => ("minecraft:decorated_pot", &[][..]),
             BlockEntity::Jukebox(_) => ("minecraft:jukebox", &[][..]),
             BlockEntity::Crafter(c) => ("minecraft:crafter", &c.items[..]),
+            BlockEntity::Lectern(_) => ("minecraft:lectern", &[][..]),
         };
         let mut nbt = Compound::new()
             .with("id", id)
@@ -126,6 +128,7 @@ impl BlockEntity {
                 | BlockEntity::Brushable(_)
                 | BlockEntity::Pot(_)
                 | BlockEntity::Jukebox(_)
+                | BlockEntity::Lectern(_)
         ) {
             nbt.insert("Items", items_to_nbt(items.iter().copied().enumerate()));
         }
@@ -169,6 +172,9 @@ impl BlockEntity {
         }
         if let BlockEntity::Crafter(c) = self {
             c.write_nbt(&mut nbt);
+        }
+        if let BlockEntity::Lectern(l) = self {
+            l.write_nbt(&mut nbt);
         }
         nbt
     }
@@ -225,6 +231,9 @@ impl BlockEntity {
             }
             "minecraft:crafter" => {
                 BlockEntity::Crafter(Box::new(super::crafter::Crafter::read_nbt(nbt)))
+            }
+            "minecraft:lectern" => {
+                BlockEntity::Lectern(Box::new(super::lectern::Lectern::read_nbt(nbt)))
             }
             id @ ("minecraft:sign" | "minecraft:hanging_sign") => BlockEntity::Sign(Box::new(
                 super::signs::Sign::read_nbt(id == "minecraft:hanging_sign", nbt),
@@ -312,6 +321,7 @@ impl BlockEntity {
             "minecraft:decorated_pot" => Some(BlockEntity::Pot(Box::default())),
             "minecraft:jukebox" => Some(BlockEntity::Jukebox(Box::default())),
             "minecraft:crafter" => Some(BlockEntity::Crafter(Box::default())),
+            "minecraft:lectern" => Some(BlockEntity::Lectern(Box::default())),
             _ => super::signs::sign_kind(state)
                 .map(|hanging| BlockEntity::Sign(Box::new(super::signs::Sign::new(hanging)))),
         }
@@ -337,6 +347,7 @@ impl BlockEntity {
             BlockEntity::Pot(_) => block_entity_type::DECORATED_POT,
             BlockEntity::Jukebox(_) => block_entity_type::JUKEBOX,
             BlockEntity::Crafter(_) => block_entity_type::CRAFTER,
+            BlockEntity::Lectern(_) => block_entity_type::LECTERN,
         }
     }
 
@@ -358,6 +369,7 @@ impl BlockEntity {
             BlockEntity::Pot(p) => &p.items,
             BlockEntity::Jukebox(j) => &j.items,
             BlockEntity::Crafter(c) => &c.items,
+            BlockEntity::Lectern(l) => &l.items,
             BlockEntity::Plain(_)
             | BlockEntity::Spawner(_)
             | BlockEntity::Sign(_)
@@ -376,6 +388,7 @@ impl BlockEntity {
             BlockEntity::Pot(p) => &mut p.items,
             BlockEntity::Jukebox(j) => &mut j.items,
             BlockEntity::Crafter(c) => &mut c.items,
+            BlockEntity::Lectern(l) => &mut l.items,
             BlockEntity::Plain(_)
             | BlockEntity::Spawner(_)
             | BlockEntity::Sign(_)
@@ -400,6 +413,7 @@ impl BlockEntity {
             BlockEntity::Pot(p) => &mut p.viewers,
             BlockEntity::Jukebox(j) => &mut j.viewers,
             BlockEntity::Crafter(c) => &mut c.viewers,
+            BlockEntity::Lectern(l) => &mut l.viewers,
         }
     }
 }
@@ -431,6 +445,8 @@ pub enum View {
     Beacon(BlockPos),
     /// The chest of the minecart with this entity ID.
     CartChest(i32, usize),
+    /// A lectern's reading screen: the book's one slot, nothing of the player's.
+    Lectern(BlockPos),
 }
 
 impl View {
@@ -450,6 +466,7 @@ impl View {
             View::Merchant(_) => 3,
             View::Beacon(_) => 1,
             View::CartChest(_, slots) => slots,
+            View::Lectern(_) => 1,
         }
     }
 
@@ -470,7 +487,8 @@ impl View {
             | View::Smithing(_)
             | View::Cartography(_)
             | View::Merchant(_)
-            | View::CartChest(..) => Vec::new(),
+            | View::CartChest(..)
+            | View::Lectern(_) => Vec::new(),
         }
     }
 
@@ -480,7 +498,7 @@ impl View {
             View::Inventory => click::Layout::Inventory,
             View::Crafting => click::Layout::Crafting,
             View::Furnace(_, kind) => click::Layout::Furnace(kind),
-            View::Chest(..) | View::DoubleChest(..) | View::CartChest(..) => {
+            View::Chest(..) | View::DoubleChest(..) | View::CartChest(..) | View::Lectern(_) => {
                 click::Layout::Chest(self.container_len())
             }
             View::Enchanting(_) => click::Layout::Enchanting,
@@ -666,6 +684,14 @@ impl World {
     /// The server's view of every slot in a window.
     fn window_slots(&self, id: i32, view: View) -> Vec<Stack> {
         let p = &self.players[&id];
+        if let View::Lectern(pos) = view {
+            // The lectern's screen holds the book alone.
+            let book = match self.block_entities.get(&pos) {
+                Some(BlockEntity::Lectern(l)) => l.items[0],
+                _ => Stack::EMPTY,
+            };
+            return vec![book];
+        }
         let mut slots = match view {
             View::Inventory => return p.inventory.slots.to_vec(),
             View::Crafting => {
@@ -698,6 +724,7 @@ impl World {
                 let open = p.open.as_ref().expect("window is open");
                 open.grid[..1].to_vec()
             }
+            View::Lectern(_) => Vec::new(),
             View::CartChest(cart, _) => self
                 .carts
                 .get(&cart)
@@ -722,6 +749,9 @@ impl World {
     /// Stores window slots back where they live. Crafting results are never stored: they
     /// are recomputed from the grid.
     fn store_window(&mut self, id: i32, view: View, slots: &[Stack]) {
+        if let View::Lectern(_) = view {
+            return;
+        }
         let n = view.container_len();
         if view != View::Inventory {
             let p = self.players.get_mut(&id).expect("player exists");
@@ -768,6 +798,7 @@ impl World {
                 let open = p.open.as_mut().expect("window is open");
                 open.grid[..1].copy_from_slice(&slots[..1]);
             }
+            View::Lectern(_) => {}
             View::CartChest(cart, _) => {
                 if let Some(chest) = self.carts.get_mut(&cart).and_then(|c| c.chest.as_mut()) {
                     chest.copy_from_slice(&slots[..n]);
@@ -840,6 +871,11 @@ impl World {
             Some(open) if open.window == window => open.view,
             _ => return,
         };
+        // Nothing is clicked about in a lectern's screen: its buttons turn the pages.
+        if let View::Lectern(_) = view {
+            self.resync_window(id, window, view);
+            return;
+        }
         // Curse of binding keeps worn armour on (creative players may take it off).
         let bound = view == View::Inventory
             && p.survival()
@@ -1095,6 +1131,7 @@ impl World {
             .map(|o| o.view);
         match view {
             Some(View::Enchanting(_)) => self.enchant_button(id, window, button),
+            Some(View::Lectern(pos)) => self.lectern_button(id, pos, button),
             Some(View::Stonecutter(_)) => {
                 let p = self.players.get_mut(&id).expect("player exists");
                 let open = p.open.as_mut().expect("window is open");
@@ -1248,7 +1285,7 @@ impl World {
                     self.container_opened(open.view, false);
                 }
             }
-            View::Inventory | View::CartChest(..) => {}
+            View::Inventory | View::CartChest(..) | View::Lectern(_) => {}
         }
         self.return_to_inventory(id, returned);
     }

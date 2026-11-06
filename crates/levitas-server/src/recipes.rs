@@ -104,6 +104,8 @@ pub struct Recipes {
     map_extending: Option<(Ingredient, Ingredient)>,
     /// What a decorated pot's sides may be made of (bricks and sherds).
     pot_sides: Option<Ingredient>,
+    /// What a written book is copied onto (books and quills).
+    book_cloning: Option<Ingredient>,
     dyeing: Vec<Dyeing>,
     imbue: Vec<Imbue>,
     /// Whether two worn items of a kind can be combined in the grid
@@ -124,6 +126,7 @@ impl Recipes {
             transmute: Vec::new(),
             map_extending: None,
             pot_sides: None,
+            book_cloning: None,
             dyeing: Vec::new(),
             imbue: Vec::new(),
             repair: false,
@@ -186,6 +189,9 @@ impl Recipes {
                     ingredient(&recipe["map"])?,
                     ingredient(&recipe["material"])?,
                 ));
+            }
+            "minecraft:crafting_special_bookcloning" => {
+                self.book_cloning = Some(ingredient(&recipe["material"])?);
             }
             "minecraft:crafting_decorated_pot" => {
                 self.pot_sides = Some(ingredient(&recipe["back"])?);
@@ -334,6 +340,34 @@ impl Recipes {
                     map_post: Some(crate::inventory::MAP_SCALE),
                     ..centre
                 };
+            }
+        }
+        // Book cloning: a written book (not a copy of a copy) and up to eight books and
+        // quills make that many copies, one generation on.
+        if let Some(blank) = &self.book_cloning {
+            let originals: Vec<&Stack> = stacks.iter().filter(|s| s.is_written_book()).collect();
+            if let [original] = originals[..] {
+                let blanks = stacks.len() - 1;
+                let all_blank = stacks
+                    .iter()
+                    .filter(|s| !s.is_written_book())
+                    .all(|s| has(blank, s.item));
+                let book = original.book.map(crate::books::get);
+                if let (true, 1..=8, Some(book)) = (all_blank, blanks, book) {
+                    if book.generation < 2 {
+                        let copy = crate::books::Book {
+                            generation: book.generation + 1,
+                            ..book
+                        };
+                        if let Some(handle) = crate::books::intern(copy) {
+                            return Stack {
+                                count: blanks as i32,
+                                book: Some(handle),
+                                ..*original
+                            };
+                        }
+                    }
+                }
             }
         }
         // A decorated pot: its back, sides and front in a plus, bricks or sherds.
