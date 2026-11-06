@@ -311,7 +311,7 @@ impl World {
         }
     }
 
-    fn set_bed_occupied(&mut self, head: BlockPos, occupied: bool) {
+    pub(super) fn set_bed_occupied(&mut self, head: BlockPos, occupied: bool) {
         let state = self.block(head);
         if !blocks::is_bed(state) {
             return;
@@ -449,7 +449,7 @@ fn action_bar(text: &str) -> Writer {
 }
 
 /// Entity data putting a player into a bed at `bed`, or back on their feet.
-fn sleep_data(id: i32, bed: Option<BlockPos>) -> Writer {
+pub(super) fn sleep_data(id: i32, bed: Option<BlockPos>) -> Writer {
     let pose = if bed.is_some() {
         POSE_SLEEPING
     } else {

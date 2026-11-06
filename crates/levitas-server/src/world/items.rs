@@ -30,6 +30,15 @@ impl ItemEntity {
         self.pos
     }
 
+    pub(super) fn stack_ref(&self) -> Stack {
+        self.stack
+    }
+
+    /// Whether its pickup delay is over.
+    pub(super) fn can_be_picked_up(&self) -> bool {
+        self.pickup_delay == 0
+    }
+
     #[cfg(test)]
     pub fn stack(&self) -> Stack {
         self.stack
@@ -169,6 +178,14 @@ impl World {
     }
 
     /// A hopper takes in items lying on top of it. Returns whether it took any.
+    /// Changes what a dropped item is, telling everyone.
+    pub(super) fn set_item_stack(&mut self, id: i32, stack: Stack) {
+        if let Some(item) = self.items.get_mut(&id) {
+            item.stack = stack;
+            self.broadcast(item_data(id, stack), None);
+        }
+    }
+
     pub(super) fn hopper_pickup(&mut self, pos: BlockPos) -> bool {
         let x = f64::from(pos.x);
         let z = f64::from(pos.z);

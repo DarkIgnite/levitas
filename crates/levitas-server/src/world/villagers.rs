@@ -166,9 +166,23 @@ pub struct Offer {
     /// Experience the villager earns per trade.
     pub xp: i32,
     pub price_multiplier: f32,
+    /// How much it has been wanted: it rises when the trade sells out between
+    /// restocks and falls when it does not, and raises the price while positive.
+    pub demand: i32,
 }
 
 impl Offer {
+    /// What demand adds to the first cost: the base price times demand times the
+    /// price multiplier, rounded down, never below 0.
+    pub fn demand_bonus(&self) -> i32 {
+        ((self.buy.count as f32 * self.demand as f32 * self.price_multiplier).floor() as i32).max(0)
+    }
+
+    /// At a restock: demand goes up by the uses and down by the uses left.
+    fn update_demand(&mut self) {
+        self.demand = self.demand + self.uses - (self.max_uses - self.uses);
+    }
+
     fn to_nbt(&self) -> Compound {
         let mut nbt = Compound::new()
             .with("buy", self.buy.to_nbt())
@@ -179,7 +193,7 @@ impl Offer {
             .with("rewardExp", true)
             .with("priceMultiplier", self.price_multiplier)
             .with("specialPrice", 0)
-            .with("demand", 0);
+            .with("demand", self.demand);
         if !self.buy_b.is_empty() {
             nbt.insert("buyB", self.buy_b.to_nbt());
         }
@@ -196,6 +210,7 @@ impl Offer {
             max_uses: nbt.int("maxUses").unwrap_or(12) as i32,
             xp: nbt.int("xp").unwrap_or(1) as i32,
             price_multiplier: nbt.float("priceMultiplier").unwrap_or(0.05) as f32,
+            demand: nbt.int("demand").unwrap_or(0) as i32,
         };
         (!offer.buy.is_empty() && !offer.sell.is_empty()).then_some(offer)
     }
@@ -222,6 +237,12 @@ pub struct Villager {
     pub gossips: Vec<Gossip>,
     /// A wandering trader: Hero of the Village does not lower its prices.
     pub wandering: bool,
+    /// Its bed (the head), the bell it meets at, and the bed it lies in now.
+    pub home: Option<BlockPos>,
+    pub meeting: Option<BlockPos>,
+    pub sleeping: Option<BlockPos>,
+    /// Food and crops it carries (8 slots).
+    pub inventory: Vec<Stack>,
 }
 
 /// What players did to a villager, as vanilla keeps it (`Gossips`): a kind, a strength
@@ -273,6 +294,10 @@ impl Villager {
             next_site_check: 0,
             gossips: Vec::new(),
             wandering: false,
+            home: None,
+            meeting: None,
+            sleeping: None,
+            inventory: Vec::new(),
         }
     }
 
@@ -345,6 +370,7 @@ impl Villager {
                     max_uses,
                     xp: 0,
                     price_multiplier: 0.05,
+                    demand: 0,
                 });
             }
         }
@@ -359,6 +385,7 @@ impl Villager {
                 max_uses,
                 xp: 0,
                 price_multiplier: 0.05,
+                demand: 0,
             });
         }
         v
@@ -405,22 +432,34 @@ impl Villager {
                 .collect();
             nbt.insert("Gossips", gossips);
         }
-        if let Some(site) = self.job_site {
-            nbt.insert(
-                "Brain",
-                Compound::new().with(
-                    "memories",
+        let mut memories = Compound::new();
+        for (key, place) in [
+            ("minecraft:job_site", self.job_site),
+            ("minecraft:home", self.home),
+            ("minecraft:meeting_point", self.meeting),
+        ] {
+            if let Some(p) = place {
+                memories.insert(
+                    key,
                     Compound::new().with(
-                        "minecraft:job_site",
-                        Compound::new().with(
-                            "value",
-                            Compound::new()
-                                .with("pos", vec![site.x, site.y, site.z])
-                                .with("dimension", "minecraft:overworld"),
-                        ),
+                        "value",
+                        Compound::new()
+                            .with("pos", vec![p.x, p.y, p.z])
+                            .with("dimension", "minecraft:overworld"),
                     ),
-                ),
-            );
+                );
+            }
+        }
+        if !memories.is_empty() {
+            nbt.insert("Brain", Compound::new().with("memories", memories));
+        }
+        if !self.inventory.is_empty() {
+            let items: Vec<Tag> = self
+                .inventory
+                .iter()
+                .map(|s| Tag::Compound(s.to_nbt()))
+                .collect();
+            nbt.insert("Inventory", items);
         }
     }
 
@@ -462,16 +501,29 @@ impl Villager {
             .filter_map(Tag::as_compound)
             .filter_map(Offer::from_nbt)
             .collect();
-        v.job_site = nbt
-            .compound("Brain")
-            .and_then(|b| b.compound("memories"))
-            .and_then(|m| m.compound("minecraft:job_site"))
-            .and_then(|j| j.compound("value"))
-            .and_then(|v| v.int_array("pos"))
-            .and_then(|p| match p {
-                &[x, y, z] => Some(BlockPos::new(x, y, z)),
-                _ => None,
-            });
+        let memory = |key: &str| {
+            nbt.compound("Brain")
+                .and_then(|b| b.compound("memories"))
+                .and_then(|m| m.compound(key))
+                .and_then(|j| j.compound("value"))
+                .and_then(|v| v.int_array("pos"))
+                .and_then(|p| match p {
+                    &[x, y, z] => Some(BlockPos::new(x, y, z)),
+                    _ => None,
+                })
+        };
+        v.job_site = memory("minecraft:job_site");
+        v.home = memory("minecraft:home");
+        v.meeting = memory("minecraft:meeting_point");
+        v.inventory = nbt
+            .list("Inventory")
+            .unwrap_or_default()
+            .iter()
+            .filter_map(Tag::as_compound)
+            .map(Stack::from_nbt)
+            .filter(|s| !s.is_empty())
+            .take(super::village_life::VILLAGER_SLOTS)
+            .collect();
         v
     }
 
@@ -529,7 +581,8 @@ impl Villager {
             .iter()
             .map(|o| {
                 let off = discount(o, hero_amp, reputation, self.wandering);
-                let buy = o.buy.with_count((o.buy.count - off).max(1));
+                let cost = (o.buy.count + o.demand_bonus() - off).clamp(1, o.buy.max_stack());
+                let buy = o.buy.with_count(cost);
                 Trade {
                     buy,
                     buy_b: o.buy_b,
@@ -559,6 +612,7 @@ impl Villager {
 
     fn restock(&mut self) {
         for offer in &mut self.offers {
+            offer.update_demand();
             offer.uses = 0;
         }
     }
@@ -1082,6 +1136,7 @@ impl Spec {
             max_uses: self.max_uses,
             xp: self.xp,
             price_multiplier: multiplier,
+            demand: 0,
         })
     }
 }
@@ -1353,7 +1408,7 @@ impl World {
                 .i32(o.xp)
                 .i32(special_price)
                 .f32(o.price_multiplier)
-                .i32(0); // demand
+                .i32(o.demand);
         }
         packet = packet
             .varint(if is_regular { v.level } else { 1 })
@@ -1661,6 +1716,7 @@ mod tests {
             max_uses: 16,
             xp: 2,
             price_multiplier: 0.05,
+            demand: 0,
         };
         w.mobs
             .get_mut(&vid)
@@ -1787,6 +1843,7 @@ mod tests {
             max_uses: 16,
             xp: 2,
             price_multiplier: 0.05,
+            demand: 0,
         }];
 
         let base_trades = v.trades();
@@ -1809,6 +1866,7 @@ mod tests {
             max_uses: 16,
             xp: 2,
             price_multiplier: 0.05,
+            demand: 0,
         }];
         v.cured_by(7);
         v.cured_by(7); // a second cure by the same player adds nothing
@@ -1873,5 +1931,27 @@ mod tests {
         w.draw_explorer_maps(&mut v, [0.0, 0.0, 0.0]);
         assert_eq!(v.offers.len(), 1);
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn demand_raises_prices_after_selling_out_and_eases_after() {
+        let mut v = Villager::new("minecraft:plains");
+        v.profession = Profession::Farmer;
+        let mut rng = Rng::new(3);
+        v.offers.push(FARMER[0].offer(&mut rng).unwrap());
+        let base = v.offers[0].buy.count;
+        v.offers[0].uses = v.offers[0].max_uses;
+        v.restock();
+        // Sold out: demand rises by max uses, and so does the price.
+        assert_eq!(v.offers[0].demand, v.offers[0].max_uses);
+        assert!(v.trades()[0].buy.count > base);
+        // Untouched for a few restocks, it comes back down to the base price.
+        for _ in 0..3 {
+            v.restock();
+        }
+        assert!(v.offers[0].demand <= 0);
+        assert_eq!(v.trades()[0].buy.count, base);
+        let saved = v.offers[0].to_nbt();
+        assert_eq!(Offer::from_nbt(&saved).unwrap().demand, v.offers[0].demand);
     }
 }

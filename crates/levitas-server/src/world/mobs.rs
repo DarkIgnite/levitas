@@ -526,7 +526,7 @@ pub struct Mob {
     pub kind: MobKind,
     pub(super) uuid: u128,
     pub pos: [f64; 3],
-    vel: [f64; 3],
+    pub(super) vel: [f64; 3],
     /// Sideways speed from knockback and explosions, fading with friction.
     knockback: [f64; 2],
     pub yaw: f32,
@@ -534,10 +534,10 @@ pub struct Mob {
     on_ground: bool,
     pub health: f32,
     fall_distance: f64,
-    hurt_ticks: u32,
+    pub(super) hurt_ticks: u32,
     last_damage: f32,
     dying: Option<u32>,
-    panic: u32,
+    pub(super) panic: u32,
     /// Where the mob is walking to, and for how many more ticks it tries.
     pub target: Option<([f64; 2], u32)>,
     /// Monsters: the player being hunted, ticks until the next attack, ticks left on
@@ -800,6 +800,9 @@ impl Mob {
                 ));
             } else if self.kind == MobKind::Villager {
                 packets.push(v.data_packet(id));
+                if let Some(bed) = v.sleeping {
+                    packets.push(super::time::sleep_data(id, Some(bed)));
+                }
             }
         }
         if self.kind == MobKind::IronGolem {
@@ -1440,6 +1443,9 @@ impl World {
                 self.mobs.insert(id, mob);
                 continue;
             }
+            if mob.dying.is_some() && mob.villager.as_ref().is_some_and(|v| v.sleeping.is_some()) {
+                self.wake_villager(id, &mut mob);
+            }
             if let Some(ticks) = mob.dying.as_mut() {
                 *ticks += 1;
                 if *ticks >= DEATH_TICKS {
@@ -1466,6 +1472,8 @@ impl World {
                 if mob.villager.as_ref().is_some_and(|v| v.customer.is_some()) {
                     mob.target = None;
                     mob.path.clear();
+                } else {
+                    self.villager_life(id, &mut mob);
                 }
             }
             if mob.kind == MobKind::ZombieVillager {

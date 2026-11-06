@@ -23,6 +23,8 @@ const MATING_DISTANCE: f64 = 2.5;
 const TEMPT_RANGE: f64 = 10.0;
 const TEMPT_STOP: f64 = 2.5;
 const ENTITY_EVENT_LOVE_HEARTS: i8 = 18;
+/// Villagers show their own hearts when mating.
+const ENTITY_EVENT_VILLAGER_HEARTS: i8 = 12;
 const DATA_BABY: u8 = 16;
 const SERIALIZER_BOOLEAN: i32 = 8;
 
@@ -108,7 +110,12 @@ impl World {
         }
         mob.love -= 1;
         if mob.love.is_multiple_of(10) {
-            self.send_to_viewers(mob, entity_event(id, ENTITY_EVENT_LOVE_HEARTS));
+            let event = if mob.kind == MobKind::Villager {
+                ENTITY_EVENT_VILLAGER_HEARTS
+            } else {
+                ENTITY_EVENT_LOVE_HEARTS
+            };
+            self.send_to_viewers(mob, entity_event(id, event));
         }
         let partner = self
             .mobs
@@ -133,6 +140,25 @@ impl World {
         ];
         let mut baby = Mob::new(mob.kind, at, &mut self.rng);
         baby.age = BABY_AGE;
+        if mob.kind == MobKind::Villager {
+            // Parents eat their 12 food points; the baby dresses for where it is born.
+            if let Some(v) = mob.villager.as_mut() {
+                v.eat(super::village_life::FOOD_TO_BREED);
+            }
+            if let Some(v) = self.mobs.get_mut(&pid).and_then(|m| m.villager.as_mut()) {
+                v.eat(super::village_life::FOOD_TO_BREED);
+            }
+            let biome = self
+                .biome_at(
+                    at[0].floor() as i32,
+                    at[1].floor() as i32,
+                    at[2].floor() as i32,
+                )
+                .unwrap_or_default();
+            baby.villager = Some(Box::new(super::villagers::Villager::new(
+                super::villagers::kind_for_biome(&biome),
+            )));
+        }
         if matches!(mob.kind, MobKind::Wolf | MobKind::Cat) {
             // A tamed wolf's pup is tamed to the same owner.
             baby.owner = mob.owner.or(self.mobs[&pid].owner);
@@ -169,8 +195,11 @@ impl World {
             );
             self.advance(breeder, super::advancements::Trigger::BredAnimals(child));
         }
-        let xp = 1 + self.rng.below(7) as i32;
-        self.spawn_xp(at, xp);
+        // Animals give experience; villagers do not.
+        if mob.kind != MobKind::Villager {
+            let xp = 1 + self.rng.below(7) as i32;
+            self.spawn_xp(at, xp);
+        }
     }
 
     /// Where the nearest player holding this animal's food stands, if one is close.

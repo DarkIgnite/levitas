@@ -532,7 +532,7 @@ Known gaps are listed under each phase instead of being hidden.
 
 ## Phase 10: Villagers and raids
 
-- [ ] Villagers: professions, workstations, trading, restocking, gossip. Villages
+- [x] Villagers: professions, workstations, trading, restocking, gossip. Villages
       generate with their villagers (and Pumpkin's structure entities come out with
       each chunk). Villagers (`world/villagers.rs`) wander, claim an unclaimed
       workstation within 16 blocks and take its profession, and trade from the
@@ -540,9 +540,18 @@ Known gaps are listed under each phase instead of being hidden.
       Trading earns them experience up to master, each level adding two trades;
       they restock twice a day while they have a workstation; one that never traded
       loses its profession with its workstation. Picking a trade pulls the payment
-      from the inventory. Saved in vanilla's format. Missing: gossip and prices that
-      change with demand or reputation, breeding, sleeping in beds, schedules and
-      walking to work, iron golems and cats.
+      from the inventory. Saved in vanilla's format. Prices follow demand (it rises by
+      the uses and falls by the uses left at each restock, adding base x demand x
+      multiplier while positive) and reputation from gossip. Their day
+      (`world/village_life.rs`) follows vanilla's schedules: idle, at work from 2000
+      (walking to their workstation), meeting at the bell from 9000, idle from 11000 and
+      asleep in their claimed bed from 12000 (lying in it, the bed occupied, waking at
+      dawn or when hurt); babies play instead of working. They pick up food and crops into
+      an 8-slot inventory (saved as `Inventory`, home and bell as Brain memories);
+      farmers harvest and replant ripe crops around them; one with plenty of food throws
+      some to a hungry neighbour at the bell. Two adults with 12 food points each and a
+      free bed about make a baby, eating the food. Iron golems and cats are below and in
+      Phase 5.
 - [x] Wandering traders, iron golems, zombie villagers and curing. Iron golems
       (`world/golems.rs`) come with villages and are built from four iron blocks
       and a carved pumpkin; they go after monsters (not creepers) within 16 blocks

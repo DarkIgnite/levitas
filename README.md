@@ -52,7 +52,7 @@ what is missing in each one.
 | 7. Redstone | 68% | `██████▊░░░` |
 | 8. Progression (enchanting, brewing, ...) | 100% | `██████████` |
 | 9. Dimensions (Nether, End) | 60% | `██████░░░░` |
-| 10. Villagers and raids | 95% | `█████████▌` |
+| 10. Villagers and raids | 100% | `██████████` |
 | 11. Everything else (commands, config, ...) | 69% | `██████▉░░░` |
 | 12. World generation | 95% | `█████████▌` |
 | 13. Plugins and economy | 0% | `░░░░░░░░░░` |

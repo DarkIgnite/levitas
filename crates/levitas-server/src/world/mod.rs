@@ -61,6 +61,7 @@ mod thrown;
 mod time;
 mod tnt;
 pub mod travel;
+mod village_life;
 mod villagers;
 mod weather;
 mod wolves;
