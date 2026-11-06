@@ -413,6 +413,17 @@ impl World {
         true
     }
 
+    /// The pot item a decorated pot drops when it is not shattered: with its sides.
+    pub(super) fn pot_item(&self, pos: BlockPos) -> Option<Stack> {
+        let Some(BlockEntity::Pot(pot)) = self.block_entities.get(&pos) else {
+            return None;
+        };
+        let brick = ItemInfo::id_of("minecraft:brick").unwrap_or(0);
+        let mut stack = Stack::new(ItemInfo::id_of("minecraft:decorated_pot")?, 1);
+        stack.sherds = pot.sherds.iter().any(|&s| s != brick).then_some(pot.sherds);
+        Some(stack)
+    }
+
     /// Breaking a decorated pot with something that shatters it (a sword, axe, ...)
     /// drops its four sides instead of the pot. Returns the sherds to drop, if so.
     pub(super) fn pot_shards(&self, pos: BlockPos, tool: i32) -> Option<Vec<Stack>> {

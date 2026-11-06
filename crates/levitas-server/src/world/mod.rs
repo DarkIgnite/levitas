@@ -1511,6 +1511,11 @@ impl World {
             .get(&id)
             .map_or(0, |p| p.inventory.held(p.held).item);
         let shards = self.pot_shards(pos, held);
+        let whole_pot = if shards.is_none() {
+            self.pot_item(pos)
+        } else {
+            None
+        };
         self.set_block(pos, block::AIR);
         self.remove_block_entity(pos);
         if let Some(shards) = &shards {
@@ -1533,7 +1538,9 @@ impl World {
             p.exhaustion += 0.005;
             let tool = p.inventory.held(p.held).item;
             let held_enchants = p.inventory.held(p.held).enchants;
-            if survival::harvestable(state, tool) && shards.is_none() {
+            if let Some(pot) = whole_pot {
+                self.drop_at_block(pos, pot);
+            } else if survival::harvestable(state, tool) && shards.is_none() {
                 let drops = self.loot.block_drops(&mut LootContext {
                     state,
                     tool,

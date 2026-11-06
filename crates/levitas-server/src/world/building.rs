@@ -89,7 +89,12 @@ impl World {
                 Some(blocks) if !self.obstructed(&blocks) => {
                     for &(q, state) in &blocks {
                         self.set_block(q, state);
-                        if let Some(entity) = BlockEntity::for_block(state) {
+                        if let Some(mut entity) = BlockEntity::for_block(state) {
+                            if let (BlockEntity::Pot(pot), Some(sides)) =
+                                (&mut entity, stack.sherds)
+                            {
+                                pot.sherds = sides;
+                            }
                             self.block_entities.insert(q, entity);
                         }
                     }

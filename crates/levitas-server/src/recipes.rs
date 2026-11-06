@@ -1,6 +1,6 @@
 //! Crafting and smelting recipes, loaded from the vanilla recipe JSON. Shaped (including
 //! mirrored), shapeless, smelting, stonecutting and smithing recipes are supported;
-//! special recipes (fireworks, map cloning, dyeing, ...) and transmute recipes are not yet.
+//! special recipes are handled by `craft_special`.
 
 use std::collections::HashMap;
 
@@ -19,7 +19,11 @@ type Ingredient = Vec<i32>;
 struct Transmute {
     input: Ingredient,
     material: Ingredient,
-    result: i32,
+    /// The item it becomes, or the input itself (map cloning).
+    result: Option<i32>,
+    /// How many of the material go with it, and whether each adds one to the result.
+    materials: (usize, usize),
+    add_count: bool,
 }
 
 /// Dyeing leather armor in the crafting grid (`crafting_dye`).
@@ -96,6 +100,10 @@ pub struct Recipes {
     stonecutting: Vec<(Ingredient, Stack)>,
     smithing: Vec<Smithing>,
     transmute: Vec<Transmute>,
+    /// Map extending: the map and the paper around it.
+    map_extending: Option<(Ingredient, Ingredient)>,
+    /// What a decorated pot's sides may be made of (bricks and sherds).
+    pot_sides: Option<Ingredient>,
     dyeing: Vec<Dyeing>,
     imbue: Vec<Imbue>,
     /// Whether two worn items of a kind can be combined in the grid
@@ -114,6 +122,8 @@ impl Recipes {
             stonecutting: Vec::new(),
             smithing: Vec::new(),
             transmute: Vec::new(),
+            map_extending: None,
+            pot_sides: None,
             dyeing: Vec::new(),
             imbue: Vec::new(),
             repair: false,
@@ -153,11 +163,33 @@ impl Recipes {
                     result: result(&recipe["result"])?,
                 });
             }
-            "minecraft:crafting_transmute" => self.transmute.push(Transmute {
-                input: ingredient(&recipe["input"])?,
-                material: ingredient(&recipe["material"])?,
-                result: ItemInfo::id_of(recipe["result"]["id"].as_str()?)?,
-            }),
+            "minecraft:crafting_transmute" => {
+                let count = &recipe["material_count"];
+                let materials = match (count["min"].as_u64(), count["max"].as_u64(), count.as_u64())
+                {
+                    (Some(min), Some(max), _) => (min as usize, max as usize),
+                    (_, _, Some(n)) => (n as usize, n as usize),
+                    _ => (1, 1),
+                };
+                self.transmute.push(Transmute {
+                    input: ingredient(&recipe["input"])?,
+                    material: ingredient(&recipe["material"])?,
+                    result: recipe["result"]["id"].as_str().and_then(ItemInfo::id_of),
+                    materials,
+                    add_count: recipe["add_material_count_to_result"]
+                        .as_bool()
+                        .unwrap_or(false),
+                });
+            }
+            "minecraft:crafting_special_mapextending" => {
+                self.map_extending = Some((
+                    ingredient(&recipe["map"])?,
+                    ingredient(&recipe["material"])?,
+                ));
+            }
+            "minecraft:crafting_decorated_pot" => {
+                self.pot_sides = Some(ingredient(&recipe["back"])?);
+            }
             "minecraft:crafting_dye" => self.dyeing.push(Dyeing {
                 target: ingredient(&recipe["target"])?,
                 dye: ingredient(&recipe["dye"])?,
@@ -263,22 +295,67 @@ impl Recipes {
     fn craft_special(&self, grid: &[Stack], size: usize) -> Stack {
         let stacks: Vec<Stack> = grid.iter().copied().filter(|s| !s.is_empty()).collect();
         let has = |ingredient: &Ingredient, item: i32| ingredient.binary_search(&item).is_ok();
-        if let [a, b] = stacks[..] {
-            // Transmuting: the input becomes the result, components and all.
-            for t in &self.transmute {
-                for (input, material) in [(a, b), (b, a)] {
-                    if has(&t.input, input.item)
-                        && has(&t.material, material.item)
-                        && input.item != t.result
-                    {
-                        return Stack {
-                            item: t.result,
-                            count: 1,
-                            ..input
-                        };
-                    }
+        // Transmuting: the input becomes the result, components and all (map cloning:
+        // one filled map and up to eight empty ones make that many more copies).
+        for t in &self.transmute {
+            let inputs: Vec<&Stack> = stacks.iter().filter(|s| has(&t.input, s.item)).collect();
+            let [input] = inputs[..] else {
+                continue;
+            };
+            let materials = stacks.len() - 1;
+            let all_material = stacks
+                .iter()
+                .filter(|s| !std::ptr::eq(*s, input))
+                .all(|s| has(&t.material, s.item));
+            if !all_material || materials < t.materials.0 || materials > t.materials.1 {
+                continue;
+            }
+            let item = t.result.unwrap_or(input.item);
+            if t.result.is_some() && item == input.item {
+                continue;
+            }
+            let count = if t.add_count { 1 + materials as i32 } else { 1 };
+            return Stack {
+                item,
+                count,
+                ..*input
+            };
+        }
+        // Map extending: a map ringed with paper, zoomed out when taken.
+        if let (Some((maps, paper)), true) = (&self.map_extending, size == 3 && stacks.len() == 9) {
+            let centre = grid[4];
+            let ringed = grid
+                .iter()
+                .enumerate()
+                .all(|(slot, s)| slot == 4 || has(paper, s.item));
+            if ringed && has(maps, centre.item) && centre.map_id.is_some() {
+                return Stack {
+                    count: 1,
+                    map_post: Some(crate::inventory::MAP_SCALE),
+                    ..centre
+                };
+            }
+        }
+        // A decorated pot: its back, sides and front in a plus, bricks or sherds.
+        if let (Some(sides), true) = (&self.pot_sides, size == 3 && stacks.len() == 4) {
+            let [back, left, right, front] = [grid[1], grid[3], grid[5], grid[7]];
+            if [back, left, right, front]
+                .iter()
+                .all(|s| has(sides, s.item))
+            {
+                let brick = ItemInfo::id_of("minecraft:brick").unwrap_or(0);
+                let decorations = [back.item, left.item, right.item, front.item];
+                if let Some(pot) = ItemInfo::id_of("minecraft:decorated_pot") {
+                    let mut stack = Stack::new(pot, 1);
+                    stack.sherds = decorations
+                        .iter()
+                        .any(|&s| s != brick)
+                        .then_some(decorations);
+                    return stack;
                 }
             }
+        }
+        if let [a, b] = stacks[..] {
             if self.repair {
                 let repaired = repair(a, b);
                 if !repaired.is_empty() {
@@ -933,5 +1010,42 @@ mod tests {
         assert_eq!(Stack::from_nbt(&trimmed.to_nbt()), trimmed);
         assert_eq!(r.smithing_slot(template.item), Some(0));
         assert_eq!(r.smithing_slot(gold.item), Some(2));
+    }
+
+    #[test]
+    fn maps_clone_and_extend_and_pots_take_their_sherds() {
+        let r = Recipes::load();
+        let mut filled = Stack::new(item("minecraft:filled_map"), 1);
+        filled.map_id = Some(7);
+        let empty = Stack::new(item("minecraft:map"), 1);
+        let mut g = vec![Stack::EMPTY; 9];
+        g[0] = filled;
+        g[1] = empty;
+        g[2] = empty;
+        g[5] = empty;
+        let copies = r.craft(&g, 3);
+        assert_eq!(
+            (copies.item, copies.count, copies.map_id),
+            (filled.item, 4, Some(7))
+        );
+        // Ringed with paper, it zooms out when taken.
+        let paper = Stack::new(item("minecraft:paper"), 1);
+        let mut g = vec![paper; 9];
+        g[4] = filled;
+        let zoom = r.craft(&g, 3);
+        assert_eq!(zoom.map_post, Some(crate::inventory::MAP_SCALE));
+        // A pot with a sherd in front.
+        let brick = Stack::new(item("minecraft:brick"), 1);
+        let sherd = Stack::new(item("minecraft:archer_pottery_sherd"), 1);
+        let mut g = vec![Stack::EMPTY; 9];
+        g[1] = brick;
+        g[3] = brick;
+        g[5] = brick;
+        g[7] = sherd;
+        let pot = r.craft(&g, 3);
+        assert_eq!(pot.item, item("minecraft:decorated_pot"));
+        let sides = pot.sherds.expect("decorated");
+        assert_eq!(sides[3], sherd.item);
+        assert_eq!(Stack::from_nbt(&pot.to_nbt()), pot);
     }
 }

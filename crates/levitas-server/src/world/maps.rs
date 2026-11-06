@@ -380,6 +380,17 @@ impl World {
     /// Turns the maps a cartography table marked (locked or zoomed out) in a player's
     /// inventory and cursor into the new maps they stand for. The caller sends the
     /// player their window again.
+    /// Whether the player carries a map waiting to be locked or zoomed out.
+    pub(super) fn has_map_posts(&self, id: i32) -> bool {
+        self.players.get(&id).is_some_and(|p| {
+            p.inventory
+                .slots
+                .iter()
+                .chain(std::iter::once(&p.inventory.carried))
+                .any(|s| s.map_post.is_some() && s.map_id.is_some())
+        })
+    }
+
     pub(super) fn finish_map_posts(&mut self, id: i32) {
         let Some(p) = self.players.get(&id) else {
             return;

@@ -61,6 +61,9 @@ pub struct Stack {
     pub instrument: Option<u8>,
     /// A loaded crossbow's projectiles (the `minecraft:charged_projectiles` component).
     pub charged: Option<Charged>,
+    /// A decorated pot's four sides (`minecraft:pot_decorations`): back, left, right,
+    /// front, by item ID.
+    pub sherds: Option<[i32; 4]>,
 }
 
 /// What a crossbow is loaded with: an arrow (tipped with a potion, perhaps), as many
@@ -300,6 +303,7 @@ impl Stack {
         ominous: None,
         instrument: None,
         charged: None,
+        sherds: None,
     };
 
     pub fn new(item: i32, count: i32) -> Self {
@@ -337,6 +341,7 @@ impl Stack {
             && self.ominous == other.ominous
             && self.instrument == other.instrument
             && self.charged == other.charged
+            && self.sherds == other.sherds
     }
 
     pub fn is_empty(&self) -> bool {
@@ -423,6 +428,19 @@ impl Stack {
         }
         if let Some(amp) = self.ominous {
             components.insert("minecraft:ominous_bottle_amplifier", i32::from(amp));
+        }
+        if let Some(sides) = self.sherds {
+            let names: Vec<Tag> = sides
+                .iter()
+                .map(|&s| {
+                    Tag::String(
+                        ItemInfo::get(s)
+                            .map_or("minecraft:brick", |i| i.name)
+                            .into(),
+                    )
+                })
+                .collect();
+            components.insert("minecraft:pot_decorations", names);
         }
         if let Some(c) = self.charged {
             let shots: Vec<Tag> = (0..c.count)
@@ -548,6 +566,18 @@ impl Stack {
                         .position(|&n| n == name)?;
                     Some((id as u8, e.int("duration").unwrap_or(160) as i32))
                 }),
+            sherds: components
+                .and_then(|c| c.list("minecraft:pot_decorations"))
+                .map(|l| {
+                    let brick = ItemInfo::id_of("minecraft:brick").unwrap_or(0);
+                    let mut sides = [brick; 4];
+                    for (i, t) in l.iter().take(4).enumerate() {
+                        if let Some(id) = t.as_str().and_then(ItemInfo::id_of) {
+                            sides[i] = id;
+                        }
+                    }
+                    sides
+                }),
             charged: components
                 .and_then(|c| c.list("minecraft:charged_projectiles"))
                 .and_then(|l| {
@@ -623,6 +653,7 @@ fn write_components(packet: Writer, stack: &Stack) -> Writer {
     let ominous = stack.ominous.is_some();
     let horned = stack.instrument.is_some();
     let loaded = stack.charged.is_some();
+    let decorated = stack.sherds.is_some();
     let added = i32::from(damaged)
         + i32::from(processing)
         + i32::from(dyed)
@@ -637,7 +668,8 @@ fn write_components(packet: Writer, stack: &Stack) -> Writer {
         + i32::from(stewed)
         + i32::from(ominous)
         + i32::from(horned)
-        + i32::from(loaded);
+        + i32::from(loaded)
+        + i32::from(decorated);
     let mut packet = packet.varint(added).varint(0);
     if damaged {
         packet = packet.varint(component::DAMAGE).varint(stack.damage);
@@ -715,6 +747,12 @@ fn write_components(packet: Writer, stack: &Stack) -> Writer {
         packet = packet
             .varint(component::OMINOUS_BOTTLE_AMPLIFIER)
             .varint(i32::from(amp));
+    }
+    if let Some(sides) = stack.sherds {
+        packet = packet.varint(component::POT_DECORATIONS).varint(4);
+        for s in sides {
+            packet = packet.varint(s);
+        }
     }
     if let Some(c) = stack.charged {
         packet = packet

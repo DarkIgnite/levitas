@@ -973,6 +973,10 @@ impl World {
             (View::Grindstone(pos), Some(click::Used::Experience(xp))) => {
                 self.grindstone_used(pos, xp)
             }
+            (View::Crafting | View::Inventory, _) if self.has_map_posts(id) => {
+                self.finish_map_posts(id);
+                self.resync_window(id, window, view);
+            }
             (View::Cartography(pos), Some(click::Used::Cartography)) => {
                 // The new map IDs reach the client with the whole window.
                 self.finish_map_posts(id);
