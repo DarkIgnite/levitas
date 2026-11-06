@@ -36,6 +36,7 @@ const DATA_HURT_DIRECTION: u8 = 9;
 const DATA_DAMAGE: u8 = 10;
 const SERIALIZER_INT: i32 = 1;
 const SERIALIZER_FLOAT: i32 = 3;
+const SERIALIZER_BOOLEAN: i32 = 8;
 
 pub struct Cart {
     uuid: u128,
@@ -46,15 +47,100 @@ pub struct Cart {
     damage: f32,
     hurt_direction: i32,
     sent_pos: [f64; 3],
-    /// A chest minecart's 27 slots.
+    /// What it carries: nothing (a rider), a chest, a hopper, a furnace or TNT.
+    pub kind: CartKind,
+    /// A chest minecart's 27 slots, or a hopper minecart's 5.
     pub chest: Option<Box<[Stack]>>,
+    /// A furnace minecart's fuel left in ticks, and the way it pushes.
+    fuel: i32,
+    push: [f64; 2],
+    /// A TNT minecart's fuse, once lit.
+    fuse: Option<i32>,
+    /// A hopper minecart moves items while not on a powered activator rail.
+    enabled: bool,
+    cooldown: u32,
     /// The loot table a structure's chest minecart still has to be filled from, and
     /// its seed.
     pub loot: Option<(String, i64)>,
 }
 
-/// Slots in a chest minecart.
+/// Slots in a chest minecart, and a hopper minecart.
 pub const CART_CHEST_SLOTS: usize = 27;
+pub const CART_HOPPER_SLOTS: usize = 5;
+/// Fuel a piece of coal gives a furnace minecart, and the most it holds.
+const COAL_FUEL: i32 = 3600;
+const MAX_FUEL: i32 = 32_000;
+/// How fast a furnace minecart pushes itself along.
+const FURNACE_SPEED: f64 = 0.2;
+const FURNACE_PUSH: f64 = 0.04;
+/// A TNT minecart's fuse once lit, and its blast.
+const TNT_FUSE: i32 = 80;
+const TNT_POWER: f32 = 4.0;
+/// Ticks between a hopper minecart's moves.
+const HOPPER_COOLDOWN: u32 = 4;
+/// How close two minecarts come before they push each other apart.
+const BUMP_DISTANCE: f64 = 1.0;
+
+/// What a minecart carries.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CartKind {
+    Ride,
+    Chest,
+    Hopper,
+    Furnace,
+    Tnt,
+}
+
+impl CartKind {
+    /// The entity's and item's ID.
+    pub fn name(self) -> &'static str {
+        match self {
+            CartKind::Ride => "minecraft:minecart",
+            CartKind::Chest => "minecraft:chest_minecart",
+            CartKind::Hopper => "minecraft:hopper_minecart",
+            CartKind::Furnace => "minecraft:furnace_minecart",
+            CartKind::Tnt => "minecraft:tnt_minecart",
+        }
+    }
+
+    fn from_name(name: &str) -> Option<CartKind> {
+        [
+            CartKind::Ride,
+            CartKind::Chest,
+            CartKind::Hopper,
+            CartKind::Furnace,
+            CartKind::Tnt,
+        ]
+        .into_iter()
+        .find(|k| k.name() == name)
+    }
+
+    /// The block it carries, which drops along with the minecart.
+    fn block_item(self) -> Option<&'static str> {
+        match self {
+            CartKind::Ride => None,
+            CartKind::Chest => Some("minecraft:chest"),
+            CartKind::Hopper => Some("minecraft:hopper"),
+            CartKind::Furnace => Some("minecraft:furnace"),
+            CartKind::Tnt => Some("minecraft:tnt"),
+        }
+    }
+
+    fn entity_type(self) -> i32 {
+        entity_type::NAMES
+            .iter()
+            .position(|&n| n == self.name())
+            .map_or(entity_type::MINECART, |i| i as i32)
+    }
+
+    fn slots(self) -> usize {
+        match self {
+            CartKind::Chest => CART_CHEST_SLOTS,
+            CartKind::Hopper => CART_HOPPER_SLOTS,
+            _ => 0,
+        }
+    }
+}
 
 /// One end of a rail piece: the side it leaves the block by, and whether that end is
 /// the raised end of a slope.
@@ -129,13 +215,21 @@ impl Cart {
             damage: 0.0,
             hurt_direction: 1,
             sent_pos: pos,
+            kind: CartKind::Ride,
             chest: None,
             loot: None,
+            fuel: 0,
+            push: [0.0; 2],
+            fuse: None,
+            enabled: true,
+            cooldown: 0,
         }
     }
 
-    fn with_chest(mut self) -> Self {
-        self.chest = Some(vec![Stack::EMPTY; CART_CHEST_SLOTS].into_boxed_slice());
+    fn of_kind(mut self, kind: CartKind) -> Self {
+        self.kind = kind;
+        let slots = kind.slots();
+        self.chest = (slots > 0).then(|| vec![Stack::EMPTY; slots].into_boxed_slice());
         self
     }
 
@@ -153,11 +247,7 @@ impl Cart {
             (self.uuid >> 32) as i32,
             self.uuid as i32,
         ];
-        let id = if self.chest.is_some() {
-            "minecraft:chest_minecart"
-        } else {
-            "minecraft:minecart"
-        };
+        let id = self.kind.name();
         let mut nbt = Compound::new()
             .with("id", id)
             .with("UUID", uuid.to_vec())
@@ -176,6 +266,17 @@ impl Cart {
                 crate::inventory::items_to_nbt(items.iter().copied().enumerate()),
             );
         }
+        if self.kind == CartKind::Furnace {
+            nbt.insert("Fuel", self.fuel.clamp(0, i32::from(i16::MAX)) as i16);
+            nbt.insert("PushX", self.push[0]);
+            nbt.insert("PushZ", self.push[1]);
+        }
+        if self.kind == CartKind::Tnt {
+            nbt.insert("fuse", self.fuse.unwrap_or(-1));
+        }
+        if self.kind == CartKind::Hopper {
+            nbt.insert("Enabled", self.enabled);
+        }
         if let Some((table, seed)) = &self.loot {
             nbt.insert("LootTable", table.as_str());
             if *seed != 0 {
@@ -186,18 +287,20 @@ impl Cart {
     }
 
     pub fn from_nbt(nbt: &Compound, rng: &mut Rng) -> Option<Cart> {
-        let chest = match nbt.str("id")? {
-            "minecraft:minecart" => false,
-            "minecraft:chest_minecart" => true,
-            _ => return None,
-        };
+        let kind = CartKind::from_name(nbt.str("id")?)?;
         let read = |key: &str| -> Option<[f64; 3]> {
             let v: Vec<f64> = nbt.list(key)?.iter().filter_map(Tag::as_f64).collect();
             Some([*v.first()?, *v.get(1)?, *v.get(2)?])
         };
-        let mut cart = Cart::new(read("Pos")?, rng);
-        if chest {
-            cart = cart.with_chest();
+        let mut cart = Cart::new(read("Pos")?, rng).of_kind(kind);
+        cart.fuel = nbt.int("Fuel").unwrap_or(0) as i32;
+        cart.push = [
+            nbt.float("PushX").unwrap_or(0.0),
+            nbt.float("PushZ").unwrap_or(0.0),
+        ];
+        cart.fuse = nbt.int("fuse").filter(|&f| f >= 0).map(|f| f as i32);
+        cart.enabled = nbt.int("Enabled").unwrap_or(1) != 0;
+        if cart.chest.is_some() {
             if let Some(items) = cart.chest.as_mut() {
                 for (slot, stack) in
                     crate::inventory::items_from_nbt(nbt.list("Items").unwrap_or_default())
@@ -226,11 +329,7 @@ pub fn spawn_packets(id: i32, cart: &Cart) -> Vec<Writer> {
     let mut packets = vec![Writer::packet(clientbound::ADD_ENTITY)
         .varint(id)
         .uuid(cart.uuid)
-        .varint(if cart.chest.is_some() {
-            entity_type::CHEST_MINECART
-        } else {
-            entity_type::MINECART
-        })
+        .varint(cart.kind.entity_type())
         .f64(cart.pos[0])
         .f64(cart.pos[1])
         .f64(cart.pos[2])
@@ -242,7 +341,20 @@ pub fn spawn_packets(id: i32, cart: &Cart) -> Vec<Writer> {
     if let Some(rider) = cart.rider {
         packets.push(passengers(id, Some(rider)));
     }
+    if cart.kind == CartKind::Furnace && cart.fuel > 0 {
+        packets.push(furnace_lit(id, true));
+    }
     packets
+}
+
+/// Whether a furnace minecart shows its fire (entity data 13).
+fn furnace_lit(id: i32, lit: bool) -> Writer {
+    Writer::packet(clientbound::SET_ENTITY_DATA)
+        .varint(id)
+        .u8(13)
+        .varint(SERIALIZER_BOOLEAN)
+        .bool(lit)
+        .u8(0xFF)
 }
 
 fn passengers(cart: i32, rider: Option<i32>) -> Writer {
@@ -265,6 +377,34 @@ fn position_sync(id: i32, cart: &Cart) -> Writer {
         .bool(true)
 }
 
+/// Whether `stack` fits somewhere in `slots`.
+fn can_take(slots: &[Stack], stack: Stack) -> bool {
+    slots
+        .iter()
+        .any(|s| s.is_empty() || (s.same_kind(&stack) && s.count < s.max_stack()))
+}
+
+/// Puts `stack` into `slots`, topping up first; returns what did not fit.
+fn put_into(slots: &mut [Stack], mut stack: Stack) -> Stack {
+    for s in slots.iter_mut() {
+        if !s.is_empty() && s.same_kind(&stack) && s.count < s.max_stack() {
+            let moved = (s.max_stack() - s.count).min(stack.count);
+            *s = s.with_count(s.count + moved);
+            stack = stack.with_count(stack.count - moved);
+        }
+    }
+    for s in slots.iter_mut() {
+        if stack.is_empty() {
+            break;
+        }
+        if s.is_empty() {
+            *s = stack;
+            stack = Stack::EMPTY;
+        }
+    }
+    stack
+}
+
 impl World {
     /// The rail a cart at `pos` runs on: in its block, or the one under it.
     fn rail_under(&self, pos: [f64; 3]) -> Option<(BlockPos, u16)> {
@@ -284,10 +424,9 @@ impl World {
             return false;
         };
         let stack = p.inventory.slots[slot];
-        let chest = match ItemInfo::get(stack.item).map_or("", |i| i.name) {
-            "minecraft:minecart" => false,
-            "minecraft:chest_minecart" => true,
-            _ => return false,
+        let Some(kind) = CartKind::from_name(ItemInfo::get(stack.item).map_or("", |i| i.name))
+        else {
+            return false;
         };
         let survival = p.survival();
         let state = self.block(pos);
@@ -295,10 +434,7 @@ impl World {
             return false;
         }
         let at = center(pos, shape_of(state));
-        let mut cart = Cart::new(at, &mut self.rng);
-        if chest {
-            cart = cart.with_chest();
-        }
+        let cart = Cart::new(at, &mut self.rng).of_kind(kind);
         let cart_id = next_entity_id();
         for packet in spawn_packets(cart_id, &cart) {
             self.broadcast(packet, None);
@@ -323,12 +459,22 @@ impl World {
             return true;
         };
         let near = distance(p.pos, cart.pos) <= 6.0;
-        // A chest minecart opens instead.
-        if cart.chest.is_some() {
-            if near && p.alive {
-                self.open_cart_chest(id, target);
+        // A chest or hopper minecart opens instead; a furnace one takes coal.
+        match cart.kind {
+            CartKind::Chest | CartKind::Hopper => {
+                if near && p.alive {
+                    self.open_cart_chest(id, target);
+                }
+                return true;
             }
-            return true;
+            CartKind::Furnace => {
+                if near && p.alive {
+                    self.fuel_cart(id, target);
+                }
+                return true;
+            }
+            CartKind::Tnt => return true,
+            CartKind::Ride => {}
         }
         if cart.rider.is_some() || !p.alive || p.sneaking || !near || p.riding.is_some() {
             return true;
@@ -398,14 +544,16 @@ impl World {
                         self.scatter_item(cart.pos, s);
                     }
                 }
-                if !creative {
+                // A TNT minecart broken while moving fast, or burning, goes off.
+                let speed = cart.vel[0].hypot(cart.vel[2]);
+                if cart.kind == CartKind::Tnt && speed > 0.1 {
+                    self.cart_explodes(&cart);
+                } else if !creative {
                     if let Some(item) = ItemInfo::id_of("minecraft:minecart") {
                         self.scatter_item(cart.pos, Stack::new(item, 1));
                     }
-                    if cart.chest.is_some() {
-                        if let Some(chest) = ItemInfo::id_of("minecraft:chest") {
-                            self.scatter_item(cart.pos, Stack::new(chest, 1));
-                        }
+                    if let Some(block) = cart.kind.block_item().and_then(ItemInfo::id_of) {
+                        self.scatter_item(cart.pos, Stack::new(block, 1));
                     }
                 }
             }
@@ -426,12 +574,24 @@ impl World {
             self.roll_cart_loot(&mut cart);
             self.carts.insert(cart_id, cart);
         }
-        self.open_view(
-            id,
-            super::containers::View::CartChest(cart_id),
-            levitas_registry::menu::GENERIC_9X3,
-            "Minecart with Chest",
-        );
+        let hopper = self
+            .carts
+            .get(&cart_id)
+            .is_some_and(|c| c.kind == CartKind::Hopper);
+        let (view, menu, title) = if hopper {
+            (
+                super::containers::View::CartChest(cart_id, CART_HOPPER_SLOTS),
+                levitas_registry::menu::HOPPER,
+                "Minecart with Hopper",
+            )
+        } else {
+            (
+                super::containers::View::CartChest(cart_id, CART_CHEST_SLOTS),
+                levitas_registry::menu::GENERIC_9X3,
+                "Minecart with Chest",
+            )
+        };
+        self.open_view(id, view, menu, title);
     }
 
     /// Players looking into a chest minecart that is gone have the window closed.
@@ -441,7 +601,7 @@ impl World {
             .iter()
             .filter_map(|(&pid, p)| {
                 let open = p.open.as_ref()?;
-                (open.view == super::containers::View::CartChest(cart_id))
+                matches!(open.view, super::containers::View::CartChest(c, _) if c == cart_id)
                     .then_some((pid, open.window))
             })
             .collect();
@@ -462,6 +622,9 @@ impl World {
             cart.damage = (cart.damage - 1.0).max(0.0);
             if self.chunks.contains_key(&cart.chunk()) {
                 self.move_cart(&mut cart);
+                if self.cart_chores(id, &mut cart) {
+                    continue; // blown up
+                }
             }
             if let Some((rail, state)) = self.rail_under(cart.pos) {
                 if blocks::name(state) == "minecraft:detector_rail" {
@@ -486,6 +649,275 @@ impl World {
             self.carts.insert(id, cart);
         }
         self.update_detectors(occupied);
+        self.bump_carts();
+    }
+
+    /// A player uses coal or charcoal on a furnace minecart: fuel for three minutes, and
+    /// it sets off away from them.
+    fn fuel_cart(&mut self, id: i32, cart_id: i32) {
+        let p = &self.players[&id];
+        let slot = p.hand_slot(0);
+        let held = p.inventory.slots[slot];
+        let coal = ItemInfo::get(held.item)
+            .is_some_and(|i| matches!(i.name, "minecraft:coal" | "minecraft:charcoal"));
+        let (from, survival) = (p.pos, p.survival());
+        let Some(cart) = self.carts.get_mut(&cart_id) else {
+            return;
+        };
+        if coal && cart.fuel + COAL_FUEL <= MAX_FUEL {
+            let lit = cart.fuel > 0;
+            cart.fuel += COAL_FUEL;
+            if !lit {
+                self.broadcast(furnace_lit(cart_id, true), None);
+            }
+            if survival {
+                let p = self.players.get_mut(&id).expect("checked");
+                p.inventory.take(slot, 1);
+                let update = p.inventory.set_slot_packet(slot);
+                self.send(id, update);
+            }
+        }
+        let cart = self.carts.get_mut(&cart_id).expect("checked");
+        let d = [cart.pos[0] - from[0], cart.pos[2] - from[2]];
+        let len = d[0].hypot(d[1]).max(1e-6);
+        cart.push = [d[0] / len, d[1] / len];
+    }
+
+    /// What each kind of minecart does as it goes: a furnace one burns fuel and pushes
+    /// on, a TNT one burns its fuse, a hopper one moves items, and a powered activator
+    /// rail lights TNT, stops hoppers and puts riders off. Returns whether it blew up.
+    fn cart_chores(&mut self, id: i32, cart: &mut Cart) -> bool {
+        let activated = self.rail_under(cart.pos).is_some_and(|(_, s)| {
+            blocks::name(s) == "minecraft:activator_rail"
+                && blocks::prop(s, "powered") == Some("true")
+        });
+        match cart.kind {
+            CartKind::Furnace if cart.fuel > 0 => {
+                cart.fuel -= 1;
+                let speed = cart.vel[0].hypot(cart.vel[2]);
+                if speed > 0.01 {
+                    // It keeps pushing the way it goes, round curves too.
+                    cart.push = [cart.vel[0] / speed, cart.vel[2] / speed];
+                }
+                if speed < FURNACE_SPEED {
+                    cart.vel[0] += cart.push[0] * FURNACE_PUSH;
+                    cart.vel[2] += cart.push[1] * FURNACE_PUSH;
+                }
+                if cart.fuel == 0 {
+                    self.broadcast(furnace_lit(id, false), None);
+                }
+            }
+            CartKind::Tnt => {
+                let here = BlockPos::new(
+                    cart.pos[0].floor() as i32,
+                    cart.pos[1].floor() as i32,
+                    cart.pos[2].floor() as i32,
+                );
+                let burning = self.loaded_state(here).is_some_and(|s| {
+                    crate::blocks::fire::is_fire(s)
+                        || crate::blocks::fluid::fluid_at(s)
+                            .is_some_and(|f| f.fluid == crate::blocks::fluid::Fluid::Lava)
+                });
+                if (activated || burning) && cart.fuse.is_none() {
+                    self.light_cart(id, cart);
+                }
+                if let Some(fuse) = cart.fuse.as_mut() {
+                    *fuse -= 1;
+                    if *fuse <= 0 {
+                        self.broadcast(items::remove_entity(id), None);
+                        self.cart_explodes(cart);
+                        return true;
+                    }
+                }
+            }
+            CartKind::Hopper => {
+                cart.enabled = !activated;
+                cart.cooldown = cart.cooldown.saturating_sub(1);
+                if cart.enabled && cart.cooldown == 0 && self.cart_hopper_pull(cart) {
+                    cart.cooldown = HOPPER_COOLDOWN;
+                }
+            }
+            CartKind::Ride if activated => {
+                if let Some(rider) = cart.rider.take() {
+                    self.players.get_mut(&rider).map(|p| p.riding.take());
+                    self.broadcast(passengers(id, None), None);
+                    let at = [cart.pos[0], cart.pos[1] + 0.6, cart.pos[2]];
+                    self.teleport(rider, at);
+                }
+            }
+            _ => {}
+        }
+        false
+    }
+
+    /// Lights a TNT minecart's fuse (fire, lava, explosions or an activator rail).
+    pub(super) fn light_cart(&mut self, id: i32, cart: &mut Cart) {
+        cart.fuse = Some(TNT_FUSE);
+        // The flashing, as primed TNT shows it.
+        self.broadcast(
+            Writer::packet(clientbound::ENTITY_EVENT).i32(id).i8(10),
+            None,
+        );
+        self.play_sound_at("minecraft:entity.tnt.primed", cart.pos, 1.0, 1.0, None);
+    }
+
+    /// A TNT minecart's blast, stronger the faster it went.
+    fn cart_explodes(&mut self, cart: &Cart) {
+        let speed2 = (cart.vel[0] * cart.vel[0] + cart.vel[2] * cart.vel[2]).min(5.0);
+        let power = TNT_POWER + self.rng.f64() as f32 * 1.5 * speed2 as f32;
+        self.explode(cart.pos, power, "TNT");
+    }
+
+    /// A hopper minecart takes an item from the container above it, or picks up the
+    /// items lying on it. Returns whether it took one.
+    fn cart_hopper_pull(&mut self, cart: &mut Cart) -> bool {
+        let Some(slots) = cart.chest.as_mut() else {
+            return false;
+        };
+        let above = BlockPos::new(
+            cart.pos[0].floor() as i32,
+            cart.pos[1].floor() as i32 + 1,
+            cart.pos[2].floor() as i32,
+        );
+        // From a container above.
+        let taken = self.block_entities.get(&above).and_then(|e| {
+            e.stacks()
+                .iter()
+                .enumerate()
+                .find(|(_, s)| !s.is_empty() && can_take(slots, **s))
+                .map(|(i, s)| (i, *s))
+        });
+        if let Some((i, s)) = taken {
+            if let Some(e) = self.block_entities.get_mut(&above) {
+                let left = s.with_count(s.count - 1);
+                e.stacks_mut()[i] = left;
+            }
+            self.dirty.insert(above.chunk());
+            self.redstone_dirty.push(above);
+            put_into(slots, s.with_count(1));
+            return true;
+        }
+        // Items lying on it.
+        let near: Vec<i32> = self
+            .items
+            .iter()
+            .filter(|(_, item)| {
+                let p = item.pos();
+                (p[0] - cart.pos[0]).abs() <= 0.75
+                    && (p[2] - cart.pos[2]).abs() <= 0.75
+                    && (-0.25..=1.5).contains(&(p[1] - cart.pos[1]))
+            })
+            .map(|(&id, _)| id)
+            .collect();
+        for item_id in near {
+            let stack = self.items[&item_id].stack_ref();
+            if !can_take(slots, stack) {
+                continue;
+            }
+            let left = put_into(slots, stack);
+            if left.is_empty() {
+                self.items.remove(&item_id);
+                self.broadcast(items::remove_entity(item_id), None);
+            } else {
+                self.set_item_stack(item_id, left);
+            }
+            return true;
+        }
+        false
+    }
+
+    /// A hopper takes an item from a chest or hopper minecart right above it. Returns
+    /// whether it did.
+    pub(super) fn hopper_pull_cart(&mut self, hopper: BlockPos) -> bool {
+        let above = offset(hopper, Dir::Up);
+        let cart_id = self.carts.iter().find_map(|(&id, c)| {
+            let at = BlockPos::new(
+                c.pos[0].floor() as i32,
+                c.pos[1].floor() as i32,
+                c.pos[2].floor() as i32,
+            );
+            (at == above && c.chest.is_some()).then_some(id)
+        });
+        let Some(cart_id) = cart_id else {
+            return false;
+        };
+        let Some(slot) = self.carts[&cart_id]
+            .chest
+            .as_ref()
+            .and_then(|c| c.iter().position(|s| !s.is_empty()))
+        else {
+            return false;
+        };
+        let stack = self.carts[&cart_id].chest.as_ref().expect("checked")[slot];
+        let rest = self.insert_stack(hopper, Dir::Up, stack.with_count(1));
+        if !rest.is_empty() {
+            return false;
+        }
+        if let Some(c) = self.carts.get_mut(&cart_id).and_then(|c| c.chest.as_mut()) {
+            c[slot] = stack.with_count(stack.count - 1);
+        }
+        true
+    }
+
+    /// A hopper pointing into a chest or hopper minecart fills it. Returns whether an
+    /// item went.
+    pub(super) fn hopper_push_cart(&mut self, hopper: BlockPos, target: BlockPos) -> bool {
+        let cart_id = self.carts.iter().find_map(|(&id, c)| {
+            let at = BlockPos::new(
+                c.pos[0].floor() as i32,
+                c.pos[1].floor() as i32,
+                c.pos[2].floor() as i32,
+            );
+            (at == target && c.chest.is_some()).then_some(id)
+        });
+        let Some(cart_id) = cart_id else {
+            return false;
+        };
+        let Some((slot, stack)) = self.block_entities.get(&hopper).and_then(|e| {
+            e.stacks()
+                .iter()
+                .enumerate()
+                .find(|(_, s)| !s.is_empty())
+                .map(|(i, s)| (i, *s))
+        }) else {
+            return false;
+        };
+        let Some(slots) = self.carts.get_mut(&cart_id).and_then(|c| c.chest.as_mut()) else {
+            return false;
+        };
+        if !can_take(slots, stack) {
+            return false;
+        }
+        put_into(slots, stack.with_count(1));
+        if let Some(e) = self.block_entities.get_mut(&hopper) {
+            e.stacks_mut()[slot] = stack.with_count(stack.count - 1);
+        }
+        self.dirty.insert(hopper.chunk());
+        true
+    }
+
+    /// Minecarts running into each other push apart.
+    fn bump_carts(&mut self) {
+        let list: Vec<(i32, [f64; 3])> = self.carts.iter().map(|(&id, c)| (id, c.pos)).collect();
+        for (i, &(a, pa)) in list.iter().enumerate() {
+            for &(b, pb) in &list[i + 1..] {
+                let d = [pb[0] - pa[0], pb[2] - pa[2]];
+                let len = d[0].hypot(d[1]);
+                if len >= BUMP_DISTANCE || (pb[1] - pa[1]).abs() > 0.8 || len < 1e-6 {
+                    continue;
+                }
+                let push = (BUMP_DISTANCE - len) * 0.1;
+                let n = [d[0] / len * push, d[1] / len * push];
+                if let Some(c) = self.carts.get_mut(&a) {
+                    c.vel[0] -= n[0];
+                    c.vel[2] -= n[1];
+                }
+                if let Some(c) = self.carts.get_mut(&b) {
+                    c.vel[0] += n[0];
+                    c.vel[2] += n[1];
+                }
+            }
+        }
     }
 
     /// Detector rails are powered while a cart is on them.
@@ -932,7 +1364,10 @@ mod tests {
         assert!(filled > 0, "the loot was rolled");
         assert_eq!(
             w.players[&pid].open.as_ref().map(|o| o.view),
-            Some(super::super::containers::View::CartChest(cart_id))
+            Some(super::super::containers::View::CartChest(
+                cart_id,
+                CART_CHEST_SLOTS
+            ))
         );
 
         // Broken: the window closes and everything drops, chest and minecart too.
@@ -942,5 +1377,118 @@ mod tests {
         assert!(!w.carts.contains_key(&cart_id));
         assert!(w.players[&pid].open.is_none());
         assert!(w.items.len() >= filled + 2);
+    }
+
+    #[test]
+    fn furnace_hopper_and_tnt_minecarts_do_their_jobs() {
+        let mut w = world();
+        for x in 0..=15 {
+            w.set_block(
+                BlockPos::new(x, -60, 2),
+                rail("minecraft:rail", "east_west"),
+            );
+        }
+        // A fuelled furnace minecart sets off and keeps going.
+        let mut furnace = Cart::new([2.5, -60.0, 2.5], &mut w.rng).of_kind(CartKind::Furnace);
+        furnace.fuel = 200;
+        furnace.push = [1.0, 0.0];
+        let fid = next_entity_id();
+        w.carts.insert(fid, furnace);
+        for _ in 0..40 {
+            w.tick_minecarts();
+        }
+        assert!(
+            w.carts[&fid].pos[0] > 4.0,
+            "pushed itself: {:?}",
+            w.carts[&fid].pos
+        );
+        assert!(w.carts[&fid].fuel < 200);
+        let saved = w.carts[&fid].to_nbt();
+        assert_eq!(saved.str("id"), Some("minecraft:furnace_minecart"));
+        let back = Cart::from_nbt(&saved, &mut w.rng).unwrap();
+        assert_eq!(back.kind, CartKind::Furnace);
+        w.carts.remove(&fid);
+
+        // A hopper minecart takes from a chest above it; a hopper under the rail takes
+        // from the minecart.
+        let z = 6;
+        w.set_block(
+            BlockPos::new(3, -60, z),
+            rail("minecraft:rail", "east_west"),
+        );
+        let chest = BlockPos::new(3, -59, z);
+        w.set_block(
+            chest,
+            BlockInfo::by_name("minecraft:chest").unwrap().default_state,
+        );
+        let state = w.block(chest);
+        w.block_entities
+            .insert(chest, BlockEntity::for_block(state).unwrap());
+        let dirt = ItemInfo::id_of("minecraft:dirt").unwrap();
+        w.block_entities.get_mut(&chest).unwrap().stacks_mut()[0] = Stack::new(dirt, 2);
+        let hid = next_entity_id();
+        w.carts.insert(
+            hid,
+            Cart::new([3.5, -60.0, 6.5], &mut w.rng).of_kind(CartKind::Hopper),
+        );
+        for _ in 0..20 {
+            w.tick_minecarts();
+        }
+        let carried: i32 = w.carts[&hid]
+            .chest
+            .as_ref()
+            .unwrap()
+            .iter()
+            .map(|s| s.count)
+            .sum();
+        assert_eq!(carried, 2);
+        let below = BlockPos::new(3, -61, z);
+        w.set_block(
+            below,
+            BlockInfo::by_name("minecraft:hopper")
+                .unwrap()
+                .default_state,
+        );
+        let state = w.block(below);
+        w.block_entities
+            .insert(below, BlockEntity::for_block(state).unwrap());
+        assert!(w.hopper_pull_cart(below));
+        assert_eq!(w.block_entities[&below].stacks()[0].count, 1);
+
+        // A powered activator rail lights a TNT minecart, which goes off.
+        let mut tnt_rail = rail("minecraft:activator_rail", "east_west");
+        tnt_rail = blocks::with_bool(tnt_rail, "powered", true);
+        w.set_block(BlockPos::new(10, -60, 2), tnt_rail);
+        let tid = next_entity_id();
+        w.carts.insert(
+            tid,
+            Cart::new([10.5, -60.0, 2.5], &mut w.rng).of_kind(CartKind::Tnt),
+        );
+        w.tick_minecarts();
+        assert!(w.carts[&tid].fuse.is_some(), "lit");
+        for _ in 0..(TNT_FUSE + 2) {
+            w.tick_minecarts();
+        }
+        assert!(!w.carts.contains_key(&tid), "blown up");
+    }
+
+    #[test]
+    fn minecarts_push_each_other_apart() {
+        let mut w = world();
+        for x in 0..=10 {
+            w.set_block(
+                BlockPos::new(x, -60, 2),
+                rail("minecraft:rail", "east_west"),
+            );
+        }
+        let a = next_entity_id();
+        let b = next_entity_id();
+        w.carts.insert(a, Cart::new([5.0, -60.0, 2.5], &mut w.rng));
+        w.carts.insert(b, Cart::new([5.4, -60.0, 2.5], &mut w.rng));
+        for _ in 0..20 {
+            w.tick_minecarts();
+        }
+        let gap = (w.carts[&b].pos[0] - w.carts[&a].pos[0]).abs();
+        assert!(gap > 0.6, "they moved apart: {gap}");
     }
 }

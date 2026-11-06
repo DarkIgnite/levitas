@@ -192,10 +192,12 @@ impl World {
             let facing = blocks::facing(state).unwrap_or(Dir::Down);
             let target = offset(pos, facing);
             let pushed = self.transfer(pos, facing, target)
-                || (facing == Dir::Down && self.hopper_into_composter(pos, target));
+                || (facing == Dir::Down && self.hopper_into_composter(pos, target))
+                || self.hopper_push_cart(pos, target);
             let above = offset(pos, Dir::Up);
             let pulled = self.transfer(above, Dir::Down, pos)
                 || self.composter_into_hopper(above, pos)
+                || self.hopper_pull_cart(pos)
                 || self.hopper_pickup(pos);
             if pushed || pulled {
                 if let Some(BlockEntity::Chest(c)) = self.block_entities.get_mut(&pos) {

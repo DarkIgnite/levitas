@@ -403,7 +403,7 @@ pub enum View {
     /// A beacon: one payment slot.
     Beacon(BlockPos),
     /// The chest of the minecart with this entity ID.
-    CartChest(i32),
+    CartChest(i32, usize),
 }
 
 impl View {
@@ -422,7 +422,7 @@ impl View {
             View::Brewing(_) => super::brewing::SLOTS,
             View::Merchant(_) => 3,
             View::Beacon(_) => 1,
-            View::CartChest(_) => super::minecarts::CART_CHEST_SLOTS,
+            View::CartChest(_, slots) => slots,
         }
     }
 
@@ -443,7 +443,7 @@ impl View {
             | View::Smithing(_)
             | View::Cartography(_)
             | View::Merchant(_)
-            | View::CartChest(_) => Vec::new(),
+            | View::CartChest(..) => Vec::new(),
         }
     }
 
@@ -453,7 +453,7 @@ impl View {
             View::Inventory => click::Layout::Inventory,
             View::Crafting => click::Layout::Crafting,
             View::Furnace(_, kind) => click::Layout::Furnace(kind),
-            View::Chest(..) | View::DoubleChest(..) | View::CartChest(_) => {
+            View::Chest(..) | View::DoubleChest(..) | View::CartChest(..) => {
                 click::Layout::Chest(self.container_len())
             }
             View::Enchanting(_) => click::Layout::Enchanting,
@@ -663,7 +663,7 @@ impl World {
                 let open = p.open.as_ref().expect("window is open");
                 open.grid[..1].to_vec()
             }
-            View::CartChest(cart) => self
+            View::CartChest(cart, _) => self
                 .carts
                 .get(&cart)
                 .and_then(|c| c.chest.as_ref())
@@ -732,7 +732,7 @@ impl World {
                 let open = p.open.as_mut().expect("window is open");
                 open.grid[..1].copy_from_slice(&slots[..1]);
             }
-            View::CartChest(cart) => {
+            View::CartChest(cart, _) => {
                 if let Some(chest) = self.carts.get_mut(&cart).and_then(|c| c.chest.as_mut()) {
                     chest.copy_from_slice(&slots[..n]);
                 }
@@ -1205,7 +1205,7 @@ impl World {
                     self.container_opened(open.view, false);
                 }
             }
-            View::Inventory | View::CartChest(_) => {}
+            View::Inventory | View::CartChest(..) => {}
         }
         self.return_to_inventory(id, returned);
     }
