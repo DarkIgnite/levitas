@@ -6,6 +6,7 @@ mod admin;
 mod advancements;
 mod armor_stands;
 mod arrows;
+mod attributes;
 mod beacon;
 mod boats;
 mod breeding;
@@ -442,6 +443,8 @@ struct Player {
     /// The saved player file as it was read: keys Levitas does not manage (the ender
     /// chest, the recipe book, abilities, ...) are written back unchanged.
     saved_extra: levitas_nbt::Compound,
+    /// The enchantment attributes the client was last sent (None: send them again).
+    sent_attributes: Option<attributes::Modifiers>,
     /// Tick the attack charge last started over (after an attack or switching items).
     attack_reset: u64,
     /// Hand and start tick of a bow being drawn.
@@ -538,6 +541,7 @@ impl Player {
             respawn: None,
             respawn_forced: false,
             saved_extra: levitas_nbt::Compound::new(),
+            sent_attributes: None,
             attack_reset: 0,
             drawing: None,
             xp_level: 0,
@@ -1669,6 +1673,7 @@ impl World {
         self.tick_maps();
         self.tick_advancements();
         self.tick_lodestone_compasses();
+        self.tick_attributes();
         self.tick_stats();
         self.tick_conduits();
         self.tick_daylight_detectors();

@@ -553,6 +553,10 @@ impl World {
                 .varint(id),
             Some(id),
         );
+        // A respawned client starts its attributes afresh.
+        if let Some(p) = self.players.get_mut(&id) {
+            p.sent_attributes = None;
+        }
         let spawn = spawn_player(id, &self.players[&id]);
         for packet in spawn {
             self.broadcast(packet, Some(id));

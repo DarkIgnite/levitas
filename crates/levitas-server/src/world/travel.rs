@@ -87,6 +87,7 @@ impl World {
         }
         // The client forgets its chunks and entities when it changes dimension.
         player.loaded.clear();
+        player.sent_attributes = None;
         player.digging = None;
         player.eating = None;
         player.drawing = None;

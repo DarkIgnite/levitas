@@ -569,6 +569,7 @@ fn items_and_entities(data: &Path, block_defaults: &HashMap<String, u64>, out: &
 
     for (module, registry, doc) in [
         ("entity_type", "minecraft:entity_type", "Entity type IDs."),
+        ("attribute", "minecraft:attribute", "Attribute IDs."),
         (
             "menu",
             "minecraft:menu",
