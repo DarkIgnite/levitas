@@ -546,3 +546,87 @@ fn walls_rise_under_what_covers_them() {
     assert_eq!(prop(mid, "up"), Some("true"));
     assert_eq!(prop(mid, "east"), Some("low"));
 }
+
+#[test]
+fn bells_stand_hang_from_ceilings_and_walls() {
+    let mut w = World::new();
+    let bell = state("minecraft:bell");
+    // On the floor, facing away from the player (looking south, it faces north).
+    let floor = w.place(bell, on_ground(0, 0, 0.0)).unwrap()[0].1;
+    assert_eq!(prop(floor, "attachment"), Some("floor"));
+    assert_eq!(prop(floor, "facing"), Some("north"));
+    // Under a block.
+    w.set(pos(10, 3, 0), block::STONE);
+    let ceiling = w
+        .place(bell, on_side(pos(10, 3, 0), Dir::Down, 0.0, 0.0))
+        .unwrap()[0]
+        .1;
+    assert_eq!(prop(ceiling, "attachment"), Some("ceiling"));
+    // On a wall, facing away from it; between two walls, held by both.
+    w.set(pos(12, 1, 0), block::STONE);
+    let single = w
+        .place(bell, on_side(pos(12, 1, 0), Dir::East, 0.5, 90.0))
+        .unwrap()[0]
+        .1;
+    assert_eq!(prop(single, "attachment"), Some("single_wall"));
+    assert_eq!(prop(single, "facing"), Some("east"));
+    w.set(pos(13, 1, 0), block::AIR);
+    w.set(pos(14, 1, 0), block::STONE);
+    let double = w
+        .place(bell, on_side(pos(12, 1, 0), Dir::East, 0.5, 90.0))
+        .unwrap()[0]
+        .1;
+    assert_eq!(prop(double, "attachment"), Some("double_wall"));
+    // Its wall gone, a single wall bell drops.
+    w.set(pos(13, 1, 0), single);
+    w.set(pos(14, 1, 0), block::AIR);
+    w.set(pos(12, 1, 0), block::AIR);
+    assert!(is_air(w.update(pos(13, 1, 0))));
+    // Pistons break bells and cocoa pods; flowing water bursts cocoa.
+    assert!(matches!(piston::reaction(bell), piston::Reaction::Destroy));
+    assert!(matches!(
+        piston::reaction(state("minecraft:cocoa")),
+        piston::Reaction::Destroy
+    ));
+    assert!(fluid::can_hold_fluid(state("minecraft:cocoa")));
+}
+
+#[test]
+fn hanging_signs_hang_like_vanilla_ones() {
+    let mut w = World::new();
+    let sign = state("minecraft:oak_hanging_sign");
+    // Under a full block: straight chains, four directions.
+    w.set(pos(0, 3, 0), block::STONE);
+    let straight = w
+        .place(sign, on_side(pos(0, 3, 0), Dir::Down, 0.0, 30.0))
+        .unwrap()[0]
+        .1;
+    assert_eq!(prop(straight, "attached"), Some("false"));
+    let r: i32 = prop(straight, "rotation").unwrap().parse().unwrap();
+    assert_eq!(r % 4, 0);
+    // Under a chain: the chains meet, sixteen directions.
+    w.set(pos(2, 3, 0), state("minecraft:iron_chain"));
+    let pointed = w
+        .place(sign, on_side(pos(2, 3, 0), Dir::Down, 0.0, 30.0))
+        .unwrap()[0]
+        .1;
+    assert_eq!(prop(pointed, "attached"), Some("true"));
+    // Nothing above: it drops.
+    w.set(pos(2, 3, 0), block::AIR);
+    assert!(is_air(w.update(pos(2, 2, 0))));
+    // On a wall: it sticks out, facing along the wall, and keeps its bracket after.
+    w.set(pos(5, 1, 0), block::STONE);
+    let placed = w
+        .place(sign, on_side(pos(5, 1, 0), Dir::East, 0.5, 90.0))
+        .unwrap()[0];
+    assert!(name(placed.1).ends_with("_wall_hanging_sign"));
+    let facing = prop(placed.1, "facing").unwrap();
+    assert!(facing == "north" || facing == "south", "{facing}");
+    w.set(pos(5, 1, 0), block::AIR);
+    assert!(!is_air(w.update(placed.0)));
+    // Not on the side of a chain.
+    w.set(pos(8, 1, 0), state("minecraft:iron_chain"));
+    assert!(w
+        .place(sign, on_side(pos(8, 1, 0), Dir::East, 0.5, 90.0))
+        .is_none());
+}

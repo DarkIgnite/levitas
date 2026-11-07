@@ -707,6 +707,8 @@ struct World {
     carts: HashMap<i32, minecarts::Cart>,
     /// Firework rockets in flight.
     rockets: HashMap<i32, rockets::Rocket>,
+    /// Bells rung lately, and until when villagers near them hide.
+    bell_alarms: Vec<(BlockPos, u64)>,
     /// Item frames and paintings.
     hanging: HashMap<i32, hanging::Hanging>,
     armor_stands: HashMap<i32, armor_stands::ArmorStand>,
@@ -841,6 +843,7 @@ impl World {
             boats: HashMap::new(),
             carts: HashMap::new(),
             rockets: HashMap::new(),
+            bell_alarms: Vec::new(),
             hanging: HashMap::new(),
             armor_stands: HashMap::new(),
             detectors: HashSet::new(),

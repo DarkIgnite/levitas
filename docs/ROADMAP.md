@@ -122,12 +122,20 @@ Known gaps are listed under each phase instead of being hidden.
 - [x] Block placement sounds for other players. The generator gives no sound types, so
       `blocks::place_sound` works them out from the block's own sound, its family, its
       tags or its name (stone otherwise).
-- [ ] Bells, cocoa, hanging signs, crafters and walls' tall sides: check against vanilla.
-      Done: walls (a side is tall only under a full face or a wall running the same way;
-      a straight run keeps its post only under `#wall_post_override` or a posted wall) and
-      crafters (`world/crafter.rs`: 3x3 grid, slots switched off, crafting on a pulse,
-      comparators, hoppers). Bells, cocoa and hanging signs work but are not yet compared
-      with a vanilla server.
+- [x] Bells, cocoa, hanging signs, crafters and walls' tall sides: checked against the
+      wiki. Bells stand on floors, hang from ceilings and from one or two walls, facing
+      away from the player or their wall, drop without their support and break under
+      pistons; they ring only when struck on a side they swing to and below their beam,
+      by redstone and by arrows, count the bell_ring statistic, send villagers within 32
+      blocks home for a while and make raiders within 48 glow when one is within 32.
+      Cocoa grows a stage 20% of random ticks, takes bone meal, drops 3 beans ripe and
+      1 before, and bursts under flowing water and pistons. Hanging signs under a full
+      face hang on straight chains turning in four steps, under something narrow (or
+      when sneaking) on meeting chains in sixteen; they drop with nothing above, while
+      wall ones need a full face to be put up, stick out facing along the wall and keep
+      their bracket after. Walls rise only under a full face or a wall running the same
+      way and keep a post only under `#wall_post_override`; crafters (`world/crafter.rs`)
+      craft on a pulse with switched-off slots, comparators and hoppers.
 - [x] Mining speed from block hardness and tool speed, with server validation
 - [x] Tool durability and breaking (damage component on the network and on disk)
 - [x] Server-side click simulation: shift-click (including crafting many at once),

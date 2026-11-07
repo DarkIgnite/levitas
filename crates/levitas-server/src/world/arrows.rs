@@ -182,6 +182,7 @@ impl World {
                     self.arrows.insert(id, arrow);
                 }
                 Some(Hit::Block) => {
+                    self.projectile_rings_bell(arrow.pos, arrow.vel);
                     arrow.stuck = Some(0);
                     arrow.vel = [0.0; 3];
                     let sound = if arrow.trident.is_some() {

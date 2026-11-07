@@ -48,6 +48,9 @@ pub fn instrument(below: u16) -> &'static str {
     }
 }
 
+/// How long villagers hide after a bell rings.
+const BELL_ALARM_TICKS: u64 = 300;
+
 impl World {
     pub(super) fn block_event(&mut self, pos: BlockPos, state: u16, action: u8, param: u8) {
         self.broadcast(
@@ -105,6 +108,107 @@ impl World {
         let state = self.block(pos);
         self.block_event(pos, state, BELL_RING, from.face() as u8);
         self.play_sound("minecraft:block.bell.use", pos, None);
+        // Villagers within 32 blocks run home for a while.
+        let until = self.tick + BELL_ALARM_TICKS;
+        self.bell_alarms.retain(|&(p, _)| p != pos);
+        self.bell_alarms.push((pos, until));
+        // A raider within 32 blocks shows every raider within 48 for three seconds.
+        let centre = [
+            f64::from(pos.x) + 0.5,
+            f64::from(pos.y) + 0.5,
+            f64::from(pos.z) + 0.5,
+        ];
+        let dist = |p: [f64; 3]| {
+            ((p[0] - centre[0]).powi(2) + (p[1] - centre[1]).powi(2) + (p[2] - centre[2]).powi(2))
+                .sqrt()
+        };
+        let raider_near = self
+            .mobs
+            .values()
+            .any(|m| m.alive() && m.kind.is_raider() && dist(m.pos) <= 32.0);
+        if raider_near {
+            let shown: Vec<i32> = self
+                .mobs
+                .iter()
+                .filter(|(_, m)| m.alive() && m.kind.is_raider() && dist(m.pos) <= 48.0)
+                .map(|(&id, _)| id)
+                .collect();
+            for id in shown {
+                self.add_mob_effect(
+                    id,
+                    levitas_registry::Effect {
+                        id: levitas_registry::mob_effect::GLOWING,
+                        duration: 60,
+                        amplifier: 0,
+                    },
+                );
+            }
+            self.play_sound("minecraft:block.bell.resonate", pos, None);
+        }
+    }
+
+    /// A player uses a bell: it rings only when struck on a side it swings to (the
+    /// faces across a floor or ceiling bell, along a wall bell), below its beam.
+    /// Returns whether the block was a bell.
+    pub(super) fn use_bell(
+        &mut self,
+        id: i32,
+        pos: BlockPos,
+        state: u16,
+        face: Dir,
+        cursor_y: f32,
+    ) -> bool {
+        if blocks::name(state) != "minecraft:bell" {
+            return false;
+        }
+        let facing = blocks::facing(state).unwrap_or(Dir::North);
+        let wall = matches!(
+            prop(state, "attachment"),
+            Some("single_wall" | "double_wall")
+        );
+        let side = face.is_horizontal()
+            && if wall {
+                face.axis() != facing.axis()
+            } else {
+                face.axis() == facing.axis()
+            };
+        if !side || cursor_y > 0.8124 {
+            return false;
+        }
+        self.ring_bell(pos, face);
+        self.stat(
+            id,
+            levitas_registry::stat_type::CUSTOM,
+            levitas_registry::custom_stat::BELL_RING,
+            1,
+        );
+        true
+    }
+
+    /// A projectile striking a bell rings it.
+    pub(super) fn projectile_rings_bell(&mut self, at: [f64; 3], vel: [f64; 3]) {
+        let ahead = [0, 1, 2].map(|i| at[i] + vel[i] * 0.1);
+        let pos = BlockPos::new(
+            ahead[0].floor() as i32,
+            ahead[1].floor() as i32,
+            ahead[2].floor() as i32,
+        );
+        if self
+            .loaded_state(pos)
+            .is_some_and(|s| blocks::name(s) == "minecraft:bell")
+        {
+            let from = Dir::from_yaw((-vel[0]).atan2(vel[2]).to_degrees() as f32).opposite();
+            self.ring_bell(pos, from);
+        }
+    }
+
+    /// Whether a bell rang near `pos` lately: villagers there hide at home.
+    pub(super) fn bell_alarm_near(&self, pos: [f64; 3]) -> bool {
+        let now = self.tick;
+        self.bell_alarms.iter().any(|&(b, until)| {
+            until > now
+                && (f64::from(b.x) + 0.5 - pos[0]).hypot(f64::from(b.z) + 0.5 - pos[2]) <= 32.0
+        })
     }
 
     pub(super) fn react_bell(&mut self, pos: BlockPos, state: u16) {

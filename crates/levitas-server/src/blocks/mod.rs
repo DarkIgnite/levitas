@@ -273,6 +273,29 @@ pub fn can_survive(state: u16, pos: BlockPos, get: &mut impl FnMut(BlockPos) -> 
         }
     }
 
+    // A ceiling hanging sign needs something above it; a wall one carries its own
+    // bracket and stays.
+    if block_has_tag(state, "minecraft:ceiling_hanging_signs") {
+        let above = get(offset(pos, Dir::Up));
+        return !collision_boxes(above).is_empty()
+            || block_has_tag(above, "minecraft:all_hanging_signs");
+    }
+    if block_has_tag(state, "minecraft:wall_hanging_signs") {
+        return true;
+    }
+    // A bell stands on a floor, hangs from a ceiling or from one or two walls.
+    if n == "minecraft:bell" {
+        let facing = facing(state).unwrap_or(Dir::North);
+        let wall = |get: &mut dyn FnMut(BlockPos) -> u16, d: Dir| {
+            sturdy(get(offset(pos, d)), d.opposite())
+        };
+        return match prop(state, "attachment") {
+            Some("ceiling") => sturdy(get(offset(pos, Dir::Up)), Dir::Down),
+            Some("single_wall") => wall(get, facing.opposite()),
+            Some("double_wall") => wall(get, facing.opposite()) && wall(get, facing),
+            _ => sturdy(below(get), Dir::Up),
+        };
+    }
     // Attached to the face of a neighbour.
     if let Some(face) = prop(state, "face") {
         let facing = facing(state).unwrap_or(Dir::North);
@@ -381,7 +404,6 @@ pub fn can_survive(state: u16, pos: BlockPos, get: &mut impl FnMut(BlockPos) -> 
         || n == "minecraft:repeater"
         || n == "minecraft:comparator"
         || n == "minecraft:note_block"
-        || n == "minecraft:bell"
         || n == "minecraft:daylight_detector"
         || n == "minecraft:comparator"
         || n == "minecraft:snow"

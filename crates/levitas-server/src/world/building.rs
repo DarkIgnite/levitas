@@ -49,6 +49,9 @@ impl World {
         // Using a container or a door works unless sneaking with something in hand.
         let clicked = self.block(pos);
         let may_use = hand == 0 && !(sneaking && !stack.is_empty());
+        if hand == 0 && self.use_bell(id, pos, clicked, face, cursor[1]) {
+            return self.ack(id, sequence);
+        }
         if may_use
             && (self.use_sign(id, slot, pos, clicked)
                 || self.open_container(id, pos, clicked)
@@ -192,11 +195,6 @@ impl World {
         }
         if name == "minecraft:note_block" {
             self.tune_note_block(pos, state);
-            return true;
-        }
-        if name == "minecraft:bell" {
-            let from = Dir::from_yaw(self.players[&id].yaw);
-            self.ring_bell(pos, from);
             return true;
         }
         if name == "minecraft:daylight_detector" {

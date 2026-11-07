@@ -50,7 +50,6 @@ fn holds_things(state: u16) -> bool {
         "lectern",
         "brewing_stand",
         "campfire",
-        "bell",
         "conduit",
         "beehive",
         "bee_nest",
@@ -91,6 +90,8 @@ pub fn reaction(state: u16) -> Reaction {
         || super::is_door(state)
         || super::is_bed(state)
         || n.ends_with("shulker_box")
+        || n == "minecraft:bell"
+        || n == "minecraft:cocoa"
     {
         return Reaction::Destroy;
     }

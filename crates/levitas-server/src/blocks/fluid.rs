@@ -163,6 +163,10 @@ pub fn can_hold_fluid(state: u16) -> bool {
                 | "minecraft:end_gateway"
                 | "minecraft:structure_void"
         );
+    // Cocoa pods burst when water flows into them, though they have a hitbox.
+    if block == "minecraft:cocoa" {
+        return true;
+    }
     !keeps_out && prop(state, "waterlogged").is_none() && collision_boxes(state).is_empty()
 }
 

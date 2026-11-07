@@ -78,6 +78,34 @@ pub fn wall_variant(block_state: u16) -> Option<u16> {
 
 /// The blocks to set for placing `block_state` (an item's default block), or `None` if it
 /// cannot be placed there.
+/// How a bell hangs, by the face it is put against: standing on a floor, hanging from
+/// a ceiling, or from a wall (two walls when there is one on the far side too). It
+/// faces away from the player, or away from its wall.
+fn bell_attachment(
+    state: u16,
+    ctx: &PlaceContext,
+    target: BlockPos,
+    get: &mut impl FnMut(BlockPos) -> u16,
+) -> Option<u16> {
+    let away = Dir::from_yaw(ctx.yaw).opposite();
+    let (attachment, facing) = match ctx.face {
+        Dir::Up => ("floor", away),
+        Dir::Down => ("ceiling", away),
+        side => {
+            let far = get(offset(target, side));
+            let both = sturdy(far, side.opposite());
+            (if both { "double_wall" } else { "single_wall" }, side)
+        }
+    };
+    let state = with(
+        with(state, "attachment", attachment),
+        "facing",
+        facing.name(),
+    );
+    let mut view = |p: BlockPos| get(p);
+    can_survive(state, target, &mut view).then_some(state)
+}
+
 pub fn place(
     block_state: u16,
     ctx: &PlaceContext,
@@ -104,6 +132,39 @@ pub fn place(
 
     let mut state = choose_variant(block_state, ctx)?;
     state = orient(state, ctx, target, existing, get)?;
+    if name(state) == "minecraft:bell" {
+        state = bell_attachment(state, ctx, target, get)?;
+    }
+    if block_has_tag(state, "minecraft:ceiling_hanging_signs") {
+        // Under something narrow (a chain, a fence) or when sneaking, the chains meet
+        // in a point and the sign turns in sixteen steps; under a full face they hang
+        // straight and it turns in four.
+        let above = get(offset(target, Dir::Up));
+        let attached = ctx.sneaking || !sturdy(above, Dir::Down);
+        state = with_bool(state, "attached", attached);
+        if !attached {
+            let r: i32 = prop(state, "rotation")
+                .and_then(|r| r.parse().ok())
+                .unwrap_or(0);
+            let snapped = ((r + 2) / 4 * 4).rem_euclid(16);
+            state = with(state, "rotation", &snapped.to_string());
+        }
+    }
+    if block_has_tag(state, "minecraft:wall_hanging_signs") {
+        // Its bracket goes on the side of a full block.
+        if !sturdy(get(ctx.clicked), ctx.face) {
+            return None;
+        }
+        // It sticks out from the wall, its faces along the wall, facing away from
+        // the player.
+        let look = Dir::from_yaw(ctx.yaw);
+        let along = if look.axis() == ctx.face.axis() {
+            ctx.face.clockwise()
+        } else {
+            look.opposite()
+        };
+        state = with(state, "facing", along.name());
+    }
     // Leaves a player places never decay.
     if prop(state, "persistent").is_some() && block_has_tag(state, "minecraft:leaves") {
         state = with_bool(state, "persistent", true);

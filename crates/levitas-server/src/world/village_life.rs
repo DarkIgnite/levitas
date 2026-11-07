@@ -196,7 +196,12 @@ impl World {
         if v.wandering || mob.kind != MobKind::Villager {
             return;
         }
-        let act = activity(self.day_time, mob.age < 0);
+        let mut act = activity(self.day_time, mob.age < 0);
+        // A bell rang: hide at home (asleep only if it is night anyway).
+        let hiding = self.bell_alarm_near(mob.pos);
+        if hiding {
+            act = Activity::Rest;
+        }
         let tick = self.tick + u64::from(id.unsigned_abs());
 
         // Asleep: stays put until morning, or until something wakes it.
@@ -225,8 +230,14 @@ impl World {
         match act {
             Activity::Rest => {
                 if let Some(home) = v.home {
+                    let night = activity(self.day_time, mob.age < 0) == Activity::Rest;
                     if centre_distance(mob.pos, home) <= BED_REACH {
-                        self.sleep_villager(id, mob, home);
+                        if night {
+                            self.sleep_villager(id, mob, home);
+                        } else {
+                            mob.target = None;
+                            mob.path.clear();
+                        }
                     } else {
                         self.follow_path(mob, home);
                     }
@@ -692,5 +703,47 @@ mod tests {
         for id in ids {
             assert_eq!(w.mobs[&id].villager.as_ref().unwrap().food(), 0);
         }
+    }
+
+    #[test]
+    fn bells_ring_from_their_sides_and_send_villagers_home() {
+        let mut w = world();
+        let pos = BlockPos::new(5, -60, 5);
+        // A floor bell facing north swings along north-south.
+        let bell = blocks::with(
+            blocks::with(state("minecraft:bell"), "attachment", "floor"),
+            "facing",
+            "north",
+        );
+        w.set_block(pos, bell);
+        let (out, frames) = tokio::sync::mpsc::channel(100_000);
+        std::mem::forget(frames);
+        let id = next_entity_id();
+        let profile = crate::connection::Profile {
+            name: "Ringer".to_owned(),
+            uuid: 11,
+            properties: Vec::new(),
+        };
+        w.players
+            .insert(id, Player::new(profile, out, [5.5, -60.0, 3.5]));
+        assert!(
+            !w.use_bell(id, pos, bell, Dir::East, 0.5),
+            "not from the side it does not swing to"
+        );
+        assert!(
+            !w.use_bell(id, pos, bell, Dir::North, 0.9),
+            "not on its beam"
+        );
+        let pillager = next_entity_id();
+        w.mobs.insert(
+            pillager,
+            Mob::new(MobKind::Pillager, [20.5, -60.0, 5.5], &mut w.rng),
+        );
+        assert!(w.use_bell(id, pos, bell, Dir::North, 0.5));
+        assert!(w.bell_alarm_near([10.0, -60.0, 10.0]));
+        assert!(!w.bell_alarm_near([60.0, -60.0, 60.0]));
+        assert!(w.mobs[&pillager]
+            .effect(levitas_registry::mob_effect::GLOWING)
+            .is_some());
     }
 }

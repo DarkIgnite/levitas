@@ -44,7 +44,7 @@ what is missing in each one.
 |---|---|---|
 | 0. Migration to Minecraft 26.3 | 100% | `██████████` |
 | 1. Persistence (saving worlds, players, chunks) | 80% | `████████░░` |
-| 2. Blocks behave correctly | 96% | `█████████▌` |
+| 2. Blocks behave correctly | 100% | `██████████` |
 | 3. Fluids, gravity and light | 80% | `████████░░` |
 | 4. Combat and basic entities | 100% | `██████████` |
 | 5. Mobs | 78% | `███████▊░░` |
@@ -57,7 +57,7 @@ what is missing in each one.
 | 12. World generation | 100% | `██████████` |
 | 13. Plugins and economy | 0% | `░░░░░░░░░░` |
 | Infrastructure (CI, parallel ticking, benchmarks) | 33% | `███▎░░░░░░` |
-| **Overall** | **~83%** | `████████▎░` |
+| **Overall** | **~83%** | `████████▍░` |
 
 ## What works today
 
