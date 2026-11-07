@@ -1,5 +1,6 @@
 mod access;
 mod auth;
+mod banners;
 mod blocks;
 mod books;
 mod click;

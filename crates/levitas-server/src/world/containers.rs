@@ -41,6 +41,14 @@ pub enum BlockEntity {
     Jukebox(Box<super::jukebox::Jukebox>),
     Crafter(Box<super::crafter::Crafter>),
     Lectern(Box<super::lectern::Lectern>),
+    Banner(Box<Banner>),
+}
+
+/// A banner's block entity: its layers.
+#[derive(Default)]
+pub struct Banner {
+    pub patterns: Option<u32>,
+    viewers: HashSet<i32>,
 }
 
 pub struct Plain {
@@ -113,6 +121,7 @@ impl BlockEntity {
             BlockEntity::Jukebox(_) => ("minecraft:jukebox", &[][..]),
             BlockEntity::Crafter(c) => ("minecraft:crafter", &c.items[..]),
             BlockEntity::Lectern(_) => ("minecraft:lectern", &[][..]),
+            BlockEntity::Banner(_) => ("minecraft:banner", &[][..]),
         };
         let mut nbt = Compound::new()
             .with("id", id)
@@ -129,6 +138,7 @@ impl BlockEntity {
                 | BlockEntity::Pot(_)
                 | BlockEntity::Jukebox(_)
                 | BlockEntity::Lectern(_)
+                | BlockEntity::Banner(_)
         ) {
             nbt.insert("Items", items_to_nbt(items.iter().copied().enumerate()));
         }
@@ -176,6 +186,11 @@ impl BlockEntity {
         if let BlockEntity::Lectern(l) = self {
             l.write_nbt(&mut nbt);
         }
+        if let BlockEntity::Banner(b) = self {
+            if b.patterns.is_some() {
+                nbt.insert("patterns", crate::banners::to_nbt(b.patterns));
+            }
+        }
         nbt
     }
 
@@ -189,6 +204,9 @@ impl BlockEntity {
             BlockEntity::Conduit(c) => Some(c.network_data()),
             BlockEntity::Brushable(b) => Some(b.network_data()),
             BlockEntity::Pot(p) => Some(p.network_data()),
+            BlockEntity::Banner(b) => {
+                Some(Compound::new().with("patterns", crate::banners::to_nbt(b.patterns)))
+            }
             _ => None,
         }
     }
@@ -235,6 +253,10 @@ impl BlockEntity {
             "minecraft:lectern" => {
                 BlockEntity::Lectern(Box::new(super::lectern::Lectern::read_nbt(nbt)))
             }
+            "minecraft:banner" => BlockEntity::Banner(Box::new(Banner {
+                patterns: nbt.list("patterns").and_then(crate::banners::from_nbt),
+                viewers: HashSet::new(),
+            })),
             id @ ("minecraft:sign" | "minecraft:hanging_sign") => BlockEntity::Sign(Box::new(
                 super::signs::Sign::read_nbt(id == "minecraft:hanging_sign", nbt),
             )),
@@ -322,6 +344,9 @@ impl BlockEntity {
             "minecraft:jukebox" => Some(BlockEntity::Jukebox(Box::default())),
             "minecraft:crafter" => Some(BlockEntity::Crafter(Box::default())),
             "minecraft:lectern" => Some(BlockEntity::Lectern(Box::default())),
+            n if crate::banners::banner_color(n).is_some() => {
+                Some(BlockEntity::Banner(Box::default()))
+            }
             _ => super::signs::sign_kind(state)
                 .map(|hanging| BlockEntity::Sign(Box::new(super::signs::Sign::new(hanging)))),
         }
@@ -348,6 +373,7 @@ impl BlockEntity {
             BlockEntity::Jukebox(_) => block_entity_type::JUKEBOX,
             BlockEntity::Crafter(_) => block_entity_type::CRAFTER,
             BlockEntity::Lectern(_) => block_entity_type::LECTERN,
+            BlockEntity::Banner(_) => block_entity_type::BANNER,
         }
     }
 
@@ -375,7 +401,8 @@ impl BlockEntity {
             | BlockEntity::Sign(_)
             | BlockEntity::Beacon(_)
             | BlockEntity::Conduit(_)
-            | BlockEntity::Brushable(_) => &[],
+            | BlockEntity::Brushable(_)
+            | BlockEntity::Banner(_) => &[],
         }
     }
 
@@ -394,7 +421,8 @@ impl BlockEntity {
             | BlockEntity::Sign(_)
             | BlockEntity::Beacon(_)
             | BlockEntity::Conduit(_)
-            | BlockEntity::Brushable(_) => &mut [],
+            | BlockEntity::Brushable(_)
+            | BlockEntity::Banner(_) => &mut [],
         }
     }
 
@@ -414,6 +442,7 @@ impl BlockEntity {
             BlockEntity::Jukebox(j) => &mut j.viewers,
             BlockEntity::Crafter(c) => &mut c.viewers,
             BlockEntity::Lectern(l) => &mut l.viewers,
+            BlockEntity::Banner(b) => &mut b.viewers,
         }
     }
 }
@@ -447,6 +476,8 @@ pub enum View {
     CartChest(i32, usize),
     /// A lectern's reading screen: the book's one slot, nothing of the player's.
     Lectern(BlockPos),
+    /// A loom: banner, dye and pattern item live in the window, with the result.
+    Loom(BlockPos),
 }
 
 impl View {
@@ -467,6 +498,7 @@ impl View {
             View::Beacon(_) => 1,
             View::CartChest(_, slots) => slots,
             View::Lectern(_) => 1,
+            View::Loom(_) => 4,
         }
     }
 
@@ -488,7 +520,8 @@ impl View {
             | View::Cartography(_)
             | View::Merchant(_)
             | View::CartChest(..)
-            | View::Lectern(_) => Vec::new(),
+            | View::Lectern(_)
+            | View::Loom(_) => Vec::new(),
         }
     }
 
@@ -510,6 +543,7 @@ impl View {
             View::Merchant(_) => click::Layout::Merchant,
             View::Cartography(_) => click::Layout::Cartography,
             View::Beacon(_) => click::Layout::Beacon,
+            View::Loom(_) => click::Layout::Loom,
         }
     }
 }
@@ -557,6 +591,7 @@ impl World {
                 "Cartography Table",
             ),
             "minecraft:beacon" => (View::Beacon(pos), menu::BEACON, "Beacon"),
+            "minecraft:loom" => (View::Loom(pos), menu::LOOM, "Loom"),
             "minecraft:brewing_stand" => (View::Brewing(pos), menu::BREWING_STAND, "Brewing Stand"),
             "minecraft:chest" | "minecraft:trapped_chest" => {
                 let partner = blocks::chest_partner(state, pos)
@@ -724,6 +759,10 @@ impl World {
                 let open = p.open.as_ref().expect("window is open");
                 open.grid[..1].to_vec()
             }
+            View::Loom(_) => {
+                let open = p.open.as_ref().expect("window is open");
+                open.grid[..4].to_vec()
+            }
             View::Lectern(_) => Vec::new(),
             View::CartChest(cart, _) => self
                 .carts
@@ -797,6 +836,11 @@ impl World {
                 let p = self.players.get_mut(&id).expect("player exists");
                 let open = p.open.as_mut().expect("window is open");
                 open.grid[..1].copy_from_slice(&slots[..1]);
+            }
+            View::Loom(_) => {
+                let p = self.players.get_mut(&id).expect("player exists");
+                let open = p.open.as_mut().expect("window is open");
+                open.grid[..4].copy_from_slice(&slots[..4]);
             }
             View::Lectern(_) => {}
             View::CartChest(cart, _) => {
@@ -1132,6 +1176,18 @@ impl World {
         match view {
             Some(View::Enchanting(_)) => self.enchant_button(id, window, button),
             Some(View::Lectern(pos)) => self.lectern_button(id, pos, button),
+            Some(View::Loom(_)) => {
+                let p = self.players.get_mut(&id).expect("player exists");
+                let open = p.open.as_mut().expect("window is open");
+                let Ok(choice) = usize::try_from(button) else {
+                    return;
+                };
+                open.choice = Some(choice);
+                let g = open.grid;
+                open.grid[3] = crate::banners::loom_result(g[0], g[1], g[2], Some(choice));
+                let update = p.inventory.window_slot_packet(window, 3, open.grid[3]);
+                self.send(id, update);
+            }
             Some(View::Stonecutter(_)) => {
                 let p = self.players.get_mut(&id).expect("player exists");
                 let open = p.open.as_mut().expect("window is open");
@@ -1259,6 +1315,7 @@ impl World {
                 returned.extend(&open.grid[..2])
             }
             View::Stonecutter(_) => returned.push(open.grid[0]),
+            View::Loom(_) => returned.extend(&open.grid[..3]),
             View::Smithing(_) => returned.extend(&open.grid[..3]),
             View::Merchant(target) => {
                 returned.extend(&open.grid[..2]);

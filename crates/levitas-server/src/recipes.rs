@@ -106,6 +106,8 @@ pub struct Recipes {
     pot_sides: Option<Ingredient>,
     /// What a written book is copied onto (books and quills).
     book_cloning: Option<Ingredient>,
+    banner_copying: bool,
+    shield_decoration: bool,
     dyeing: Vec<Dyeing>,
     imbue: Vec<Imbue>,
     /// Whether two worn items of a kind can be combined in the grid
@@ -127,6 +129,8 @@ impl Recipes {
             map_extending: None,
             pot_sides: None,
             book_cloning: None,
+            banner_copying: false,
+            shield_decoration: false,
             dyeing: Vec::new(),
             imbue: Vec::new(),
             repair: false,
@@ -190,6 +194,8 @@ impl Recipes {
                     ingredient(&recipe["material"])?,
                 ));
             }
+            "minecraft:crafting_special_bannerduplicate" => self.banner_copying = true,
+            "minecraft:crafting_special_shielddecoration" => self.shield_decoration = true,
             "minecraft:crafting_special_bookcloning" => {
                 self.book_cloning = Some(ingredient(&recipe["material"])?);
             }
@@ -340,6 +346,39 @@ impl Recipes {
                     map_post: Some(crate::inventory::MAP_SCALE),
                     ..centre
                 };
+            }
+        }
+        if let [a, b] = stacks[..] {
+            let banner = |s: &Stack| {
+                ItemInfo::get(s.item)
+                    .is_some_and(|i| crate::banners::banner_color(i.name).is_some())
+            };
+            // Banner copying: a blank banner takes the layers of one of its colour.
+            if self.banner_copying && a.item == b.item && banner(&a) {
+                let (patterned, blank) = if a.patterns.is_some() { (a, b) } else { (b, a) };
+                if patterned.patterns.is_some() && blank.patterns.is_none() {
+                    return Stack {
+                        count: 1,
+                        ..patterned
+                    };
+                }
+            }
+            // Shield decoration: a plain shield takes a banner's colour and layers.
+            if self.shield_decoration {
+                for (shield, flag) in [(a, b), (b, a)] {
+                    let is_shield =
+                        ItemInfo::get(shield.item).is_some_and(|i| i.name == "minecraft:shield");
+                    let color =
+                        ItemInfo::get(flag.item).and_then(|i| crate::banners::banner_color(i.name));
+                    if let (true, Some(color), None) = (is_shield, color, shield.base_color) {
+                        return Stack {
+                            count: 1,
+                            base_color: Some(color),
+                            patterns: flag.patterns,
+                            ..shield
+                        };
+                    }
+                }
             }
         }
         // Book cloning: a written book (not a copy of a copy) and up to eight books and

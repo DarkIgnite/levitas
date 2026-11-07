@@ -424,6 +424,18 @@ impl World {
         Some(stack)
     }
 
+    /// A banner with layers drops keeping them.
+    pub(super) fn banner_item(&self, pos: BlockPos, state: u16) -> Option<Stack> {
+        let Some(BlockEntity::Banner(b)) = self.block_entities.get(&pos) else {
+            return None;
+        };
+        b.patterns?;
+        let name = blocks::name(state).replace("_wall_banner", "_banner");
+        let mut stack = Stack::new(ItemInfo::id_of(&name)?, 1);
+        stack.patterns = b.patterns;
+        Some(stack)
+    }
+
     /// Breaking a decorated pot with something that shatters it (a sword, axe, ...)
     /// drops its four sides instead of the pot. Returns the sherds to drop, if so.
     pub(super) fn pot_shards(&self, pos: BlockPos, tool: i32) -> Option<Vec<Stack>> {

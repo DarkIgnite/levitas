@@ -113,6 +113,14 @@ fn main() {
     embed_json_dir(
         &data,
         &out_dir,
+        "tags/banner_pattern",
+        "BANNER_PATTERN_TAGS_JSON",
+        "Banner pattern tags as JSON, in their files' order (the loom lists them so).",
+        &mut out,
+    );
+    embed_json_dir(
+        &data,
+        &out_dir,
         "jukebox_song",
         "JUKEBOX_SONGS_JSON",
         "Jukebox songs as JSON: length, comparator output and sound.",

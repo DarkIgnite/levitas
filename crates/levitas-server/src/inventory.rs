@@ -66,6 +66,10 @@ pub struct Stack {
     pub sherds: Option<[i32; 4]>,
     /// A book's pages (and title), by handle in the book store (`crate::books`).
     pub book: Option<u32>,
+    /// A banner's (or shield's) layers, by handle in `crate::banners`.
+    pub patterns: Option<u32>,
+    /// A shield's banner colour (`minecraft:base_color`).
+    pub base_color: Option<u8>,
 }
 
 /// What a crossbow is loaded with: an arrow (tipped with a potion, perhaps), as many
@@ -307,6 +311,8 @@ impl Stack {
         charged: None,
         sherds: None,
         book: None,
+        patterns: None,
+        base_color: None,
     };
 
     pub fn new(item: i32, count: i32) -> Self {
@@ -351,6 +357,8 @@ impl Stack {
             && self.charged == other.charged
             && self.sherds == other.sherds
             && self.book == other.book
+            && self.patterns == other.patterns
+            && self.base_color == other.base_color
     }
 
     pub fn is_empty(&self) -> bool {
@@ -437,6 +445,18 @@ impl Stack {
         }
         if let Some(amp) = self.ominous {
             components.insert("minecraft:ominous_bottle_amplifier", i32::from(amp));
+        }
+        if self.patterns.is_some() {
+            components.insert(
+                "minecraft:banner_patterns",
+                crate::banners::to_nbt(self.patterns),
+            );
+        }
+        if let Some(c) = self.base_color {
+            components.insert(
+                "minecraft:base_color",
+                crate::banners::COLORS[usize::from(c) % 16],
+            );
         }
         if let Some(book) = self.book {
             let contents = crate::books::get(book);
@@ -589,6 +609,12 @@ impl Stack {
                         .position(|&n| n == name)?;
                     Some((id as u8, e.int("duration").unwrap_or(160) as i32))
                 }),
+            patterns: components
+                .and_then(|c| c.list("minecraft:banner_patterns"))
+                .and_then(crate::banners::from_nbt),
+            base_color: components
+                .and_then(|c| c.str("minecraft:base_color"))
+                .and_then(crate::banners::color_index),
             book: components.and_then(|c| {
                 let (content, written) = match c.compound("minecraft:written_book_content") {
                     Some(w) => (w, true),
@@ -685,6 +711,8 @@ fn write_components(packet: Writer, stack: &Stack) -> Writer {
     let loaded = stack.charged.is_some();
     let decorated = stack.sherds.is_some();
     let booked = stack.book.is_some();
+    let patterned = stack.patterns.is_some();
+    let based = stack.base_color.is_some();
     let added = i32::from(damaged)
         + i32::from(processing)
         + i32::from(dyed)
@@ -701,7 +729,9 @@ fn write_components(packet: Writer, stack: &Stack) -> Writer {
         + i32::from(horned)
         + i32::from(loaded)
         + i32::from(decorated)
-        + i32::from(booked);
+        + i32::from(booked)
+        + i32::from(patterned)
+        + i32::from(based);
     let mut packet = packet.varint(added).varint(0);
     if damaged {
         packet = packet.varint(component::DAMAGE).varint(stack.damage);
@@ -779,6 +809,12 @@ fn write_components(packet: Writer, stack: &Stack) -> Writer {
         packet = packet
             .varint(component::OMINOUS_BOTTLE_AMPLIFIER)
             .varint(i32::from(amp));
+    }
+    if stack.patterns.is_some() {
+        packet = crate::banners::write(packet.varint(component::BANNER_PATTERNS), stack.patterns);
+    }
+    if let Some(c) = stack.base_color {
+        packet = packet.varint(component::BASE_COLOR).varint(i32::from(c));
     }
     if let Some(book) = stack.book {
         let written = stack.is_written_book();

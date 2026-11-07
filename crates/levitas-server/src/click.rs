@@ -62,6 +62,8 @@ pub enum Layout {
     Cartography,
     /// A beacon: one payment slot, then main inventory and hotbar.
     Beacon,
+    /// A loom: banner, dye, pattern item, result, then main inventory and hotbar.
+    Loom,
 }
 
 /// A trade as the trading screen offers it.
@@ -115,6 +117,7 @@ impl Layout {
             Layout::Brewing => 5,
             Layout::Merchant | Layout::Cartography => 3,
             Layout::Beacon => 1,
+            Layout::Loom => 4,
         }
     }
 
@@ -143,6 +146,7 @@ impl Layout {
             Layout::Stonecutter => Some(1),
             Layout::Smithing => Some(3),
             Layout::Merchant => Some(2),
+            Layout::Loom => Some(3),
             _ => None,
         }
     }
@@ -180,6 +184,12 @@ impl Layout {
             Layout::Furnace(_) if slot == 1 => fuel_ticks(stack.item) > 0 || is_bucket(stack),
             Layout::Enchanting if slot == 1 => is_lapis(stack),
             Layout::Beacon if slot == 0 => is_beacon_payment(stack),
+            Layout::Loom => match slot {
+                0 => is_banner(stack),
+                1 => crate::banners::dye_color(stack.item).is_some(),
+                2 => is_pattern_item(stack),
+                _ => true,
+            },
             Layout::Brewing => match slot {
                 0..=2 => potions::is_potion(*stack) || is_glass_bottle(stack),
                 3 => potions::is_ingredient(*stack),
@@ -254,6 +264,14 @@ fn is_blaze_powder(stack: &Stack) -> bool {
 }
 
 /// What a crafting ingredient leaves behind in the grid (a bucket from milk, ...).
+fn is_banner(stack: &Stack) -> bool {
+    ItemInfo::get(stack.item).is_some_and(|i| crate::banners::banner_color(i.name).is_some())
+}
+
+fn is_pattern_item(stack: &Stack) -> bool {
+    ItemInfo::get(stack.item).is_some_and(|i| i.name.ends_with("_banner_pattern"))
+}
+
 pub(crate) fn crafting_remainder(item: i32) -> Option<i32> {
     let remainder = match ItemInfo::get(item)?.name {
         "minecraft:milk_bucket"
@@ -391,6 +409,9 @@ fn refresh_result(w: &mut Window) {
                 _ => Stack::EMPTY,
             };
         }
+        Layout::Loom => {
+            w.slots[3] = crate::banners::loom_result(w.slots[0], w.slots[1], w.slots[2], w.choice);
+        }
         Layout::Cartography => {
             let state = w.slots[0].map_id.and_then(|id| w.maps.get(&id).copied());
             w.slots[2] = cartography_recipe(w.slots[0], w.slots[1], state);
@@ -496,6 +517,18 @@ fn take_result(w: &mut Window) -> Stack {
             refresh_result(w);
             return result;
         }
+        Layout::Loom => {
+            let result = w.slots[3];
+            if result.is_empty() {
+                return Stack::EMPTY;
+            }
+            // The banner and the dye are used; the pattern item stays.
+            for s in 0..2 {
+                w.slots[s] = w.slots[s].with_count(w.slots[s].count - 1);
+            }
+            refresh_result(w);
+            return result;
+        }
         Layout::Stonecutter => {
             let result = w.slots[1];
             if result.is_empty() {
@@ -550,6 +583,9 @@ fn take_result(w: &mut Window) -> Stack {
         }
         // Book cloning leaves the original book in the grid.
         if s.is_written_book() && result.is_written_book() {
+            continue;
+        }
+        if s.patterns.is_some() && s.patterns == result.patterns && s.item == result.item {
             continue;
         }
         w.slots[i] = match crafting_remainder(s.item) {
@@ -808,6 +844,26 @@ fn quick_move(w: &mut Window, s: usize) {
                 move_into(w, stack, 1..2, false)
             } else if w.slots[0].is_empty() {
                 move_into(w, stack, 0..1, false)
+            } else if main.contains(&s) {
+                move_into(w, stack, hotbar, false)
+            } else {
+                move_into(w, stack, main, false)
+            }
+        }
+        Layout::Loom => {
+            let target = if is_banner(&stack) {
+                Some(0)
+            } else if crate::banners::dye_color(stack.item).is_some() {
+                Some(1)
+            } else if is_pattern_item(&stack) {
+                Some(2)
+            } else {
+                None
+            };
+            if !in_player {
+                move_into(w, stack, player, true)
+            } else if let Some(t) = target {
+                move_into(w, stack, t..t + 1, false)
             } else if main.contains(&s) {
                 move_into(w, stack, hotbar, false)
             } else {

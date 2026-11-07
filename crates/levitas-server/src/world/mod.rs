@@ -14,6 +14,7 @@ mod breeding;
 mod brewing;
 mod building;
 mod campfire;
+mod cauldron;
 mod clouds;
 mod combat;
 mod commands;
@@ -1526,7 +1527,7 @@ impl World {
             .map_or(0, |p| p.inventory.held(p.held).item);
         let shards = self.pot_shards(pos, held);
         let whole_pot = if shards.is_none() {
-            self.pot_item(pos)
+            self.pot_item(pos).or_else(|| self.banner_item(pos, state))
         } else {
             None
         };

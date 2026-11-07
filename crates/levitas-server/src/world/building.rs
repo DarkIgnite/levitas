@@ -57,6 +57,7 @@ impl World {
                 || self.use_decorated_pot(id, slot, pos, clicked)
                 || self.use_jukebox(id, slot, pos, clicked)
                 || self.use_lectern(id, slot, pos, clicked)
+                || self.use_cauldron(id, slot, pos, clicked)
                 || self.use_flower_pot(id, slot, pos, clicked))
         {
             return self.ack(id, sequence);
@@ -95,6 +96,9 @@ impl World {
                                 (&mut entity, stack.sherds)
                             {
                                 pot.sherds = sides;
+                            }
+                            if let BlockEntity::Banner(banner) = &mut entity {
+                                banner.patterns = stack.patterns;
                             }
                             self.block_entities.insert(q, entity);
                         }
