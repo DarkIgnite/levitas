@@ -610,6 +610,31 @@ impl World {
         self.send(id, super::player_data(id, &self.players[&id]));
     }
 
+    /// The player opens their elytra: they glide while it is worn and they are off
+    /// the ground, which others see.
+    pub(super) fn start_gliding(&mut self, id: i32) {
+        let Some(p) = self.players.get_mut(&id) else {
+            return;
+        };
+        let elytra = p.inventory.slots[6].is_named("minecraft:elytra")
+            && ItemInfo::get(p.inventory.slots[6].item)
+                .is_some_and(|i| p.inventory.slots[6].damage < i.max_damage - 1);
+        if !elytra || p.on_ground || !p.alive {
+            return;
+        }
+        p.gliding = true;
+        let flags = 0x80 | if p.sneaking { 0x02 } else { 0 } | if p.sprinting { 0x08 } else { 0 };
+        self.broadcast(
+            Writer::packet(clientbound::SET_ENTITY_DATA)
+                .varint(id)
+                .u8(0)
+                .varint(0)
+                .u8(flags)
+                .u8(0xFF),
+            Some(id),
+        );
+    }
+
     /// Chorus fruit: the eater goes to a random spot within `diameter` blocks across
     /// where they can stand (ground under two free blocks), trying 16 times.
     pub(super) fn teleport_randomly(&mut self, id: i32, diameter: f64) {
@@ -748,6 +773,7 @@ impl World {
         if self.use_bucket(id, hand)
             || self.place_boat(id, hand)
             || self.fill_bottle(id, hand)
+            || self.boost_with_rocket(id, hand)
             || self.start_ranged(id, hand)
             || self.open_book(id, hand)
             || self.start_drawing(id, hand)

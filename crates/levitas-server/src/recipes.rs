@@ -108,6 +108,7 @@ pub struct Recipes {
     book_cloning: Option<Ingredient>,
     banner_copying: bool,
     shield_decoration: bool,
+    fireworks: bool,
     dyeing: Vec<Dyeing>,
     imbue: Vec<Imbue>,
     /// Whether two worn items of a kind can be combined in the grid
@@ -131,6 +132,7 @@ impl Recipes {
             book_cloning: None,
             banner_copying: false,
             shield_decoration: false,
+            fireworks: false,
             dyeing: Vec::new(),
             imbue: Vec::new(),
             repair: false,
@@ -195,6 +197,9 @@ impl Recipes {
                 ));
             }
             "minecraft:crafting_special_bannerduplicate" => self.banner_copying = true,
+            "minecraft:crafting_special_firework_rocket"
+            | "minecraft:crafting_special_firework_star"
+            | "minecraft:crafting_special_firework_star_fade" => self.fireworks = true,
             "minecraft:crafting_special_shielddecoration" => self.shield_decoration = true,
             "minecraft:crafting_special_bookcloning" => {
                 self.book_cloning = Some(ingredient(&recipe["material"])?);
@@ -346,6 +351,12 @@ impl Recipes {
                     map_post: Some(crate::inventory::MAP_SCALE),
                     ..centre
                 };
+            }
+        }
+        if self.fireworks {
+            let made = firework_recipe(&stacks);
+            if !made.is_empty() {
+                return made;
             }
         }
         if let [a, b] = stacks[..] {
@@ -803,6 +814,97 @@ pub fn fuel_ticks(item: i32) -> i32 {
 pub fn fuel_remainder(item: i32) -> Option<i32> {
     let name = ItemInfo::get(item)?.name;
     (name == "minecraft:lava_bucket").then(|| ItemInfo::id_of("minecraft:bucket"))?
+}
+
+/// The firework recipes: a rocket (paper, one to three gunpowder for its flight and
+/// any stars), a star (gunpowder, dyes and at most one each of a shape item, diamond
+/// for a trail and glowstone for twinkling) and a star's fade (a star and dyes).
+fn firework_recipe(stacks: &[Stack]) -> Stack {
+    use crate::fireworks::{self, Explosion, Firework};
+    let count = |name: &str| stacks.iter().filter(|s| s.is_named(name)).count();
+    let dyes: Vec<i32> = stacks
+        .iter()
+        .filter_map(|s| fireworks::dye(s.item))
+        .collect();
+    let stars: Vec<&Stack> = stacks
+        .iter()
+        .filter(|s| s.is_named("minecraft:firework_star"))
+        .collect();
+    let gunpowder = count("minecraft:gunpowder");
+    let item = |name: &str| ItemInfo::id_of(name).unwrap_or(0);
+    // A rocket.
+    if count("minecraft:paper") == 1
+        && (1..=3).contains(&gunpowder)
+        && 1 + gunpowder + stars.len() == stacks.len()
+    {
+        let explosions = stars
+            .iter()
+            .filter_map(|s| fireworks::get(s.firework).explosions.first().cloned())
+            .collect();
+        let mut rocket = Stack::new(item("minecraft:firework_rocket"), 3);
+        rocket.firework = fireworks::intern(Firework {
+            flight: gunpowder as u8,
+            explosions,
+        });
+        return rocket;
+    }
+    // A star's fade.
+    if let [star] = stars[..] {
+        if !dyes.is_empty() && dyes.len() + 1 == stacks.len() {
+            let mut f = fireworks::get(star.firework);
+            if let Some(e) = f.explosions.first_mut() {
+                e.fade = dyes;
+            } else {
+                return Stack::EMPTY;
+            }
+            return Stack {
+                count: 1,
+                firework: fireworks::intern(f),
+                ..*star
+            };
+        }
+        return Stack::EMPTY;
+    }
+    // A star.
+    if gunpowder != 1 || dyes.is_empty() {
+        return Stack::EMPTY;
+    }
+    let skull = |s: &Stack| {
+        ItemInfo::get(s.item)
+            .is_some_and(|i| i.name.ends_with("_skull") || i.name.ends_with("_head"))
+    };
+    let shapes: Vec<u8> = stacks
+        .iter()
+        .filter_map(|s| match ItemInfo::get(s.item).map_or("", |i| i.name) {
+            "minecraft:fire_charge" => Some(1),
+            "minecraft:gold_nugget" => Some(2),
+            "minecraft:feather" => Some(4),
+            _ if skull(s) => Some(3),
+            _ => None,
+        })
+        .collect();
+    let (trail, twinkle) = (
+        count("minecraft:diamond"),
+        count("minecraft:glowstone_dust"),
+    );
+    if shapes.len() > 1 || trail > 1 || twinkle > 1 {
+        return Stack::EMPTY;
+    }
+    if 1 + dyes.len() + shapes.len() + trail + twinkle != stacks.len() {
+        return Stack::EMPTY;
+    }
+    let mut star = Stack::new(item("minecraft:firework_star"), 1);
+    star.firework = fireworks::intern(Firework {
+        flight: 0,
+        explosions: vec![Explosion {
+            shape: shapes.first().copied().unwrap_or(0),
+            colors: dyes,
+            fade: Vec::new(),
+            trail: trail == 1,
+            twinkle: twinkle == 1,
+        }],
+    });
+    star
 }
 
 #[cfg(test)]

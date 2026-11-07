@@ -25,6 +25,7 @@ const PLAYER_COMMAND_LEAVE_BED: i32 = 0;
 const MAX_COMPONENTS: i32 = 64;
 const PLAYER_COMMAND_START_SPRINTING: i32 = 1;
 const PLAYER_COMMAND_STOP_SPRINTING: i32 = 2;
+const PLAYER_COMMAND_START_GLIDING: i32 = 6;
 
 pub async fn run(conn: Conn, profile: Profile, world: mpsc::Sender<Event>) -> io::Result<()> {
     let Conn {
@@ -408,6 +409,7 @@ fn decode(id: i32, packet: &[u8]) -> io::Result<Option<Event>> {
                     id,
                     sprinting: false,
                 },
+                PLAYER_COMMAND_START_GLIDING => Event::StartGliding { id },
                 _ => return Ok(None),
             }
         }

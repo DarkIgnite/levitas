@@ -27,8 +27,8 @@ const PLAYER_PART: std::ops::Range<usize> = 9..45;
 
 pub enum BlockEntity {
     Chest(Chest),
-    Furnace(Furnace),
-    Campfire(super::campfire::Campfire),
+    Furnace(Box<Furnace>),
+    Campfire(Box<super::campfire::Campfire>),
     /// A block entity holding nothing Levitas tracks (daylight detectors, bells).
     Plain(Plain),
     Spawner(super::spawners::Spawner),
@@ -311,15 +311,15 @@ impl BlockEntity {
             "minecraft:hopper" => store(block_entity_type::HOPPER, HOPPER_SLOTS),
             "minecraft:dropper" => store(block_entity_type::DROPPER, DISPENSER_SLOTS),
             "minecraft:dispenser" => store(block_entity_type::DISPENSER, DISPENSER_SLOTS),
-            "minecraft:furnace" => Some(BlockEntity::Furnace(Furnace::default())),
-            "minecraft:smoker" => Some(BlockEntity::Furnace(Furnace {
+            "minecraft:furnace" => Some(BlockEntity::Furnace(Box::default())),
+            "minecraft:smoker" => Some(BlockEntity::Furnace(Box::new(Furnace {
                 kind: Cooker::Smoker,
                 ..Furnace::default()
-            })),
-            "minecraft:blast_furnace" => Some(BlockEntity::Furnace(Furnace {
+            }))),
+            "minecraft:blast_furnace" => Some(BlockEntity::Furnace(Box::new(Furnace {
                 kind: Cooker::BlastFurnace,
                 ..Furnace::default()
-            })),
+            }))),
             "minecraft:bell" => Some(BlockEntity::Plain(Plain {
                 kind: block_entity_type::BELL,
                 viewers: HashSet::new(),
@@ -329,10 +329,10 @@ impl BlockEntity {
                 viewers: HashSet::new(),
             })),
             name @ ("minecraft:campfire" | "minecraft:soul_campfire") => {
-                Some(BlockEntity::Campfire(super::campfire::Campfire {
+                Some(BlockEntity::Campfire(Box::new(super::campfire::Campfire {
                     soul: name == "minecraft:soul_campfire",
                     ..Default::default()
-                }))
+                })))
             }
             "minecraft:brewing_stand" => Some(BlockEntity::Brewing(Box::default())),
             "minecraft:beacon" => Some(BlockEntity::Beacon(Box::default())),
@@ -1584,7 +1584,8 @@ mod tests {
         let mut furnace = Furnace::default();
         furnace.items[FURNACE_OUTPUT] = Stack::new(ingot, 3);
         furnace.experience = 2.1;
-        w.block_entities.insert(pos, BlockEntity::Furnace(furnace));
+        w.block_entities
+            .insert(pos, BlockEntity::Furnace(Box::new(furnace)));
         let view = View::Furnace(pos, Cooker::Furnace);
         let mut slots = w.window_slots(1, view);
         slots[FURNACE_OUTPUT] = Stack::EMPTY;

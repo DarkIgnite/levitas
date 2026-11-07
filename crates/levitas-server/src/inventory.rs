@@ -70,6 +70,9 @@ pub struct Stack {
     pub patterns: Option<u32>,
     /// A shield's banner colour (`minecraft:base_color`).
     pub base_color: Option<u8>,
+    /// A firework star's explosion or a rocket's flight and explosions, by handle in
+    /// `crate::fireworks`.
+    pub firework: Option<u32>,
 }
 
 /// What a crossbow is loaded with: an arrow (tipped with a potion, perhaps), as many
@@ -79,12 +82,15 @@ pub struct Charged {
     pub item: i32,
     pub count: u8,
     pub potion: Option<u8>,
+    /// A loaded firework rocket's contents.
+    pub firework: Option<u32>,
 }
 
 impl Charged {
     fn stack(self) -> Stack {
         let mut s = Stack::new(self.item, 1);
         s.potion = self.potion;
+        s.firework = self.firework;
         s
     }
 }
@@ -313,6 +319,7 @@ impl Stack {
         book: None,
         patterns: None,
         base_color: None,
+        firework: None,
     };
 
     pub fn new(item: i32, count: i32) -> Self {
@@ -321,6 +328,11 @@ impl Stack {
             count,
             ..Stack::EMPTY
         }
+    }
+
+    /// Whether this stack is of the item `name`.
+    pub fn is_named(&self, name: &str) -> bool {
+        ItemInfo::get(self.item).is_some_and(|i| i.name == name)
     }
 
     /// Whether this is a written (signed) book.
@@ -359,6 +371,7 @@ impl Stack {
             && self.book == other.book
             && self.patterns == other.patterns
             && self.base_color == other.base_color
+            && self.firework == other.firework
     }
 
     pub fn is_empty(&self) -> bool {
@@ -451,6 +464,17 @@ impl Stack {
                 "minecraft:banner_patterns",
                 crate::banners::to_nbt(self.patterns),
             );
+        }
+        if self.firework.is_some() {
+            let f = crate::fireworks::get(self.firework);
+            if self.is_named("minecraft:firework_star") {
+                components.insert(
+                    "minecraft:firework_explosion",
+                    crate::fireworks::star_nbt(&f),
+                );
+            } else {
+                components.insert("minecraft:fireworks", crate::fireworks::rocket_nbt(&f));
+            }
         }
         if let Some(c) = self.base_color {
             components.insert(
@@ -609,6 +633,14 @@ impl Stack {
                         .position(|&n| n == name)?;
                     Some((id as u8, e.int("duration").unwrap_or(160) as i32))
                 }),
+            firework: components.and_then(|c| {
+                c.compound("minecraft:firework_explosion")
+                    .and_then(crate::fireworks::star_from)
+                    .or_else(|| {
+                        c.compound("minecraft:fireworks")
+                            .and_then(crate::fireworks::rocket_from)
+                    })
+            }),
             patterns: components
                 .and_then(|c| c.list("minecraft:banner_patterns"))
                 .and_then(crate::banners::from_nbt),
@@ -642,6 +674,7 @@ impl Stack {
                         item: first.item,
                         count: l.len().min(3) as u8,
                         potion: first.potion,
+                        firework: first.firework,
                     })
                 }),
             ominous: components
@@ -712,6 +745,7 @@ fn write_components(packet: Writer, stack: &Stack) -> Writer {
     let decorated = stack.sherds.is_some();
     let booked = stack.book.is_some();
     let patterned = stack.patterns.is_some();
+    let fired = stack.firework.is_some();
     let based = stack.base_color.is_some();
     let added = i32::from(damaged)
         + i32::from(processing)
@@ -731,6 +765,7 @@ fn write_components(packet: Writer, stack: &Stack) -> Writer {
         + i32::from(decorated)
         + i32::from(booked)
         + i32::from(patterned)
+        + i32::from(fired)
         + i32::from(based);
     let mut packet = packet.varint(added).varint(0);
     if damaged {
@@ -812,6 +847,14 @@ fn write_components(packet: Writer, stack: &Stack) -> Writer {
     }
     if stack.patterns.is_some() {
         packet = crate::banners::write(packet.varint(component::BANNER_PATTERNS), stack.patterns);
+    }
+    if stack.firework.is_some() {
+        let f = crate::fireworks::get(stack.firework);
+        packet = if stack.is_named("minecraft:firework_star") {
+            crate::fireworks::write_star(packet.varint(component::FIREWORK_EXPLOSION), &f)
+        } else {
+            crate::fireworks::write_rocket(packet.varint(component::FIREWORKS), &f)
+        };
     }
     if let Some(c) = stack.base_color {
         packet = packet.varint(component::BASE_COLOR).varint(i32::from(c));

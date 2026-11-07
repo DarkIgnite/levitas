@@ -55,6 +55,7 @@ mod portal;
 mod raids;
 mod ranged;
 mod redstone;
+mod rockets;
 mod shields;
 mod signs;
 mod spawners;
@@ -249,6 +250,10 @@ pub enum Event {
         slot: i32,
         pages: Vec<String>,
         title: Option<String>,
+    },
+    /// The player opened their elytra.
+    StartGliding {
+        id: i32,
     },
     /// A crafter slot switched off or on.
     SlotState {
@@ -511,6 +516,8 @@ struct Player {
     pub using_spyglass: Option<i32>,
     /// The block being brushed, if any.
     pub brushing: Option<archaeology::Brushing>,
+    /// Gliding with an elytra.
+    pub gliding: bool,
     /// Dimension and position where the player last died (for recovery compass).
     pub last_death: Option<(&'static str, BlockPos)>,
     /// Maps this player's client has been sent in full.
@@ -591,6 +598,7 @@ impl Player {
             enchant_seed: profile_seed,
             using_spyglass: None,
             brushing: None,
+            gliding: false,
             last_death: None,
             known_maps: HashSet::new(),
             advancements: advancements::Progress::default(),
@@ -697,6 +705,8 @@ struct World {
     pub next_raid_id: u32,
     boats: HashMap<i32, boats::Boat>,
     carts: HashMap<i32, minecarts::Cart>,
+    /// Firework rockets in flight.
+    rockets: HashMap<i32, rockets::Rocket>,
     /// Item frames and paintings.
     hanging: HashMap<i32, hanging::Hanging>,
     armor_stands: HashMap<i32, armor_stands::ArmorStand>,
@@ -830,6 +840,7 @@ impl World {
             next_raid_id: 1,
             boats: HashMap::new(),
             carts: HashMap::new(),
+            rockets: HashMap::new(),
             hanging: HashMap::new(),
             armor_stands: HashMap::new(),
             detectors: HashSet::new(),
@@ -1020,6 +1031,7 @@ impl World {
                     p.sprinting = sprinting;
                 }
             }
+            Event::StartGliding { id } => self.start_gliding(id),
             Event::Sneak {
                 id,
                 sneaking,
@@ -1257,6 +1269,7 @@ impl World {
         packets.extend(self.evoker_fangs_packets());
         packets.extend(self.boat_packets());
         packets.extend(self.cart_packets());
+        packets.extend(self.rocket_packets());
         packets.extend(self.hanging_packets());
         packets.extend(self.armor_stand_packets());
         packets.extend(self.eye_packets());
@@ -1377,6 +1390,23 @@ impl World {
         };
         p.on_ground = on_ground;
         p.moved = true;
+        // Landing folds the elytra.
+        let landed = on_ground && p.gliding;
+        if landed {
+            p.gliding = false;
+        }
+        let flags = (u8::from(p.sneaking) * 0x02) | (u8::from(p.sprinting) * 0x08);
+        if landed {
+            self.broadcast(
+                Writer::packet(clientbound::SET_ENTITY_DATA)
+                    .varint(id)
+                    .u8(0)
+                    .varint(0)
+                    .u8(flags)
+                    .u8(0xFF),
+                Some(id),
+            );
+        }
         if on_ground && pos.is_some() {
             self.frost_walk(id);
         }
@@ -1720,6 +1750,7 @@ impl World {
         self.tick_area_effect_clouds();
         self.tick_boats();
         self.tick_minecarts();
+        self.tick_rockets();
         self.tick_hanging();
         self.tick_armor_stands();
         self.tick_eyes();

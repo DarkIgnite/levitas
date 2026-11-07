@@ -287,6 +287,21 @@ impl World {
         let replaceable =
             is_air(front_state) || block_has_tag(front_state, "minecraft:replaceable");
         let used: Option<Option<&str>> = match name {
+            "minecraft:firework_rocket" => {
+                let step = facing.step().map(f64::from);
+                let from =
+                    [0, 1, 2].map(|i| f64::from([pos.x, pos.y, pos.z][i]) + 0.5 + 0.7 * step[i]);
+                self.launch_rocket(
+                    stack.with_count(1),
+                    from,
+                    step.map(|v| v * 0.5),
+                    None,
+                    None,
+                    true,
+                );
+                self.take_one(pos, slot);
+                Some(None)
+            }
             "minecraft:arrow" | "minecraft:tipped_arrow" => {
                 let from = [0, 1, 2].map(|i| {
                     f64::from([pos.x, pos.y, pos.z][i]) + 0.5 + 0.7 * f64::from(facing.step()[i])

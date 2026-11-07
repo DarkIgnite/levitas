@@ -119,8 +119,15 @@ Known gaps are listed under each phase instead of being hidden.
 - [x] Interactive blocks: doors, trapdoors, fence gates, buttons (springing back), levers,
       with sounds for other players
 - [x] Double chests (54 slots), trapped chests
-- [ ] Block placement sounds for other players (sound types are not in the data yet)
-- [ ] Bells, cocoa, hanging signs, crafters and walls' tall sides: check against vanilla
+- [x] Block placement sounds for other players. The generator gives no sound types, so
+      `blocks::place_sound` works them out from the block's own sound, its family, its
+      tags or its name (stone otherwise).
+- [ ] Bells, cocoa, hanging signs, crafters and walls' tall sides: check against vanilla.
+      Done: walls (a side is tall only under a full face or a wall running the same way;
+      a straight run keeps its post only under `#wall_post_override` or a posted wall) and
+      crafters (`world/crafter.rs`: 3x3 grid, slots switched off, crafting on a pulse,
+      comparators, hoppers). Bells, cocoa and hanging signs work but are not yet compared
+      with a vanilla server.
 - [x] Mining speed from block hardness and tool speed, with server validation
 - [x] Tool durability and breaking (damage component on the network and on disk)
 - [x] Server-side click simulation: shift-click (including crafting many at once),
@@ -135,21 +142,29 @@ Known gaps are listed under each phase instead of being hidden.
       upgrades keep the item's enchantments and wear; armor trims take their material
       from the addition (`minecraft:trim` on the stack, saved and sent to clients).
       Template, base and addition are each used up once.
-- [ ] Special crafting recipes: dyeing, fireworks, map and book cloning, banners,
-      shields, repairing, decorated pots, transmute recipes. Done (`recipes.rs`):
-      repairing two worn items of a kind (uses left added up plus 5%, only curses
-      kept); dyeing leather armor with any number of dyes, mixed by the wiki's formula
-      and kept as `minecraft:dyed_color`; transmute recipes (shulker boxes and bundles
-      change colour, keeping their components); tipped arrows from eight arrows and a
-      lingering potion. Missing: fireworks, map and book cloning, banner copying,
-      shield decoration and decorated pots with sherds, which wait for those items'
-      components
-- [ ] Signs (editing text), item frames, armor stands, flower pots, jukebox, note blocks.
+- [x] Special crafting recipes: dyeing, fireworks, map and book cloning, banners,
+      shields, repairing, decorated pots, transmute recipes (`recipes.rs`): repairing two
+      worn items (uses added plus 5%, only curses kept); dyeing leather armor by the wiki's
+      mix; transmute recipes with material counts (shulker boxes and bundles changing
+      colour, map cloning with up to eight maps); map extending; tipped arrows; decorated
+      pots with sherds (`minecraft:pot_decorations`, kept when placed and broken); book
+      cloning (written books, one generation on, the original staying); banner copying and
+      shield decoration (`minecraft:banner_patterns`, `minecraft:base_color`); firework
+      stars (shape, colours, trail, twinkle), fades and rockets (flight 1 to 3).
+      Alongside: the loom (patterns from the tags, in order, pattern items, up to six
+      layers), banners keeping their layers when placed and broken, cauldrons (buckets,
+      bottles, washing armor, banners and shulker boxes), books (writing, signing,
+      reading, lecterns with page turns, pulses and comparators) and firework rockets in
+      flight (`world/rockets.rs`: launched from blocks, dispensers and crossbows, boosting
+      gliding players, bursting with damage by their stars).
+- [x] Signs (editing text), item frames, armor stands, flower pots, jukebox, note blocks.
       Signs and hanging signs work (`world/signs.rs`): placing one opens its editor,
       either side can be edited again by right-clicking it, dyes colour a side's text,
       glow ink sacs make it glow and ink sacs undo that, honeycomb waxes it for good.
       Text is saved in vanilla's format (older worlds' JSON lines are read too). Note
-      blocks, item frames and armor stands work; flower pots and jukeboxes do not yet.
+      blocks, item frames and armor stands work, and so do flower pots (any plant with a
+      potted block) and jukeboxes (`world/jukebox.rs`: songs for their length, ejecting,
+      comparators, hoppers).
 
 ## Phase 3: Fluids, gravity and light
 

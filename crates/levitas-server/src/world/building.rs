@@ -69,6 +69,9 @@ impl World {
         {
             return self.ack(id, sequence);
         }
+        if self.use_rocket_on(id, slot, pos, face) {
+            return self.ack(id, sequence);
+        }
         if !stack.is_empty() && self.start_brushing(id, hand, pos, face, clicked) {
             return self.ack(id, sequence);
         }

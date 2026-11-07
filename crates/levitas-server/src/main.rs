@@ -7,6 +7,7 @@ mod click;
 mod config;
 mod connection;
 mod enchanting;
+mod fireworks;
 mod flat;
 mod inventory;
 mod loot;

@@ -120,7 +120,12 @@ impl World {
         let p = self.players.get_mut(&id).expect("player exists");
         let slot = p.hand_slot(hand);
         let crossbow = p.inventory.slots[slot];
-        let arrow = super::arrows::find_arrows(p);
+        let rocket = p.inventory.slots[OFFHAND].is_named("minecraft:firework_rocket");
+        let arrow = if rocket {
+            Some(OFFHAND)
+        } else {
+            super::arrows::find_arrows(p)
+        };
         let ammo = match arrow {
             Some(s) => p.inventory.slots[s],
             None if !p.survival() => Stack::new(ItemInfo::id_of("minecraft:arrow").unwrap_or(0), 1),
@@ -139,6 +144,7 @@ impl World {
             item: ammo.item,
             count: if multishot { 3 } else { 1 },
             potion: ammo.potion,
+            firework: ammo.firework,
         });
         let update = p.inventory.set_slot_packet(slot);
         let at = p.pos;
@@ -158,11 +164,20 @@ impl World {
         let (eye, look, _) = p.eye_ray();
         let pierce = crossbow.enchants.level_of("minecraft:piercing").min(255) as u8;
         let tipped = ItemInfo::get(loaded.item).is_some_and(|i| i.name == "minecraft:tipped_arrow");
+        let rocket =
+            ItemInfo::get(loaded.item).is_some_and(|i| i.name == "minecraft:firework_rocket");
         for (i, angle) in [0.0, -10.0, 10.0]
             .into_iter()
             .take(usize::from(loaded.count))
             .enumerate()
         {
+            if rocket {
+                let mut stack = Stack::new(loaded.item, 1);
+                stack.firework = loaded.firework;
+                let dir = turn(look, angle);
+                self.launch_rocket(stack, eye, dir.map(|v| v * 1.6), Some(id), None, true);
+                continue;
+            }
             self.shoot_arrow(
                 id,
                 true,
