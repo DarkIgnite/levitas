@@ -306,6 +306,43 @@ fn orb_packets(id: i32, orb: &XpOrb) -> [Writer; 2] {
     ]
 }
 
+impl XpOrb {
+    pub(super) fn to_nbt(&self) -> levitas_nbt::Compound {
+        levitas_nbt::Compound::new()
+            .with("id", "minecraft:experience_orb")
+            .with("Pos", super::saved_entities::doubles(self.pos))
+            .with("Motion", super::saved_entities::doubles(self.vel))
+            .with("Value", self.value.min(i32::from(i16::MAX)) as i16)
+            .with("Count", 1)
+            .with("Age", self.age.min(i16::MAX as u32) as i16)
+            .with("Health", 5i16)
+    }
+
+    pub(super) fn from_nbt(nbt: &levitas_nbt::Compound) -> Option<XpOrb> {
+        if nbt.str("id")? != "minecraft:experience_orb" {
+            return None;
+        }
+        let pos = super::saved_entities::triple_of(nbt, "Pos")?;
+        // Merged orbs keep a count; each is worth the value.
+        let count = nbt.int("Count").unwrap_or(1).clamp(1, 1000) as i32;
+        Some(XpOrb {
+            pos,
+            vel: super::saved_entities::triple_of(nbt, "Motion").unwrap_or([0.0; 3]),
+            value: nbt.int("Value").unwrap_or(1).max(1) as i32 * count,
+            age: nbt.int("Age").unwrap_or(0).max(0) as u32,
+            sent_pos: pos,
+        })
+    }
+
+    pub(super) fn chunk(&self) -> (i32, i32) {
+        super::chunk_of(self.pos)
+    }
+}
+
+pub(super) fn spawn_saved(id: i32, orb: &XpOrb) -> [Writer; 2] {
+    orb_packets(id, orb)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

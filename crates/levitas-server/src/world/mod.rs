@@ -56,6 +56,7 @@ mod raids;
 mod ranged;
 mod redstone;
 mod rockets;
+mod saved_entities;
 mod shields;
 mod signs;
 mod spawners;

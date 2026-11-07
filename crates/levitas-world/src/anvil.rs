@@ -106,16 +106,7 @@ const FIRST_LIGHT_Y: i32 = (MIN_Y >> 4) - 1;
 /// Adds a section's block states and biomes to its saved compound.
 fn add_blocks(saved: &mut Compound, section: &Section) {
     let states = palette_and_data(&section.blocks().values(), 4, |state| {
-        let info = BlockInfo::of(state);
-        let mut entry = Compound::new().with("Name", info.name);
-        if !info.properties.is_empty() {
-            let mut props = Compound::new();
-            for (name, value) in info.properties_of(state) {
-                props.insert(name, value);
-            }
-            entry.insert("Properties", props);
-        }
-        Tag::Compound(entry)
+        Tag::Compound(state_nbt(state))
     });
     let biome_names = biomes().entries;
     let biomes = palette_and_data(&section.biomes().values(), 1, |biome| {
@@ -277,6 +268,26 @@ pub fn from_nbt(nbt: &Compound) -> Result<Option<LoadedChunk>, ChunkError> {
 
 fn to_bytes(array: &[i8]) -> Vec<u8> {
     array.iter().map(|&b| b as u8).collect()
+}
+
+/// A block state as vanilla saves one: `{Name, Properties}`.
+pub fn state_nbt(state: u16) -> Compound {
+    let info = BlockInfo::of(state);
+    let mut entry = Compound::new().with("Name", info.name);
+    if !info.properties.is_empty() {
+        let mut props = Compound::new();
+        for (name, value) in info.properties_of(state) {
+            props.insert(name, value);
+        }
+        entry.insert("Properties", props);
+    }
+    entry
+}
+
+/// A saved `{Name, Properties}` block state as an ID (renamed blocks take their new
+/// name; unknown ones are air).
+pub fn state_from_nbt(entry: &Compound) -> u16 {
+    block_state(Some(entry))
 }
 
 /// A palette entry `{Name, Properties}` as a block state ID; blocks renamed since the

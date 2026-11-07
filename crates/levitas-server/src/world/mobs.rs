@@ -2669,6 +2669,7 @@ impl World {
                 .filter(|s| s.chunk() == (cx, cz))
                 .map(|s| Tag::Compound(s.to_nbt())),
         );
+        entities.extend(self.saved_extras(cx, cz).into_iter().map(Tag::Compound));
         if let Some(kept) = self.kept_entities.get(&(cx, cz)) {
             entities.extend(kept.iter().cloned().map(Tag::Compound));
         }
@@ -2693,6 +2694,7 @@ impl World {
                     .values()
                     .map(super::armor_stands::ArmorStand::chunk),
             )
+            .chain(self.extra_chunks())
             .collect();
         let chunks: Vec<(i32, i32)> = now
             .union(&self.mob_chunks)
@@ -2755,7 +2757,9 @@ impl World {
             .filter(|(_, s)| s.chunk() == (x, z))
             .map(|(&id, _)| id)
             .collect();
+        let has_extras = !self.saved_extras(x, z).is_empty();
         if ids.is_empty()
+            && !has_extras
             && item_ids.is_empty()
             && boat_ids.is_empty()
             && cart_ids.is_empty()
@@ -2770,6 +2774,7 @@ impl World {
         self.save_mob_chunk(x, z);
         self.kept_entities.remove(&(x, z));
         self.unreadable_entities.remove(&(x, z));
+        self.unload_extras(x, z);
         for id in ids {
             self.raider_unloaded(id);
             let mob = self.mobs.remove(&id).expect("listed");
@@ -2836,6 +2841,9 @@ impl World {
                     self.broadcast(packet, None);
                 }
                 self.hanging.insert(id, h);
+                continue;
+            }
+            if self.load_extra(entity) {
                 continue;
             }
             if let Some(cart) = super::minecarts::Cart::from_nbt(entity, &mut self.rng) {

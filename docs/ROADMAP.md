@@ -102,10 +102,22 @@ Known gaps are listed under each phase instead of being hidden.
       `data/minecraft/`, as 26.3 keeps them)
 - [x] Player data: position, rotation, inventory, equipment, health, hunger, game mode
 - [x] Autosave every 5 minutes, save on shutdown (Ctrl-C), unload unused chunks
-- [ ] Dropped items and other entities saved (with Phase 4). Dropped items are saved
-      with mobs in `entities/` region files; arrows, orbs and falling blocks are not.
-- [ ] LZ4-compressed region files (vanilla's optional format)
-- [ ] Item components preserved when loading worlds from other servers (with Phase 11)
+- [x] Dropped items and other entities saved (with Phase 4). Mobs, dropped items,
+      boats, minecarts, item frames, paintings and armor stands are saved in `entities/`
+      region files, and so are arrows and thrown tridents (stuck or flying, with their
+      owner, pickup, damage, piercing and item), experience orbs (value, age) and
+      falling blocks (block state, time) (`world/saved_entities.rs`), as vanilla saves
+      them.
+- [x] LZ4-compressed region files (vanilla's optional format). Chunks are read however
+      they were written (zlib, gzip, none or LZ4); `region-file-compression` in
+      `server.properties` (deflate, lz4 or none, as vanilla) picks how new ones are
+      written. LZ4 is lz4-java's block stream with its xxHash32 checksums
+      (`levitas-world/src/lz4.rs`, no new dependency).
+- [x] Item components preserved when loading worlds from other servers. Components
+      Levitas does not handle (custom data from plugins, rarity, unbreakable, ...) are
+      kept with the stack (`item_extras.rs`) and saved back unchanged; stacks with
+      different ones do not merge. Clients are sent only the components the server can
+      encode.
 
 ## Phase 2: Blocks behave correctly
 

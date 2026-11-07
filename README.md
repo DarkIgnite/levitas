@@ -11,7 +11,7 @@
   <img alt="Java Edition 26.3" src="https://img.shields.io/badge/Java%20Edition-26.3-f74c00">
   <img alt="Written in Rust" src="https://img.shields.io/badge/written%20in-Rust-b7410e?logo=rust">
   <img alt="License: GPL-3.0-only" src="https://img.shields.io/badge/license-GPL--3.0--only-blue">
-  <img alt="Progress: about 83%" src="https://img.shields.io/badge/progress-~83%25-orange">
+  <img alt="Progress: about 85%" src="https://img.shields.io/badge/progress-~85%25-orange">
 </p>
 
 # Levitas
@@ -26,7 +26,7 @@ needs, with a plugin API for survival-economy servers on top.
 > **Status: playable.** You can join a generated world and play survival: mine, craft,
 > farm, fight monsters, enchant, brew, build redstone, trade with villagers, and go to
 > the Nether and the End to fight the dragon, fish, and tame wolves and cats. Plugins
-> and the economy are still to come. Overall progress: **about 83%** of the [roadmap](docs/ROADMAP.md).
+> and the economy are still to come. Overall progress: **about 85%** of the [roadmap](docs/ROADMAP.md).
 >
 > **Now on 26.3.** The server speaks Minecraft 26.3 (protocol 777), saves worlds in the
 > 26.3 layout, upgrades 1.21.8 worlds when it opens them, and the blocks new in 26.3
@@ -43,7 +43,7 @@ what is missing in each one.
 | Phase | Progress | |
 |---|---|---|
 | 0. Migration to Minecraft 26.3 | 100% | `██████████` |
-| 1. Persistence (saving worlds, players, chunks) | 80% | `████████░░` |
+| 1. Persistence (saving worlds, players, chunks) | 100% | `██████████` |
 | 2. Blocks behave correctly | 100% | `██████████` |
 | 3. Fluids, gravity and light | 80% | `████████░░` |
 | 4. Combat and basic entities | 100% | `██████████` |
@@ -57,7 +57,7 @@ what is missing in each one.
 | 12. World generation | 100% | `██████████` |
 | 13. Plugins and economy | 0% | `░░░░░░░░░░` |
 | Infrastructure (CI, parallel ticking, benchmarks) | 33% | `███▎░░░░░░` |
-| **Overall** | **~83%** | `████████▍░` |
+| **Overall** | **~85%** | `████████▋░` |
 
 ## What works today
 

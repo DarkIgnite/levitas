@@ -371,6 +371,9 @@ their server.
   - Lodestone compasses keep pointing at a broken lodestone.
   - Maps held in the Nether draw the bedrock roof instead of static.
   - Jumps count towards fly_one_cm and fall_one_cm (unclear what vanilla does; check before changing).
+  - `Stack` has grown to 208 bytes (components for books, banners, fireworks, explorer maps and
+    kept unknown ones). Handles could be `Option<NonZeroU32>` and the rarer fields moved into one
+    interned side record to bring it back down; worth doing before the Phase 7/parallel work.
 - Raids are saved (2026-11-06): `World::save_raids`/`load_raids` in `world/raids.rs` keep them in
   `dimensions/minecraft/overworld/levitas_raids.dat`. A raid's `away` set holds the UUIDs of raiders whose
   chunks are not loaded; a wave is over only when `raiders` and `away` are both empty. `rejoin_raid` runs in

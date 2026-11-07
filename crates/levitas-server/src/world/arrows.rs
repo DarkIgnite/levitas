@@ -624,6 +624,93 @@ fn arrow_add(id: i32, arrow: &Arrow) -> Writer {
         .varint(arrow.shooter + 1)
 }
 
+impl Arrow {
+    /// The arrow (or thrown trident) as vanilla saves it.
+    pub(super) fn to_nbt(&self, owner: Option<u128>) -> levitas_nbt::Compound {
+        let id = if self.trident.is_some() {
+            "minecraft:trident"
+        } else {
+            "minecraft:arrow"
+        };
+        let item = self.trident.unwrap_or_else(|| {
+            let name = if self.potion.is_some() {
+                "minecraft:tipped_arrow"
+            } else {
+                "minecraft:arrow"
+            };
+            let mut s = Stack::new(ItemInfo::id_of(name).unwrap_or(0), 1);
+            s.potion = self.potion;
+            s
+        });
+        let mut nbt = levitas_nbt::Compound::new()
+            .with("id", id)
+            .with("Pos", super::saved_entities::doubles(self.pos))
+            .with("Motion", super::saved_entities::doubles(self.vel))
+            .with(
+                "Rotation",
+                vec![levitas_nbt::Tag::Float(0.0), levitas_nbt::Tag::Float(0.0)],
+            )
+            .with("inGround", self.stuck.is_some())
+            .with("life", self.stuck.unwrap_or(0).min(i16::MAX as u32) as i16)
+            .with("pickup", i8::from(self.pickup))
+            .with("damage", self.base_damage)
+            .with("crit", self.critical)
+            .with("PierceLevel", self.pierce as i8)
+            .with("item", item.to_nbt());
+        if let Some(owner) = owner {
+            nbt.insert("Owner", super::saved_entities::uuid_ints(owner));
+        }
+        if self.trident.is_some() {
+            nbt.insert("DealtDamage", self.dealt);
+        }
+        nbt
+    }
+
+    /// A saved arrow or thrown trident, with the entity ID of its owner if they are
+    /// here.
+    pub(super) fn from_nbt(nbt: &levitas_nbt::Compound, owner: Option<i32>) -> Option<Arrow> {
+        let trident = match nbt.str("id")? {
+            "minecraft:arrow" => false,
+            "minecraft:trident" => true,
+            _ => return None,
+        };
+        let item = nbt
+            .compound("item")
+            .map(Stack::from_nbt)
+            .unwrap_or(Stack::EMPTY);
+        let in_ground = nbt.int("inGround").unwrap_or(0) != 0;
+        Some(Arrow {
+            pos: super::saved_entities::triple_of(nbt, "Pos")?,
+            vel: super::saved_entities::triple_of(nbt, "Motion").unwrap_or([0.0; 3]),
+            shooter: owner.unwrap_or(0),
+            by_player: nbt.int("pickup").unwrap_or(0) == 1 || owner.is_some(),
+            critical: nbt.int("crit").unwrap_or(0) != 0,
+            base_damage: nbt.float("damage").unwrap_or(BASE_DAMAGE),
+            pickup: nbt.int("pickup").unwrap_or(0) == 1,
+            flaming: false,
+            potion: if trident { None } else { item.potion },
+            slowness: false,
+            punch: 0,
+            stuck: in_ground.then(|| nbt.int("life").unwrap_or(0).max(0) as u32),
+            age: 0,
+            pierce: nbt.int("PierceLevel").unwrap_or(0).clamp(0, 255) as u8,
+            pierced: Vec::new(),
+            trident: trident.then_some(item).filter(|s| !s.is_empty()),
+            returning: false,
+            dealt: nbt.int("DealtDamage").unwrap_or(0) != 0,
+        })
+    }
+
+    pub(super) fn chunk(&self) -> (i32, i32) {
+        super::chunk_of(self.pos)
+    }
+}
+
+/// An arrow's spawn packets, for saved ones coming back.
+pub(super) fn spawn_saved(id: i32, arrow: &Arrow) -> Vec<Writer> {
+    arrow_spawn(id, arrow)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

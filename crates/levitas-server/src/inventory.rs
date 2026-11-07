@@ -73,6 +73,8 @@ pub struct Stack {
     /// A firework star's explosion or a rocket's flight and explosions, by handle in
     /// `crate::fireworks`.
     pub firework: Option<u32>,
+    /// Components Levitas does not handle, kept to be saved back (`crate::item_extras`).
+    pub extra: Option<u32>,
 }
 
 /// What a crossbow is loaded with: an arrow (tipped with a potion, perhaps), as many
@@ -320,6 +322,7 @@ impl Stack {
         patterns: None,
         base_color: None,
         firework: None,
+        extra: None,
     };
 
     pub fn new(item: i32, count: i32) -> Self {
@@ -372,6 +375,7 @@ impl Stack {
             && self.patterns == other.patterns
             && self.base_color == other.base_color
             && self.firework == other.firework
+            && self.extra == other.extra
     }
 
     pub fn is_empty(&self) -> bool {
@@ -521,6 +525,9 @@ impl Stack {
         {
             components.insert("minecraft:instrument", name);
         }
+        if let Some(extra) = self.extra {
+            crate::item_extras::merge_into(extra, &mut components);
+        }
         if !components.is_empty() {
             nbt.insert("components", components);
         }
@@ -633,6 +640,7 @@ impl Stack {
                         .position(|&n| n == name)?;
                     Some((id as u8, e.int("duration").unwrap_or(160) as i32))
                 }),
+            extra: components.and_then(crate::item_extras::unknown_of),
             firework: components.and_then(|c| {
                 c.compound("minecraft:firework_explosion")
                     .and_then(crate::fireworks::star_from)
@@ -1260,5 +1268,47 @@ mod tests {
             .with("id", "minecraft:cobblestone")
             .with("Count", 37i8);
         assert_eq!(Stack::from_nbt(&stack).count, 37);
+    }
+
+    #[test]
+    fn components_levitas_does_not_handle_are_saved_back() {
+        let saved = Compound::new()
+            .with("id", "minecraft:diamond_sword")
+            .with("count", 1)
+            .with(
+                "components",
+                Compound::new()
+                    .with("minecraft:damage", 3)
+                    .with("minecraft:custom_data", Compound::new().with("shop_id", 42))
+                    .with("minecraft:rarity", "epic")
+                    .with("minecraft:unbreakable", Compound::new()),
+            );
+        let stack = Stack::from_nbt(&saved);
+        assert_eq!(stack.damage, 3);
+        assert!(stack.extra.is_some());
+        let back = stack.to_nbt();
+        let c = back.compound("components").unwrap();
+        assert_eq!(
+            c.compound("minecraft:custom_data")
+                .and_then(|d| d.int("shop_id")),
+            Some(42)
+        );
+        assert_eq!(c.str("minecraft:rarity"), Some("epic"));
+        assert!(c.get("minecraft:unbreakable").is_some());
+        assert_eq!(c.int("minecraft:damage"), Some(3));
+        // Two such swords still stack with each other, not with plain ones.
+        assert!(stack.same_kind(&Stack::from_nbt(&saved)));
+        assert!(!stack.same_kind(&Stack::new(stack.item, 1)));
+        // The network form leaves them out.
+        let sent = write_stack(Writer::packet(0), stack).into_frame();
+        let plain = write_stack(
+            Writer::packet(0),
+            Stack {
+                extra: None,
+                ..stack
+            },
+        )
+        .into_frame();
+        assert_eq!(sent, plain);
     }
 }

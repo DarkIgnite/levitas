@@ -26,6 +26,8 @@ const SERIALIZER_PAINTING: i32 = 34;
 const SUPPORT_CHECK_TICKS: u64 = 20;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
+// A frame holds a whole stack, a painting a variant; there are few of either.
+#[allow(clippy::large_enum_variant)]
 pub enum What {
     Frame {
         glow: bool,

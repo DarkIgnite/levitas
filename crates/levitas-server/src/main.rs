@@ -10,6 +10,7 @@ mod enchanting;
 mod fireworks;
 mod flat;
 mod inventory;
+mod item_extras;
 mod loot;
 mod names;
 mod play;

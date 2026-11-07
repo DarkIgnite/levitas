@@ -4,6 +4,7 @@ pub mod anvil;
 pub mod chunk;
 pub mod light;
 pub mod lighting;
+pub mod lz4;
 pub mod paletted;
 pub mod region;
 

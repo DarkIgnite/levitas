@@ -9,6 +9,7 @@ use std::collections::HashMap;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU8, Ordering};
 
 use levitas_nbt::Compound;
 
@@ -20,6 +21,23 @@ const ZLIB: u8 = 2;
 const UNCOMPRESSED: u8 = 3;
 const LZ4: u8 = 4;
 const EXTERNAL: u8 = 0x80;
+
+/// How new chunks are compressed: vanilla's `region-file-compression` (deflate, lz4 or
+/// none). Chunks are read whatever way they were written.
+static COMPRESSION: AtomicU8 = AtomicU8::new(ZLIB);
+
+/// Sets the compression from `region-file-compression`'s value; unknown values keep
+/// deflate. Returns whether the value was known.
+pub fn set_compression(name: &str) -> bool {
+    let kind = match name {
+        "deflate" => ZLIB,
+        "lz4" => LZ4,
+        "none" => UNCOMPRESSED,
+        _ => return false,
+    };
+    COMPRESSION.store(kind, Ordering::Relaxed);
+    true
+}
 
 fn invalid(message: String) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, message)
@@ -119,22 +137,30 @@ impl RegionFile {
         decompress(kind & !EXTERNAL, &data).map(Some)
     }
 
-    /// Stores a chunk's uncompressed NBT, zlib-compressed.
+    /// Stores a chunk's uncompressed NBT, compressed as `set_compression` chose (zlib
+    /// unless told otherwise).
     pub fn write(&mut self, lx: usize, lz: usize, nbt: &[u8], timestamp: u32) -> io::Result<()> {
-        let mut encoder =
-            flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::default());
-        encoder.write_all(nbt)?;
-        let compressed = encoder.finish()?;
+        let kind = COMPRESSION.load(Ordering::Relaxed);
+        let compressed = match kind {
+            LZ4 => crate::lz4::compress(nbt),
+            UNCOMPRESSED => nbt.to_vec(),
+            _ => {
+                let mut encoder =
+                    flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::default());
+                encoder.write_all(nbt)?;
+                encoder.finish()?
+            }
+        };
 
         let external = 5 + compressed.len() > MAX_SECTORS_PER_CHUNK * SECTOR;
         let mut record = Vec::new();
         if external {
             fs::write(self.external_path(lx, lz), &compressed)?;
             record.extend_from_slice(&1u32.to_be_bytes());
-            record.push(ZLIB | EXTERNAL);
+            record.push(kind | EXTERNAL);
         } else {
             record.extend_from_slice(&(compressed.len() as u32 + 1).to_be_bytes());
-            record.push(ZLIB);
+            record.push(kind);
             record.extend_from_slice(&compressed);
         }
         let count = record.len().div_ceil(SECTOR);
@@ -196,11 +222,7 @@ fn decompress(kind: u8, data: &[u8]) -> io::Result<Vec<u8>> {
             flate2::read::ZlibDecoder::new(data).read_to_end(&mut out)?;
         }
         UNCOMPRESSED => out.extend_from_slice(data),
-        LZ4 => {
-            return Err(invalid(
-                "LZ4-compressed chunks are not supported yet".into(),
-            ))
-        }
+        LZ4 => out = crate::lz4::decompress(data)?,
         other => return Err(invalid(format!("unknown chunk compression {other}"))),
     }
     Ok(out)
@@ -315,5 +337,37 @@ mod tests {
         // Rewriting one small chunk keeps the file at header + at most two sectors.
         assert!(region.used.len() <= HEADER_SECTORS + 2);
         fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn lz4_chunks_are_written_and_read_back() {
+        let dir = std::env::temp_dir().join(format!("levitas-lz4-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        let nbt = Compound::new()
+            .with("DataVersion", 4000)
+            .with("Status", "minecraft:full");
+        let bytes = levitas_nbt::to_bytes("", &nbt);
+        let mut file = RegionFile::open(&dir, 0, 0).unwrap();
+        // Written as vanilla does with region-file-compression=lz4.
+        let record = {
+            let packed = crate::lz4::compress(&bytes);
+            let mut r = (packed.len() as u32 + 1).to_be_bytes().to_vec();
+            r.push(LZ4);
+            r.extend_from_slice(&packed);
+            r
+        };
+        assert_eq!(record[4], 4);
+        assert_eq!(decompress(LZ4, &record[5..]).unwrap(), bytes);
+        // Written with lz4 chosen: the record says so, and it reads back.
+        assert!(set_compression("lz4"));
+        file.write(1, 1, &bytes, 0).unwrap();
+        assert!(set_compression("deflate"));
+        assert_eq!(file.read(1, 1).unwrap().unwrap(), bytes);
+        let raw = fs::read(dir.join("r.0.0.mca")).unwrap();
+        let location = u32::from_be_bytes(raw[(1 + 32) * 4..(1 + 32) * 4 + 4].try_into().unwrap());
+        let at = (location >> 8) as usize * SECTOR;
+        assert_eq!(raw[at + 4], LZ4);
+        assert!(!set_compression("brotli"));
+        let _ = fs::remove_dir_all(&dir);
     }
 }

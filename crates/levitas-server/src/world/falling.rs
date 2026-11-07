@@ -320,3 +320,38 @@ impl World {
         }
     }
 }
+
+impl FallingBlock {
+    pub(super) fn to_nbt(&self) -> levitas_nbt::Compound {
+        levitas_nbt::Compound::new()
+            .with("id", "minecraft:falling_block")
+            .with("Pos", super::saved_entities::doubles(self.pos))
+            .with("Motion", super::saved_entities::doubles(self.vel))
+            .with("BlockState", levitas_world::anvil::state_nbt(self.state))
+            .with("Time", self.age as i32)
+            .with("DropItem", true)
+            .with("FallDistance", self.fall_distance as f32)
+    }
+
+    pub(super) fn from_nbt(nbt: &levitas_nbt::Compound) -> Option<FallingBlock> {
+        if nbt.str("id")? != "minecraft:falling_block" {
+            return None;
+        }
+        let state = levitas_world::anvil::state_from_nbt(nbt.compound("BlockState")?);
+        if is_air(state) {
+            return None;
+        }
+        Some(FallingBlock {
+            state,
+            pos: super::saved_entities::triple_of(nbt, "Pos")?,
+            vel: super::saved_entities::triple_of(nbt, "Motion").unwrap_or([0.0; 3]),
+            fall_distance: nbt.float("FallDistance").unwrap_or(0.0),
+            age: nbt.int("Time").unwrap_or(0).max(0) as u32,
+            viewers: HashSet::new(),
+        })
+    }
+
+    pub(super) fn chunk(&self) -> (i32, i32) {
+        super::chunk_of(self.pos)
+    }
+}

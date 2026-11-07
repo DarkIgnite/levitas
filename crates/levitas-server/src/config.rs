@@ -27,6 +27,8 @@ pub struct Config {
     pub online_mode: bool,
     /// `peaceful`, `easy`, `normal` or `hard`.
     pub difficulty: String,
+    /// How chunks are compressed in region files: `deflate`, `lz4` or `none`.
+    pub region_file_compression: String,
 }
 
 impl Default for Config {
@@ -48,6 +50,7 @@ impl Default for Config {
             online_mode: false,
             // Vanilla's default; Levitas's own tests are written for Normal.
             difficulty: if cfg!(test) { "normal" } else { "easy" }.to_owned(),
+            region_file_compression: "deflate".to_owned(),
         }
     }
 }
@@ -96,6 +99,14 @@ pub fn load(dir: &Path) -> &'static Config {
     let level_type = get_or("level-type", defaults.level_type.clone());
     let online = get_or("online-mode", "false".to_owned());
     let difficulty = get_or("difficulty", defaults.difficulty.clone());
+    let mut region_compression = get_or(
+        "region-file-compression",
+        defaults.region_file_compression.clone(),
+    );
+    if !levitas_world::region::set_compression(region_compression.trim()) {
+        warn!("{FILE}: region-file-compression={region_compression} is not deflate, lz4 or none, using deflate");
+        region_compression = "deflate".to_owned();
+    }
     let difficulty = match crate::rules::Difficulty::parse(&difficulty) {
         Some(d) => d.name().to_owned(),
         None => {
@@ -116,6 +127,7 @@ pub fn load(dir: &Path) -> &'static Config {
         level_type,
         online_mode: online.trim() == "true",
         difficulty,
+        region_file_compression: region_compression.trim().to_owned(),
     };
     if changed {
         if let Err(e) = fs::write(&path, write(&values)) {
