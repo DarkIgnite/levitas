@@ -134,7 +134,10 @@ impl World {
         if ItemInfo::get(held.item).is_none_or(|i| i.name != "minecraft:firework_rocket") {
             return false;
         }
-        if !p.gliding {
+        // Gliding, or in the air with an elytra on (the start-gliding command may have
+        // gone unheard).
+        let flying = p.gliding || (!p.on_ground && self.wears_elytra(id));
+        if !flying {
             return true;
         }
         let at = p.pos;
@@ -162,7 +165,7 @@ impl World {
             let mut burst = r.age >= r.life;
             if let Some(player) = r.attached {
                 match self.players.get(&player) {
-                    Some(p) if p.alive && p.gliding => r.pos = p.pos,
+                    Some(p) if p.alive && !p.on_ground => r.pos = p.pos,
                     _ => r.attached = None,
                 }
             } else {
@@ -350,5 +353,52 @@ mod tests {
         let r2 = w.rockets.remove(&rid).unwrap();
         w.burst(rid, &r2);
         assert!(w.mobs[&cow].health < super::super::mobs::MobKind::Cow.max_health());
+    }
+
+    #[test]
+    fn elytras_glide_fold_on_landing_and_take_a_boost() {
+        let dir = std::env::temp_dir().join(format!("levitas-elytra-{}", std::process::id()));
+        let (mut w, _) = World::new(
+            dir,
+            NewWorld {
+                kind: WorldKind::Flat,
+                seed: Some(0),
+            },
+        );
+        w.chunk(0, 0);
+        let (out, mut frames) = tokio::sync::mpsc::channel(100_000);
+        let id = next_entity_id();
+        let profile = Profile {
+            name: "Flyer".to_owned(),
+            uuid: 10,
+            properties: Vec::new(),
+        };
+        w.players
+            .insert(id, Player::new(profile, out, [2.5, -50.0, 2.5]));
+        w.players.get_mut(&id).unwrap().inventory.slots[6] = stack("minecraft:elytra");
+        w.move_player(id, Some([2.5, -50.0, 2.5]), None, false);
+        while frames.try_recv().is_ok() {}
+        w.start_gliding(id);
+        assert!(w.players[&id].gliding);
+        // The gliding player is told too.
+        let mut told = false;
+        while let Ok(f) = frames.try_recv() {
+            // Entity data: index 0, a byte, the gliding bit.
+            told |= f.as_ref().windows(3).any(|b| b == [0x00, 0x00, 0x80]);
+        }
+        assert!(told);
+        // A rocket boosts them.
+        let slot = w.players[&id].hand_slot(0);
+        let mut rocket = stack("minecraft:firework_rocket");
+        rocket.firework = crate::fireworks::intern(crate::fireworks::Firework {
+            flight: 1,
+            explosions: Vec::new(),
+        });
+        w.players.get_mut(&id).unwrap().inventory.slots[slot] = rocket;
+        assert!(w.boost_with_rocket(id, 0));
+        assert!(w.rockets.values().any(|r| r.attached == Some(id)));
+        // Landing folds the elytra.
+        w.move_player(id, Some([2.5, -60.0, 2.5]), None, true);
+        assert!(!w.players[&id].gliding);
     }
 }

@@ -26,6 +26,8 @@ const DATA_AIR: u8 = 1;
 const SERIALIZER_BYTE: i32 = 0;
 const SERIALIZER_INT: i32 = 1;
 const FLAG_ON_FIRE: u8 = 0x01;
+/// Gliding with an elytra.
+const FLAG_GLIDING: u8 = 0x80;
 const FLAG_SNEAKING: u8 = 0x02;
 const FLAG_SPRINTING: u8 = 0x08;
 
@@ -196,8 +198,8 @@ impl World {
         }
     }
 
-    /// A player's entity flags: burning, sneaking and sprinting.
-    fn player_flags(&self, id: i32) -> u8 {
+    /// A player's entity flags: burning, sneaking, sprinting and gliding.
+    pub(super) fn player_flags(&self, id: i32) -> u8 {
         let p = &self.players[&id];
         let mut flags = 0;
         if p.fire_ticks > 0 {
@@ -209,7 +211,28 @@ impl World {
         if p.sprinting {
             flags |= FLAG_SPRINTING;
         }
+        if p.gliding {
+            flags |= FLAG_GLIDING;
+        }
         flags
+    }
+
+    /// Sends a player's entity flags to everyone, the player too: the client starts
+    /// gliding on its own but stops only when the server says so.
+    pub(super) fn send_player_flags(&mut self, id: i32) {
+        if !self.players.contains_key(&id) {
+            return;
+        }
+        let flags = self.player_flags(id);
+        self.broadcast(
+            Writer::packet(clientbound::SET_ENTITY_DATA)
+                .varint(id)
+                .u8(0)
+                .varint(0)
+                .u8(flags)
+                .u8(0xFF),
+            None,
+        );
     }
 }
 

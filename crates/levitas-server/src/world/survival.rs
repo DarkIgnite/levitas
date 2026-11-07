@@ -619,20 +619,22 @@ impl World {
         let elytra = p.inventory.slots[6].is_named("minecraft:elytra")
             && ItemInfo::get(p.inventory.slots[6].item)
                 .is_some_and(|i| p.inventory.slots[6].damage < i.max_damage - 1);
-        if !elytra || p.on_ground || !p.alive {
+        // The client only asks while in the air; the server's view of the ground may be
+        // a move behind, so it is not asked again.
+        if !elytra || !p.alive {
             return;
         }
         p.gliding = true;
-        let flags = 0x80 | if p.sneaking { 0x02 } else { 0 } | if p.sprinting { 0x08 } else { 0 };
-        self.broadcast(
-            Writer::packet(clientbound::SET_ENTITY_DATA)
-                .varint(id)
-                .u8(0)
-                .varint(0)
-                .u8(flags)
-                .u8(0xFF),
-            Some(id),
-        );
+        self.send_player_flags(id);
+    }
+
+    /// Whether the player wears an elytra that still works.
+    pub(super) fn wears_elytra(&self, id: i32) -> bool {
+        self.players.get(&id).is_some_and(|p| {
+            let chest = p.inventory.slots[6];
+            chest.is_named("minecraft:elytra")
+                && ItemInfo::get(chest.item).is_some_and(|i| chest.damage < i.max_damage - 1)
+        })
     }
 
     /// Chorus fruit: the eater goes to a random spot within `diameter` blocks across

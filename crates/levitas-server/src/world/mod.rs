@@ -1391,21 +1391,12 @@ impl World {
         p.on_ground = on_ground;
         p.moved = true;
         // Landing folds the elytra.
-        let landed = on_ground && p.gliding;
-        if landed {
-            p.gliding = false;
-        }
-        let flags = (u8::from(p.sneaking) * 0x02) | (u8::from(p.sprinting) * 0x08);
-        if landed {
-            self.broadcast(
-                Writer::packet(clientbound::SET_ENTITY_DATA)
-                    .varint(id)
-                    .u8(0)
-                    .varint(0)
-                    .u8(flags)
-                    .u8(0xFF),
-                Some(id),
-            );
+        let gliding = self.players.get(&id).is_some_and(|p| p.gliding);
+        if gliding && (on_ground || !self.wears_elytra(id)) {
+            if let Some(p) = self.players.get_mut(&id) {
+                p.gliding = false;
+            }
+            self.send_player_flags(id);
         }
         if on_ground && pos.is_some() {
             self.frost_walk(id);
