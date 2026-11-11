@@ -643,6 +643,10 @@ impl World {
     /// Opens a container window on `view` for the player.
     pub(super) fn open_view(&mut self, id: i32, view: View, menu: i32, title: &str) {
         self.close_container(id);
+        if let Some(&(part, _)) = view.parts().first() {
+            let state = self.block(part);
+            self.piglins_guard(id, part, state);
+        }
         let mut first_viewer = false;
         for (part, _) in view.parts() {
             let part_state = self.block(part);

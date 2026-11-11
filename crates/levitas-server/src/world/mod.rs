@@ -51,6 +51,7 @@ mod mobs;
 mod monsters;
 mod nature;
 mod pathfinding;
+mod piglins;
 mod piston;
 mod portal;
 mod raids;
@@ -1556,6 +1557,7 @@ impl World {
     }
 
     fn break_block(&mut self, id: i32, pos: BlockPos, state: u16) {
+        self.piglins_guard(id, pos, state);
         if let Some(p) = self.players.get_mut(&id) {
             let block = i32::from(levitas_registry::STATE_BLOCK[usize::from(state)]);
             p.stats.add(levitas_registry::stat_type::MINED, block, 1);

@@ -1248,6 +1248,8 @@ pub struct Mob {
     kept: Option<Box<Compound>>,
     /// Horses and their kin: saddle, temper, rider and the stats they were born with.
     pub horse: Option<Box<super::horses::Horse>>,
+    /// Piglins: the gold they admire, and for how many more ticks.
+    pub admiring: Option<(u32, i32)>,
 }
 
 impl Mob {
@@ -1333,10 +1335,12 @@ impl Mob {
             panic_ticks: 0,
             kept: None,
             horse,
+            admiring: None,
             owner: None,
             variant: match kind {
                 MobKind::Cat => rng.below(cat_variants().max(1)) as u8,
                 MobKind::Wolf => wolf_variant_id("minecraft:pale").unwrap_or(0),
+                MobKind::Piglin => rng.below(2) as u8,
                 other => super::horses::roll_variant(other, rng),
             },
             sitting: false,
@@ -1476,7 +1480,8 @@ impl Mob {
         if self.kind == MobKind::Mooshroom && self.variant != 0 {
             packets.push(self.mooshroom_data(id));
         }
-        if let Some(item) = held_item(self.kind).and_then(ItemInfo::id_of) {
+        let weapon = held_item(self.kind).or_else(|| super::piglins::weapon(self));
+        if let Some(item) = weapon.and_then(ItemInfo::id_of) {
             let packet = Writer::packet(clientbound::SET_EQUIPMENT).varint(id).u8(0);
             packets.push(crate::inventory::write_stack(packet, Stack::new(item, 1)));
         }
@@ -1800,8 +1805,6 @@ const MANAGED_TAGS: &[&str] = &[
 fn held_item(kind: MobKind) -> Option<&'static str> {
     match kind {
         MobKind::WitherSkeleton => Some("minecraft:stone_sword"),
-        MobKind::Piglin => Some("minecraft:golden_sword"),
-        MobKind::PiglinBrute => Some("minecraft:golden_axe"),
         MobKind::Vex => Some("minecraft:iron_sword"),
         MobKind::Illusioner => Some("minecraft:bow"),
         _ => None,
@@ -2231,7 +2234,14 @@ impl World {
             if matches!(mob.kind, MobKind::Wolf | MobKind::Cat) {
                 self.tick_wolf(id, &mut mob);
             }
-            if mob.kind.is_monster() && self.hunt(id, &mut mob) {
+            let admiring = super::piglins::is_piglin(mob.kind) && self.tick_piglin(id, &mut mob);
+            if matches!(
+                mob.kind,
+                MobKind::Piglin | MobKind::PiglinBrute | MobKind::Hoglin
+            ) {
+                self.zombify(id, &mut mob);
+            }
+            if mob.kind.is_monster() && !admiring && self.hunt(id, &mut mob) {
                 continue; // exploded
             }
             if mob.kind.family() == MobKind::MagmaCube {
@@ -2964,6 +2974,7 @@ impl World {
         mob.hurt_ticks = HURT_TICKS;
         mob.health -= dealt;
         let anger_piglins = by_player.filter(|_| mob.kind == MobKind::ZombifiedPiglin);
+        let kind_of_hit = mob.kind;
         if let (Some(attacker), MobKind::Enderman) = (by_player, mob.kind) {
             mob.anger = mob.anger.max(ENDERMAN_ANGER);
             mob.hunting = Some(attacker);
@@ -3035,6 +3046,9 @@ impl World {
         }
         if let Some(attacker) = anger_piglins {
             self.anger_piglins(at, attacker);
+        }
+        if let Some(attacker) = by_player.filter(|_| super::piglins::is_piglin(kind_of_hit)) {
+            self.piglins_angered_at(at, attacker);
         }
         if let Some(attacker) = by_player.filter(|_| !killed) {
             self.rally_wolves(attacker, target);
@@ -3161,6 +3175,10 @@ impl World {
         }
         if super::horses::is_horse(mob.kind) {
             self.use_on_horse(id, target, slot, held);
+            return;
+        }
+        if mob.kind == MobKind::Piglin && held == "minecraft:gold_ingot" {
+            self.give_piglin_gold(id, target, slot);
             return;
         }
         if super::breeding::is_food(mob.kind, held) {

@@ -125,6 +125,15 @@ impl LootTables {
         catch
     }
 
+    /// What a gameplay table (`minecraft:piglin_bartering`, ...) gives, as whole stacks.
+    pub fn gameplay(&self, name: &str, ctx: &mut LootContext) -> Vec<Stack> {
+        let mut out = Vec::new();
+        if let Some(table) = self.gameplay.get(name) {
+            self.roll(table, ctx, &mut out);
+        }
+        out
+    }
+
     /// Items dropped by a mob of `entity` type (e.g. `minecraft:cow`) when it dies.
     pub fn entity_drops(&self, entity: &str, ctx: &mut LootContext) -> Vec<(i32, i32)> {
         if !crate::rules::bool("mob_drops") {

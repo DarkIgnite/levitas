@@ -107,6 +107,9 @@ impl World {
                 return false;
             }
         }
+        if super::piglins::is_piglin(mob.kind) {
+            mob.anger = mob.anger.saturating_sub(1);
+        }
         let range = mob.kind.follow_range();
         let head = BlockPos::new(
             mob.pos[0].floor() as i32,
@@ -118,7 +121,8 @@ impl World {
             .and_then(|pid| self.players.get(&pid))
             .is_some_and(|p| {
                 p.alive && p.survival() && horizontal_distance(p.pos, mob.pos) <= range
-            });
+            })
+            && !mob.hunting.is_some_and(|pid| self.piglin_spares(mob, pid));
         if !still_valid {
             mob.hunting = None;
         }
@@ -128,7 +132,7 @@ impl World {
             mob.hunting = self
                 .players
                 .iter()
-                .filter(|(_, p)| p.alive && p.survival())
+                .filter(|(&pid, p)| p.alive && p.survival() && !self.piglin_spares(mob, pid))
                 .map(|(&pid, p)| (pid, horizontal_distance(p.pos, mob.pos)))
                 .filter(|&(_, d)| d <= range)
                 .min_by(|a, b| a.1.total_cmp(&b.1))
@@ -224,7 +228,9 @@ impl World {
             self.shoot_at(id, mob, target, distance);
             return false;
         }
-        if mob.kind == MobKind::Pillager {
+        let crossbow_piglin =
+            mob.kind == MobKind::Piglin && mob.variant == super::piglins::CROSSBOW;
+        if mob.kind == MobKind::Pillager || crossbow_piglin {
             if mob.attack_cooldown == 0 && distance <= 16.0 {
                 self.shoot_at(id, mob, target, distance);
                 self.play_sound_at("minecraft:item.crossbow.shoot", mob.pos, 1.0, 1.0, None);

@@ -334,6 +334,14 @@ Known gaps are listed under each phase instead of being hidden.
       parents. Saved as vanilla saves them (saddle in `equipment`, `attributes`).
       Missing: horse armour, donkey and llama chests, the horse inventory screen,
       leashes, llama caravans and spit, camel dashing and two seats.
+      Piglins (`world/piglins.rs`): they leave players wearing gold armour alone
+      unless angered (a hit on any piglin near, or opening or breaking blocks they
+      guard within 16 blocks); half carry crossbows and shoot, the rest golden
+      swords; brutes always attack. Gold ingots handed over or dropped near an adult
+      are admired for six seconds and bartered from `gameplay/piglin_bartering`.
+      Outside the Nether piglins and brutes turn into zombified piglins and hoglins
+      into zoglins after 15 seconds. Missing: baby piglins, hunting hoglins, fear of
+      soul fire, picking up other gold items.
       Done: cows (milking), pigs, sheep (natural wool colours, shearing, regrowing wool
       by eating grass), chickens (eggs, slow falling). They wander, panic when hit,
       swim, look at players and make their sounds. Missing: breeding, babies, temptation

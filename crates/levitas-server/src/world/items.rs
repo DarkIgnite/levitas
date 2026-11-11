@@ -390,6 +390,28 @@ impl World {
         item.vel[2] *= friction;
     }
 
+    /// A mob takes one item off the dropped stack `id`, with the pickup animation.
+    pub(super) fn take_one_item(&mut self, id: i32, collector: i32) {
+        let Some(mut item) = self.items.remove(&id) else {
+            return;
+        };
+        self.broadcast(
+            Writer::packet(clientbound::TAKE_ITEM_ENTITY)
+                .varint(id)
+                .varint(collector)
+                .varint(1),
+            None,
+        );
+        item.stack.count -= 1;
+        if item.stack.count <= 0 {
+            self.broadcast(remove_entity(id), None);
+            return;
+        }
+        let [_, update] = spawn_packets(id, &item);
+        self.broadcast(update, None);
+        self.items.insert(id, item);
+    }
+
     /// Gives the item to a player touching it. Returns whether it was used up.
     fn pick_up(&mut self, id: i32, item: &mut ItemEntity) -> bool {
         // A player's pickup box is their hitbox (0.6 x 1.8) grown by 1 x 0.5 x 1.
