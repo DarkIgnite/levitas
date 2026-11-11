@@ -320,7 +320,7 @@ impl World {
                         pickup: false,
                         flaming: false,
                         potion: stack.potion,
-                        slowness: false,
+                        hit_effect: None,
                         punch: 0,
                         ..Default::default()
                     },

@@ -41,8 +41,8 @@ pub struct Shot {
     pub flaming: bool,
     /// The potion of a tipped arrow.
     pub potion: Option<u8>,
-    /// Whether the arrow slows what it hits for 30 seconds, as a stray's does.
-    pub slowness: bool,
+    /// What the arrow does to what it hits, as a stray's slows it for 30 seconds.
+    pub hit_effect: Option<levitas_registry::Effect>,
     /// The bow's punch level: extra knockback.
     pub punch: u32,
     /// How many more mobs a crossbow arrow with piercing goes through.
@@ -62,7 +62,7 @@ pub struct Arrow {
     pub(super) pickup: bool,
     flaming: bool,
     potion: Option<u8>,
-    slowness: bool,
+    hit_effect: Option<levitas_registry::Effect>,
     punch: u32,
     pub(super) stuck: Option<u32>,
     age: u32,
@@ -97,7 +97,7 @@ impl World {
             pickup,
             flaming,
             potion,
-            slowness,
+            hit_effect,
             punch,
             pierce,
             trident,
@@ -123,7 +123,7 @@ impl World {
             pickup,
             flaming,
             potion,
-            slowness,
+            hit_effect,
             punch,
             stuck: None,
             age: 0,
@@ -359,8 +359,8 @@ impl World {
                 }
                 let punch = 0.3 + 0.6 * f64::from(arrow.punch);
                 self.push_player(id, [away[0] * punch, 0.1, away[1] * punch]);
-                if arrow.slowness {
-                    self.add_effect(id, stray_slowness());
+                if let Some(effect) = arrow.hit_effect {
+                    self.add_effect(id, effect);
                 }
                 // A tipped arrow gives its potion's effects for an eighth of the time
                 // (instant ones in full).
@@ -395,8 +395,8 @@ impl World {
                 if arrow.flaming {
                     self.ignite_mob(id, 100);
                 }
-                if arrow.slowness {
-                    self.add_mob_effect(id, stray_slowness());
+                if let Some(effect) = arrow.hit_effect {
+                    self.add_mob_effect(id, effect);
                 }
                 for mut effect in arrow
                     .potion
@@ -550,7 +550,7 @@ impl World {
             pickup: survival && !infinity,
             flaming: bow.level_of("minecraft:flame") > 0,
             potion,
-            slowness: false,
+            hit_effect: None,
             punch: bow.level_of("minecraft:punch"),
             ..Default::default()
         };
@@ -558,13 +558,23 @@ impl World {
     }
 }
 
-/// What a stray's arrow does to what it hits: Slowness for 30 seconds.
-fn stray_slowness() -> levitas_registry::Effect {
-    levitas_registry::Effect {
-        id: levitas_registry::mob_effect::SLOWNESS,
-        duration: 30 * 20,
+/// What a skeleton's arrow does to what it hits: a stray's slows for 30 seconds, a
+/// bogged's poisons for 4 and a parched's weakens for 30.
+pub(super) fn skeleton_arrow_effect(
+    kind: super::mobs::MobKind,
+) -> Option<levitas_registry::Effect> {
+    use levitas_registry::{mob_effect, Effect};
+    let (id, seconds) = match kind {
+        super::mobs::MobKind::Stray => (mob_effect::SLOWNESS, 30),
+        super::mobs::MobKind::Bogged => (mob_effect::POISON, 4),
+        super::mobs::MobKind::Parched => (mob_effect::WEAKNESS, 30),
+        _ => return None,
+    };
+    Some(Effect {
+        id,
+        duration: seconds * 20,
         amplifier: 0,
-    }
+    })
 }
 
 /// The inventory slot of the arrows a bow uses: offhand first, then the hotbar and the
@@ -689,7 +699,7 @@ impl Arrow {
             pickup: nbt.int("pickup").unwrap_or(0) == 1,
             flaming: false,
             potion: if trident { None } else { item.potion },
-            slowness: false,
+            hit_effect: None,
             punch: 0,
             stuck: in_ground.then(|| nbt.int("life").unwrap_or(0).max(0) as u32),
             age: 0,
@@ -756,7 +766,7 @@ mod tests {
             pickup: false,
             flaming: false,
             potion: Some(swiftness),
-            slowness: false,
+            hit_effect: None,
             punch: 0,
             stuck: None,
             age: 0,
@@ -786,7 +796,7 @@ mod tests {
             pickup: false,
             flaming: false,
             potion: None,
-            slowness: true,
+            hit_effect: skeleton_arrow_effect(super::mobs::MobKind::Stray),
             punch: 0,
             stuck: None,
             age: 0,
@@ -803,7 +813,7 @@ mod tests {
         assert_eq!(slow.duration, 600);
         // An ordinary arrow does nothing of the kind.
         let plain = Arrow {
-            slowness: false,
+            hit_effect: None,
             ..arrow
         };
         w.players.get_mut(&id).unwrap().health = 20.0;
@@ -833,7 +843,7 @@ mod tests {
             pickup: false,
             flaming: false,
             potion: Some(slowness),
-            slowness: false,
+            hit_effect: None,
             punch: 0,
             stuck: None,
             age: 0,

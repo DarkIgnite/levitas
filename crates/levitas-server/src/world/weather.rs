@@ -428,6 +428,23 @@ impl World {
                         continue;
                     }
                 }
+                // Mooshrooms swap colour.
+                MobKind::Mooshroom => {
+                    if let Some(mut m) = self.mobs.remove(&id) {
+                        m.variant ^= 1;
+                        let data = m.mooshroom_data(id);
+                        self.send_to_viewers(&m, data);
+                        self.play_sound_at(
+                            "minecraft:entity.mooshroom.convert",
+                            m.pos,
+                            1.0,
+                            1.0,
+                            None,
+                        );
+                        self.mobs.insert(id, m);
+                    }
+                    continue;
+                }
                 // Creepers become charged.
                 MobKind::Creeper => {
                     if let Some(m) = self.mobs.get_mut(&id) {

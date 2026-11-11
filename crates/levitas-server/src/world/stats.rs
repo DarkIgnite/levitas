@@ -37,7 +37,6 @@ impl Stats {
         self.values.insert((category, stat), value);
     }
 
-    #[cfg(test)]
     pub fn get(&self, category: i32, stat: i32) -> i32 {
         self.values.get(&(category, stat)).copied().unwrap_or(0)
     }

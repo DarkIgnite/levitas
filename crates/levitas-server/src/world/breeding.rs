@@ -49,6 +49,24 @@ pub fn is_food(kind: MobKind, item: &str) -> bool {
                 | "minecraft:torchflower_seeds"
                 | "minecraft:pitcher_pod"
         ),
+        // Animals that breed untamed, by their vanilla food tags.
+        MobKind::Mooshroom => levitas_registry::item_has_tag(item, "minecraft:cow_food"),
+        MobKind::Goat
+        | MobKind::Fox
+        | MobKind::Panda
+        | MobKind::Turtle
+        | MobKind::Frog
+        | MobKind::Axolotl
+        | MobKind::Bee
+        | MobKind::Armadillo
+        | MobKind::Camel
+        | MobKind::Sniffer
+        | MobKind::Ocelot
+        | MobKind::Strider
+        | MobKind::Hoglin => {
+            let short = kind.name().trim_start_matches("minecraft:");
+            levitas_registry::item_has_tag(item, &format!("minecraft:{short}_food"))
+        }
         _ => false,
     }
 }

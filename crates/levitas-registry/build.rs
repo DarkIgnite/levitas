@@ -1047,7 +1047,7 @@ fn mob_stats(out: &mut String) {
                 .map_or(0.0, |&(_, v)| v)
         };
         rows.push(format!(
-            "({name:?}, MobStats {{ health: {:?}, width: {:?}, height: {:?}, speed: {:?},              flying_speed: {:?}, attack: {:?}, follow: {:?}, armor: {:?}, knockback_resistance: {:?},              fire_immune: {}, enemy: {}, xp: {}, friendly: {} }})",
+            "({name:?}, MobStats {{ health: {:?}, width: {:?}, height: {:?}, speed: {:?},              flying_speed: {:?}, attack: {:?}, follow: {:?}, armor: {:?}, knockback_resistance: {:?},              fire_immune: {}, enemy: {}, xp: {}, friendly: {}, spawns_in: SpawnPlace::{:?} }})",
             attr(Attributes::MAX_HEALTH) as f32,
             e.dimension[0] as f64,
             e.dimension[1] as f64,
@@ -1061,6 +1061,7 @@ fn mob_stats(out: &mut String) {
             e.is_enemy,
             e.experience_reward,
             e.category.is_friendly,
+            e.spawn_restriction.location,
         ));
     }
     rows.sort();

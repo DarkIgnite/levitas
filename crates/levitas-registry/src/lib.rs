@@ -93,6 +93,15 @@ pub fn block_has_tag(state: u16, tag: &str) -> bool {
         .is_some_and(|blocks| blocks.members(tag).binary_search(&i64::from(block)).is_ok())
 }
 
+/// Whether the item called `name` is in the item tag `tag`.
+pub fn item_has_tag(name: &str, tag: &str) -> bool {
+    let Some(item) = ItemInfo::id_of(name) else {
+        return false;
+    };
+    TagRegistry::get("minecraft:item")
+        .is_some_and(|items| items.members(tag).binary_search(&i64::from(item)).is_ok())
+}
+
 pub struct BlockInfo {
     pub name: &'static str,
     pub first_state: u16,
@@ -326,6 +335,17 @@ pub struct MobStats {
     pub xp: u32,
     /// Its spawn category is a friendly one (animals, water creatures).
     pub friendly: bool,
+    /// Where it spawns naturally.
+    pub spawns_in: SpawnPlace,
+}
+
+/// Where a mob may spawn naturally.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SpawnPlace {
+    OnGround,
+    InWater,
+    InLava,
+    Unrestricted,
 }
 
 impl MobStats {

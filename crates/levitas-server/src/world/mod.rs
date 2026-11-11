@@ -716,6 +716,8 @@ struct World {
     rockets: HashMap<i32, rockets::Rocket>,
     /// Bells rung lately, and until when villagers near them hide.
     bell_alarms: Vec<(BlockPos, u64)>,
+    /// Ticks until phantoms next try to find sleepless players.
+    phantom_timer: u32,
     /// Item frames and paintings.
     hanging: HashMap<i32, hanging::Hanging>,
     armor_stands: HashMap<i32, armor_stands::ArmorStand>,
@@ -851,6 +853,7 @@ impl World {
             carts: HashMap::new(),
             rockets: HashMap::new(),
             bell_alarms: Vec::new(),
+            phantom_timer: 1200,
             hanging: HashMap::new(),
             armor_stands: HashMap::new(),
             detectors: HashSet::new(),
@@ -1566,6 +1569,30 @@ impl World {
         };
         self.set_block(pos, block::AIR);
         self.remove_block_entity(pos);
+        // An infested block lets out its silverfish, unless mined with silk touch.
+        if crate::blocks::name(state).starts_with("minecraft:infested_") {
+            let silk = self.players.get(&id).is_some_and(|p| {
+                p.survival()
+                    && p.inventory
+                        .held(p.held)
+                        .enchants
+                        .level_of("minecraft:silk_touch")
+                        > 0
+            });
+            let creative = self.players.get(&id).is_some_and(|p| !p.survival());
+            if !silk
+                && !creative
+                && crate::rules::difficulty() != crate::rules::Difficulty::Peaceful
+            {
+                let at = [
+                    f64::from(pos.x) + 0.5,
+                    f64::from(pos.y),
+                    f64::from(pos.z) + 0.5,
+                ];
+                let silverfish = mobs::Mob::new(mobs::MobKind::Silverfish, at, &mut self.rng);
+                self.mobs.insert(next_entity_id(), silverfish);
+            }
+        }
         if let Some(shards) = &shards {
             if self.players.get(&id).is_some_and(Player::survival) {
                 for &s in shards {
@@ -1759,6 +1786,7 @@ impl World {
         self.tick_eyes();
         self.tick_orbs();
         self.tick_monster_spawning();
+        self.tick_phantoms();
         self.tick_brewing();
         self.tick_survival();
         self.tick_hazards();

@@ -24,6 +24,17 @@ const ANGER_TICKS: u32 = 600;
 const REPAIR: f32 = 25.0;
 
 /// The data telling clients whether a golem was built by a player.
+/// Entity data for whether a snow golem wears its pumpkin.
+pub fn snow_golem_data(id: i32, pumpkin: bool) -> Writer {
+    const DATA_PUMPKIN: u8 = 16;
+    Writer::packet(clientbound::SET_ENTITY_DATA)
+        .varint(id)
+        .u8(DATA_PUMPKIN)
+        .varint(0)
+        .u8(if pumpkin { 0x10 } else { 0 })
+        .u8(0xFF)
+}
+
 pub fn golem_data(id: i32, player_created: bool) -> Writer {
     Writer::packet(clientbound::SET_ENTITY_DATA)
         .varint(id)
@@ -157,6 +168,32 @@ impl World {
         }
         let body = offset(head, Dir::Down);
         let legs = offset(body, Dir::Down);
+        // Two snow blocks make a snow golem.
+        if self.block(body) == block::SNOW_BLOCK && self.block(legs) == block::SNOW_BLOCK {
+            for q in [head, body, legs] {
+                self.set_block_updating(q, block::AIR);
+            }
+            let at = [
+                f64::from(legs.x) + 0.5,
+                f64::from(legs.y),
+                f64::from(legs.z) + 0.5,
+            ];
+            let golem = Mob::new(MobKind::SnowGolem, at, &mut self.rng);
+            self.mobs.insert(next_entity_id(), golem);
+            let builders: Vec<i32> = self
+                .players
+                .iter()
+                .filter(|(_, p)| (0..3).map(|i| (p.pos[i] - at[i]).powi(2)).sum::<f64>() <= 25.0)
+                .map(|(&pid, _)| pid)
+                .collect();
+            for pid in builders {
+                self.advance(
+                    pid,
+                    super::advancements::Trigger::SummonedEntity(entity_type::SNOW_GOLEM),
+                );
+            }
+            return;
+        }
         if self.block(body) != block::IRON_BLOCK || self.block(legs) != block::IRON_BLOCK {
             return;
         }
@@ -193,6 +230,79 @@ impl World {
                 );
             }
             return;
+        }
+    }
+
+    /// A snow golem's turn: it leaves snow where it walks (not in the Nether, where it
+    /// melts instead) and throws a snowball at the nearest monster within 10 blocks
+    /// every second.
+    pub(super) fn tick_snow_golem(&mut self, id: i32, mob: &mut Mob) {
+        if self.dimension.ultrawarm() {
+            if self.tick.is_multiple_of(20) {
+                self.hurt_mob(id, mob, 1.0, "minecraft:on_fire");
+            }
+            return;
+        }
+        let feet = BlockPos::new(
+            mob.pos[0].floor() as i32,
+            mob.pos[1].floor() as i32,
+            mob.pos[2].floor() as i32,
+        );
+        if mob.on_ground_now()
+            && self.loaded_block(feet).is_some_and(is_air)
+            && blocks::sturdy(self.block(offset(feet, Dir::Down)), Dir::Up)
+        {
+            self.set_block_updating(feet, block::SNOW);
+        }
+        mob.attack_cooldown = mob.attack_cooldown.saturating_sub(1);
+        if mob.attack_cooldown > 0 {
+            return;
+        }
+        let target = self
+            .mobs
+            .iter()
+            .filter(|(_, m)| m.alive() && m.kind.is_monster() && distance(m.pos, mob.pos) <= 10.0)
+            .min_by(|a, b| distance(a.1.pos, mob.pos).total_cmp(&distance(b.1.pos, mob.pos)))
+            .map(|(_, m)| [m.pos[0], m.pos[1] + m.size().1 * 0.6, m.pos[2]]);
+        let Some(target) = target else {
+            return;
+        };
+        mob.attack_cooldown = 20;
+        mob.head_yaw = super::mobs::yaw_towards(mob.pos, target);
+        let eye = [mob.pos[0], mob.pos[1] + 1.7, mob.pos[2]];
+        let d = [target[0] - eye[0], target[1] - eye[1], target[2] - eye[2]];
+        let flat = d[0].hypot(d[2]);
+        // Aimed a little high to make up for the fall.
+        let aim = [d[0], d[1] + flat * 0.2, d[2]];
+        let len = (aim[0] * aim[0] + aim[1] * aim[1] + aim[2] * aim[2])
+            .sqrt()
+            .max(1e-6);
+        let vel = aim.map(|v| v / len * 1.6);
+        self.throw_snowball(id, eye, vel);
+        self.play_sound_at("minecraft:entity.snow_golem.shoot", mob.pos, 1.0, 0.8, None);
+    }
+
+    /// Shears the pumpkin off a snow golem's head.
+    pub(super) fn shear_snow_golem(&mut self, id: i32, target: i32, slot: usize) {
+        let Some(mut mob) = self.mobs.remove(&target) else {
+            return;
+        };
+        if mob.sheared {
+            self.mobs.insert(target, mob);
+            return;
+        }
+        mob.sheared = true;
+        self.send_to_viewers(&mob, snow_golem_data(target, false));
+        self.play_sound_at("minecraft:entity.snow_golem.shear", mob.pos, 1.0, 1.0, None);
+        if let Some(item) = ItemInfo::id_of("minecraft:carved_pumpkin") {
+            self.scatter_item(
+                [mob.pos[0], mob.pos[1] + 1.7, mob.pos[2]],
+                Stack::new(item, 1),
+            );
+        }
+        self.mobs.insert(target, mob);
+        if self.players.get(&id).is_some_and(|p| p.survival()) {
+            self.damage_item(id, slot, 1, ENTITY_EVENT_MAINHAND_BREAK);
         }
     }
 
@@ -273,6 +383,39 @@ mod tests {
         let golem = w.mobs.values().find(|m| m.kind == MobKind::IronGolem);
         assert!(golem.is_some_and(|g| g.player_created));
         assert!(is_air(w.block(body)) && is_air(w.block(head)));
+    }
+
+    #[test]
+    fn snow_golems_are_built_trail_snow_and_throw_snowballs() {
+        let mut w = world();
+        let legs = BlockPos::new(5, -60, 5);
+        let body = offset(legs, Dir::Up);
+        let head = offset(body, Dir::Up);
+        w.set_block(legs, block::SNOW_BLOCK);
+        w.set_block(body, block::SNOW_BLOCK);
+        w.set_block(head, block::CARVED_PUMPKIN);
+        w.try_build_golem(head);
+        let (&id, _) = w
+            .mobs
+            .iter()
+            .find(|(_, m)| m.kind == MobKind::SnowGolem)
+            .unwrap();
+        assert!(is_air(w.block(body)));
+        let mut golem = w.mobs.remove(&id).unwrap();
+        golem.pos = [5.5, -60.0, 5.5];
+        // On the ground it leaves snow behind.
+        for _ in 0..40 {
+            w.tick_snow_golem(id, &mut golem);
+            if w.block(legs) == block::SNOW {
+                break;
+            }
+        }
+        let zombie = Mob::new(MobKind::Zombie, [9.5, -60.0, 5.5], &mut w.rng);
+        w.mobs.insert(next_entity_id(), zombie);
+        golem.attack_cooldown = 0;
+        let before = w.thrown.len();
+        w.tick_snow_golem(id, &mut golem);
+        assert_eq!(w.thrown.len(), before + 1, "a snowball at the zombie");
     }
 
     #[test]

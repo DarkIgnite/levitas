@@ -162,6 +162,25 @@ impl World {
         true
     }
 
+    /// A snowball thrown by a mob (a snow golem).
+    pub(super) fn throw_snowball(&mut self, thrower: i32, pos: [f64; 3], vel: [f64; 3]) {
+        let Some(item) = ItemInfo::id_of("minecraft:snowball") else {
+            return;
+        };
+        let thrown = Thrown {
+            kind: ThrownKind::Snowball,
+            pos,
+            vel,
+            thrower,
+            age: 0,
+            stack: Stack::new(item, 1),
+        };
+        let t_id = next_entity_id();
+        self.broadcast(spawn_packet(t_id, &thrown), None);
+        self.broadcast(item_data(t_id, &thrown), None);
+        self.thrown.insert(t_id, thrown);
+    }
+
     /// Throws a splash potion from an entity (like a witch).
     pub(super) fn throw_splash_potion(
         &mut self,
@@ -326,6 +345,13 @@ impl World {
                 self.play_sound_at("minecraft:entity.player.teleport", t.pos, 1.0, 1.0, None);
                 self.teleport(id, t.pos);
                 self.damage(id, PEARL_DAMAGE, Damage::Fall);
+                // One pearl in twenty brings an endermite along.
+                if self.rng.below(20) == 0
+                    && crate::rules::difficulty() != crate::rules::Difficulty::Peaceful
+                {
+                    let mite = Mob::new(MobKind::Endermite, t.pos, &mut self.rng);
+                    self.mobs.insert(next_entity_id(), mite);
+                }
             }
             ThrownKind::Egg if self.rng.below(8) == 0 => {
                 // One time in 32 of those, four chicks.

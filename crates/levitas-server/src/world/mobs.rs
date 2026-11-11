@@ -36,6 +36,8 @@ const DEFAULT_CREATURE_PROBABILITY: f64 = 0.1;
 
 const DATA_SHEEP_WOOL: u8 = 18;
 const DATA_SLIME_SIZE: u8 = 18;
+/// A mooshroom's colour: 0 red, 1 brown.
+const DATA_MOOSHROOM_VARIANT: u8 = 17;
 const SERIALIZER_INT: i32 = 1;
 /// How long an enderman stays angry after being looked at or hit.
 pub const ENDERMAN_ANGER: u32 = 600;
@@ -984,6 +986,7 @@ impl MobKind {
             MobKind::Evoker => 6.0,
             MobKind::Wolf => 4.0,
             MobKind::WitherSkeleton => 8.0,
+            MobKind::Phantom => 6.0,
             other if other.is_monster() => other.stats().map_or(0.0, |s| s.attack),
             _ => 0.0,
         }
@@ -1405,6 +1408,21 @@ impl Mob {
         )
     }
 
+    /// Whether it stands on the ground.
+    pub(super) fn on_ground_now(&self) -> bool {
+        self.on_ground
+    }
+
+    /// Entity data with a mooshroom's colour.
+    pub(super) fn mooshroom_data(&self, id: i32) -> Writer {
+        Writer::packet(clientbound::SET_ENTITY_DATA)
+            .varint(id)
+            .u8(DATA_MOOSHROOM_VARIANT)
+            .varint(SERIALIZER_INT)
+            .varint(i32::from(self.variant))
+            .u8(0xFF)
+    }
+
     pub(super) fn spawn_packets(&self, id: i32) -> Vec<Writer> {
         let mut packets = vec![Writer::packet(clientbound::ADD_ENTITY)
             .varint(id)
@@ -1443,6 +1461,16 @@ impl Mob {
         }
         if matches!(self.kind, MobKind::Wolf | MobKind::Cat) {
             packets.push(super::wolves::wolf_data(self, id));
+        }
+        if self.kind == MobKind::SnowGolem && self.sheared {
+            packets.push(super::golems::snow_golem_data(id, false));
+        }
+        if self.kind == MobKind::Mooshroom && self.variant != 0 {
+            packets.push(self.mooshroom_data(id));
+        }
+        if let Some(item) = held_item(self.kind).and_then(ItemInfo::id_of) {
+            let packet = Writer::packet(clientbound::SET_EQUIPMENT).varint(id).u8(0);
+            packets.push(crate::inventory::write_stack(packet, Stack::new(item, 1)));
         }
         if let Some(name) = self.name {
             packets.push(name_data(id, name));
@@ -1572,6 +1600,10 @@ impl Mob {
                 nbt.insert("Size", i32::from(self.slime_size) - 1);
             }
             MobKind::ZombifiedPiglin => nbt.insert("AngerTime", self.anger as i32),
+            MobKind::Mooshroom => {
+                nbt.insert("Type", if self.variant == 1 { "brown" } else { "red" });
+            }
+            MobKind::SnowGolem => nbt.insert("Pumpkin", !self.sheared),
             MobKind::Wolf | MobKind::Cat => {
                 let name = if self.kind == MobKind::Cat {
                     cat_variant_name(self.variant)
@@ -1663,6 +1695,7 @@ impl Mob {
         let variant = match kind {
             MobKind::Cat => nbt.str("variant").and_then(cat_variant_id),
             MobKind::Wolf => nbt.str("variant").and_then(wolf_variant_id),
+            MobKind::Mooshroom => Some(u8::from(nbt.str("Type") == Some("brown"))),
             _ => None,
         };
         if let Some(v) = variant {
@@ -1745,6 +1778,19 @@ const MANAGED_TAGS: &[&str] = &[
     "powered",
     "AngerTime",
 ];
+
+/// What a mob holds in its main hand when it spawns, for mobs Levitas does not arm in
+/// their own code.
+fn held_item(kind: MobKind) -> Option<&'static str> {
+    match kind {
+        MobKind::WitherSkeleton => Some("minecraft:stone_sword"),
+        MobKind::Piglin => Some("minecraft:golden_sword"),
+        MobKind::PiglinBrute => Some("minecraft:golden_axe"),
+        MobKind::Vex => Some("minecraft:iron_sword"),
+        MobKind::Illusioner => Some("minecraft:bow"),
+        _ => None,
+    }
+}
 
 /// A natural wool colour, with vanilla's odds: mostly white, sometimes grey, black or
 /// brown, and rarely pink.
@@ -2154,6 +2200,9 @@ impl World {
                     self.send_to_viewers(&mob, items::remove_entity(id));
                     continue;
                 }
+            }
+            if mob.kind == MobKind::SnowGolem {
+                self.tick_snow_golem(id, &mut mob);
             }
             if mob.kind == MobKind::IronGolem {
                 self.tick_golem(id, &mut mob);
@@ -3109,12 +3158,57 @@ impl World {
                     self.damage_item(id, slot, 1, ENTITY_EVENT_MAINHAND_BREAK);
                 }
             }
-            (MobKind::Cow, "minecraft:bucket") => {
+            (MobKind::SnowGolem, "minecraft:shears") => {
+                self.shear_snow_golem(id, target, slot);
+            }
+            (MobKind::Mooshroom, "minecraft:shears") if mob.age >= 0 => {
+                self.shear_mooshroom(id, target, slot);
+            }
+            (MobKind::Mooshroom, "minecraft:bowl") if mob.age >= 0 => {
+                let pos = mob.pos;
+                self.play_sound_at("minecraft:entity.mooshroom.milk", pos, 1.0, 1.0, None);
+                self.exchange_held(id, slot, "minecraft:mushroom_stew");
+            }
+            (MobKind::Cow | MobKind::Mooshroom, "minecraft:bucket") if mob.age >= 0 => {
                 let pos = mob.pos;
                 self.play_sound_at("minecraft:entity.cow.milk", pos, 1.0, 1.0, None);
                 self.exchange_held(id, slot, "minecraft:milk_bucket");
             }
             _ => {}
+        }
+    }
+
+    /// Shears a mooshroom: it turns into a cow and drops five mushrooms of its colour.
+    fn shear_mooshroom(&mut self, id: i32, target: i32, slot: usize) {
+        let Some(old) = self.mobs.remove(&target) else {
+            return;
+        };
+        let mushroom = if old.variant == 1 {
+            "minecraft:brown_mushroom"
+        } else {
+            "minecraft:red_mushroom"
+        };
+        let mut cow = Mob::new(MobKind::Cow, old.pos, &mut self.rng);
+        cow.uuid = old.uuid;
+        cow.name = old.name;
+        cow.yaw = old.yaw;
+        cow.head_yaw = old.head_yaw;
+        cow.health = old.health.min(cow.health);
+        cow.viewers = old.viewers;
+        self.send_to_viewers(&cow, items::remove_entity(target));
+        for p in cow.spawn_packets(target) {
+            self.send_to_viewers(&cow, p);
+        }
+        self.play_sound_at("minecraft:entity.mooshroom.shear", cow.pos, 1.0, 1.0, None);
+        if let Some(item) = ItemInfo::id_of(mushroom) {
+            self.scatter_item(
+                [cow.pos[0], cow.pos[1] + 1.0, cow.pos[2]],
+                Stack::new(item, 5),
+            );
+        }
+        self.mobs.insert(target, cow);
+        if self.players.get(&id).is_some_and(|p| p.survival()) {
+            self.damage_item(id, slot, 1, ENTITY_EVENT_MAINHAND_BREAK);
         }
     }
 
@@ -4029,6 +4123,75 @@ mod path_tests {
             .insert(1, Player::new(profile, tx, [4.5, -60.0, 2.5]));
         world.think(&mut rabbit);
         assert!(rabbit.panic > 0);
+    }
+
+    #[test]
+    fn animals_eat_the_food_of_their_tags() {
+        use super::super::breeding::is_food;
+        assert!(is_food(MobKind::Mooshroom, "minecraft:wheat"));
+        assert!(is_food(MobKind::Goat, "minecraft:wheat"));
+        assert!(is_food(MobKind::Fox, "minecraft:sweet_berries"));
+        assert!(is_food(MobKind::Panda, "minecraft:bamboo"));
+        assert!(is_food(MobKind::Turtle, "minecraft:seagrass"));
+        assert!(is_food(MobKind::Strider, "minecraft:warped_fungus"));
+        assert!(is_food(MobKind::Hoglin, "minecraft:crimson_fungus"));
+        assert!(!is_food(MobKind::Goat, "minecraft:carrot"));
+        // Horses breed only once tamed.
+        assert!(!is_food(MobKind::Horse, "minecraft:golden_apple"));
+    }
+
+    #[test]
+    fn mooshrooms_give_stew_and_turn_into_cows_when_sheared() {
+        let mut w = flat_world();
+        let id = next_entity_id();
+        w.mobs.insert(
+            id,
+            Mob::new(MobKind::Mooshroom, [2.5, -60.0, 2.5], &mut w.rng),
+        );
+        w.shear_mooshroom(0, id, 0);
+        assert_eq!(w.mobs[&id].kind, MobKind::Cow);
+        let red = ItemInfo::id_of("minecraft:red_mushroom").unwrap();
+        let dropped: i32 = w
+            .items
+            .values()
+            .filter(|i| i.stack().item == red)
+            .map(|i| i.stack().count)
+            .sum();
+        assert_eq!(dropped, 5);
+        // The brown kind is saved and loaded back.
+        let mut brown = Mob::new(MobKind::Mooshroom, [2.5, -60.0, 2.5], &mut w.rng);
+        brown.variant = 1;
+        let back = Mob::from_nbt(&brown.to_nbt(), &mut w.rng).unwrap();
+        assert_eq!(back.variant, 1);
+    }
+
+    #[test]
+    fn skeleton_kin_tip_their_arrows_and_wither_skeletons_wither() {
+        use levitas_registry::mob_effect;
+        let effect = super::super::arrows::skeleton_arrow_effect;
+        assert_eq!(effect(MobKind::Bogged).unwrap().id, mob_effect::POISON);
+        assert_eq!(effect(MobKind::Parched).unwrap().id, mob_effect::WEAKNESS);
+        assert_eq!(effect(MobKind::Stray).unwrap().duration, 600);
+        assert!(effect(MobKind::Skeleton).is_none());
+        let hit = super::super::monsters::melee_effect(
+            MobKind::WitherSkeleton,
+            crate::rules::Difficulty::Easy,
+        );
+        assert_eq!(hit.unwrap().id, mob_effect::WITHER);
+        assert_eq!(MobKind::Bogged.family(), MobKind::Skeleton);
+        assert!(!MobKind::Parched.burns_in_daylight() && MobKind::Bogged.burns_in_daylight());
+        assert!(MobKind::WitherSkeleton.fire_immune());
+        assert_eq!(MobKind::Warden.max_health(), 500.0);
+        assert_eq!(MobKind::Phantom.attack_damage(), 6.0);
+    }
+
+    #[test]
+    fn drowned_spawn_in_water() {
+        assert_eq!(
+            MobKind::Drowned.stats().unwrap().spawns_in,
+            levitas_registry::SpawnPlace::InWater
+        );
+        assert_eq!(MobKind::Drowned.family(), MobKind::Zombie);
     }
 
     #[test]

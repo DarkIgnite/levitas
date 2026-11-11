@@ -17,6 +17,8 @@ use crate::blocks::{sturdy, Dir};
 use crate::world::survival::Damage;
 
 /// Most monsters around one player.
+/// Ticks awake (three days) before phantoms come.
+const PHANTOM_AWAKE: i32 = 72_000;
 const MONSTER_CAP: usize = 70;
 /// Monsters spawn this many chunks around players, whatever the view distance.
 const MOB_SPAWN_CHUNKS: i32 = 8;
@@ -343,9 +345,10 @@ impl World {
         false
     }
 
-    /// Whether a monster may appear at `pos`: husks and strays only where the sky is open.
+    /// Whether a monster may appear at `pos`: husks, strays and parched only where the sky
+    /// is open.
     pub(super) fn sky_allows(&self, kind: MobKind, pos: BlockPos) -> bool {
-        !matches!(kind, MobKind::Husk | MobKind::Stray)
+        !matches!(kind, MobKind::Husk | MobKind::Stray | MobKind::Parched)
             || self.light_at(pos).is_some_and(|(sky, _)| sky >= 15)
     }
 
@@ -545,7 +548,7 @@ impl World {
                 flaming: false,
                 potion: None,
                 // A stray's arrows slow what they hit.
-                slowness: mob.kind == MobKind::Stray,
+                hit_effect: super::arrows::skeleton_arrow_effect(mob.kind),
                 punch: 0,
                 ..Default::default()
             },
@@ -740,6 +743,71 @@ impl World {
         })
     }
 
+    /// Phantoms, every one to two minutes: over a player who has not slept for three days
+    /// or more (more likely the longer), at night or in a thunderstorm, under the open
+    /// sky, a group of one to (difficulty + 1) phantoms appears 20 to 34 blocks up.
+    pub(super) fn tick_phantoms(&mut self) {
+        self.phantom_timer = self.phantom_timer.saturating_sub(1);
+        if self.phantom_timer > 0 {
+            return;
+        }
+        self.phantom_timer = 1200 + self.rng.below(1200);
+        let difficulty = crate::rules::difficulty();
+        if !self.dimension.has_sky()
+            || !crate::rules::bool("spawn_phantoms")
+            || difficulty == crate::rules::Difficulty::Peaceful
+            || (self.sky_darken() < 5 && !self.weather.is_thundering())
+        {
+            return;
+        }
+        let sea = self.dimension.sea_level();
+        let sleepless: Vec<(i32, [f64; 3], i32)> = self
+            .players
+            .iter()
+            .filter(|(_, p)| p.alive && p.survival() && p.pos[1] >= f64::from(sea))
+            .map(|(&id, p)| {
+                let awake = p.stats.get(
+                    levitas_registry::stat_type::CUSTOM,
+                    levitas_registry::custom_stat::TIME_SINCE_REST,
+                );
+                (id, p.pos, awake)
+            })
+            .collect();
+        for (id, pos, awake) in sleepless {
+            let head = BlockPos::new(
+                pos[0].floor() as i32,
+                (pos[1] + 1.62).floor() as i32,
+                pos[2].floor() as i32,
+            );
+            if self.light_at(head).is_none_or(|(sky, _)| sky < 15) {
+                continue;
+            }
+            if awake < PHANTOM_AWAKE || self.rng.below(awake.max(1) as u32) < PHANTOM_AWAKE as u32 {
+                continue;
+            }
+            let up = 20 + self.rng.below(15) as i32;
+            let at = [
+                pos[0] + f64::from(self.rng.below(21) as i32 - 10),
+                pos[1] + f64::from(up),
+                pos[2] + f64::from(self.rng.below(21) as i32 - 10),
+            ];
+            let spot = BlockPos::new(
+                at[0].floor() as i32,
+                at[1].floor() as i32,
+                at[2].floor() as i32,
+            );
+            if self.loaded_block(spot).is_none_or(|s| !is_air(s)) {
+                continue;
+            }
+            let count = 1 + self.rng.below(difficulty as u32 + 1);
+            for _ in 0..count {
+                let mut phantom = Mob::new(MobKind::Phantom, at, &mut self.rng);
+                phantom.hunting = Some(id);
+                self.mobs.insert(next_entity_id(), phantom);
+            }
+        }
+    }
+
     /// Tries to spawn monster groups in the dark around each player.
     pub(super) fn tick_monster_spawning(&mut self) {
         if !crate::rules::bool("spawn_mobs")
@@ -800,8 +868,15 @@ impl World {
             let pos = BlockPos::new(gx, y, gz);
             let at = [f64::from(gx) + 0.5, f64::from(y), f64::from(gz) + 0.5];
             // A spider needs more room than the two blocks a zombie needs.
-            if self.monster_can_spawn(pos) && self.sky_allows(kind, pos) && self.mob_fits(kind, at)
-            {
+            let in_water = kind
+                .stats()
+                .is_some_and(|s| s.spawns_in == levitas_registry::SpawnPlace::InWater);
+            let placed = if in_water {
+                self.monster_can_spawn_in_water(pos)
+            } else {
+                self.monster_can_spawn(pos) && self.mob_fits(kind, at)
+            };
+            if placed && self.sky_allows(kind, pos) {
                 let actual_kind = if kind == MobKind::Zombie && self.rng.below(20) == 0 {
                     MobKind::ZombieVillager
                 } else {
@@ -811,6 +886,32 @@ impl World {
                 self.mobs.insert(next_entity_id(), mob);
             }
         }
+    }
+
+    /// Whether a water monster (a drowned) may appear at `pos`: in water two blocks deep,
+    /// far enough from players, and dark enough.
+    fn monster_can_spawn_in_water(&mut self, pos: BlockPos) -> bool {
+        let water = |w: &World, dy: i32| {
+            w.loaded_block_at(BlockPos::new(pos.x, pos.y + dy, pos.z))
+                .and_then(fluid_at)
+                .is_some_and(|f| f.fluid == crate::blocks::fluid::Fluid::Water)
+        };
+        if !water(self, 0) || !water(self, 1) {
+            return false;
+        }
+        let centre = [
+            f64::from(pos.x) + 0.5,
+            f64::from(pos.y),
+            f64::from(pos.z) + 0.5,
+        ];
+        let too_close = self.players.values().any(|p| {
+            let d: f64 = (0..3).map(|i| (p.pos[i] - centre[i]).powi(2)).sum();
+            d.sqrt() < SPAWN_DISTANCE
+        });
+        !too_close
+            && self
+                .light_at(pos)
+                .is_some_and(|(sky, block)| block == 0 && i32::from(sky) - self.sky_darken() <= 7)
     }
 
     /// The y of the highest block in a loaded column that is not air.
@@ -958,6 +1059,12 @@ pub(super) fn melee_effect(
         (MobKind::CaveSpider, Difficulty::Hard) => Some(Effect {
             id: mob_effect::POISON,
             duration: 15 * 20,
+            amplifier: 0,
+        }),
+        // A wither skeleton's blow withers for 10 seconds.
+        (MobKind::WitherSkeleton, _) => Some(Effect {
+            id: mob_effect::WITHER,
+            duration: 10 * 20,
             amplifier: 0,
         }),
         _ => None,
