@@ -40,6 +40,7 @@ mod golems;
 mod hanging;
 mod hazards;
 mod hoppers;
+mod horses;
 mod huge_mushroom;
 mod items;
 mod jukebox;
@@ -1061,7 +1062,14 @@ impl World {
                     self.get_off(id);
                 }
             }
-            Event::MoveVehicle { id, pos, yaw } => self.boat_moved(id, pos, yaw),
+            Event::MoveVehicle { id, pos, yaw } => {
+                match self.players.get(&id).and_then(|p| p.riding) {
+                    Some(horse) if self.mobs.contains_key(&horse) => {
+                        self.horse_moved(id, horse, pos, yaw)
+                    }
+                    _ => self.boat_moved(id, pos, yaw),
+                }
+            }
             Event::PaddleBoat { id, left, right } => self.paddle(id, left, right),
             Event::Settings {
                 id,

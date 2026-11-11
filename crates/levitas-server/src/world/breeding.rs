@@ -138,7 +138,11 @@ impl World {
         let partner = self
             .mobs
             .iter()
-            .filter(|(_, m)| m.kind == mob.kind && m.love > 0 && m.age == 0 && m.alive())
+            .filter(|(_, m)| {
+                let pairs = m.kind == mob.kind
+                    || World::foal_kind(m.kind, mob.kind).is_some_and(|_| mob.horse.is_some());
+                pairs && m.love > 0 && m.age == 0 && m.alive()
+            })
             .map(|(&pid, m)| (pid, distance(m.pos, mob.pos)))
             .filter(|&(_, d)| d <= PARTNER_RANGE)
             .min_by(|a, b| a.1.total_cmp(&b.1));
@@ -156,8 +160,21 @@ impl World {
             mob.pos[1].max(partner_pos[1]),
             (mob.pos[2] + partner_pos[2]) / 2.0,
         ];
-        let mut baby = Mob::new(mob.kind, at, &mut self.rng);
+        let partner_kind = self.mobs[&pid].kind;
+        let kind = World::foal_kind(mob.kind, partner_kind).unwrap_or(mob.kind);
+        let mut baby = Mob::new(kind, at, &mut self.rng);
         baby.age = BABY_AGE;
+        // A foal takes after its parents, and is born tame.
+        if let (Some(a), Some(b)) = (mob.horse.clone(), self.mobs[&pid].horse.clone()) {
+            self.foal_stats(&mut baby, &a, &b);
+            baby.health = baby.max_health();
+            baby.owner = mob.owner;
+            if kind == MobKind::Horse && self.rng.below(2) == 0 {
+                baby.variant = self.mobs[&pid].variant;
+            } else if kind == MobKind::Horse {
+                baby.variant = mob.variant;
+            }
+        }
         if mob.kind == MobKind::Villager {
             // Parents eat their 12 food points; the baby dresses for where it is born.
             if let Some(v) = mob.villager.as_mut() {

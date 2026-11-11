@@ -324,6 +324,16 @@ Known gaps are listed under each phase instead of being hidden.
       spawn from the biome lists, wander, swim or fly, and monsters hunt and hit.
       Mobs keep the saved tags Levitas does not handle yet. Their own behaviours are
       listed below as they land.
+      Horses and their kin (`world/horses.rs`): horses, donkeys, mules, skeleton and
+      zombie horses, llamas and camels are born with vanilla's random speed, jump and
+      health (and coats and markings, a llama's strength). Riding an untamed one tames
+      it on a roll under its temper or bucks the rider off (temper +5); food heals and
+      calms them. Tamed adults take a saddle (shears take it off) and their rider's
+      client steers them, as with boats; sneaking gets off. Golden carrots and apples
+      make tamed ones breed; a horse and a donkey make a mule; foals take after their
+      parents. Saved as vanilla saves them (saddle in `equipment`, `attributes`).
+      Missing: horse armour, donkey and llama chests, the horse inventory screen,
+      leashes, llama caravans and spit, camel dashing and two seats.
       Done: cows (milking), pigs, sheep (natural wool colours, shearing, regrowing wool
       by eating grass), chickens (eggs, slow falling). They wander, panic when hit,
       swim, look at players and make their sounds. Missing: breeding, babies, temptation

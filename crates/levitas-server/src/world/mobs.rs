@@ -1246,6 +1246,8 @@ pub struct Mob {
     /// What it was loaded from, so that tags Levitas does not handle (a horse's saddle,
     /// a fox's trusted players) are saved back.
     kept: Option<Box<Compound>>,
+    /// Horses and their kin: saddle, temper, rider and the stats they were born with.
+    pub horse: Option<Box<super::horses::Horse>>,
 }
 
 impl Mob {
@@ -1260,6 +1262,8 @@ impl Mob {
         } else {
             kind.max_health()
         };
+        let horse = super::horses::is_horse(kind).then(|| Box::new(super::horses::roll(kind, rng)));
+        let health = horse.as_ref().map_or(health, |h| h.max_health);
         Mob {
             kind,
             uuid: (u128::from(rng.next_u64()) << 64) | u128::from(rng.next_u64()),
@@ -1328,11 +1332,12 @@ impl Mob {
             leader: None,
             panic_ticks: 0,
             kept: None,
+            horse,
             owner: None,
             variant: match kind {
                 MobKind::Cat => rng.below(cat_variants().max(1)) as u8,
                 MobKind::Wolf => wolf_variant_id("minecraft:pale").unwrap_or(0),
-                _ => 0,
+                other => super::horses::roll_variant(other, rng),
             },
             sitting: false,
             collar: super::wolves::DEFAULT_COLLAR,
@@ -1341,7 +1346,9 @@ impl Mob {
 
     /// Full health: tamed wolves have far more than wild ones.
     pub fn max_health(&self) -> f32 {
-        if self.kind == MobKind::Wolf && self.owner.is_some() {
+        if let Some(h) = &self.horse {
+            h.max_health
+        } else if self.kind == MobKind::Wolf && self.owner.is_some() {
             super::wolves::TAMED_HEALTH
         } else {
             self.kind.max_health()
@@ -1462,6 +1469,7 @@ impl Mob {
         if matches!(self.kind, MobKind::Wolf | MobKind::Cat) {
             packets.push(super::wolves::wolf_data(self, id));
         }
+        packets.extend(super::horses::spawn_extras(id, self));
         if self.kind == MobKind::SnowGolem && self.sheared {
             packets.push(super::golems::snow_golem_data(id, false));
         }
@@ -1654,6 +1662,7 @@ impl Mob {
                 super::effects::effects_to_nbt(&self.effects),
             );
         }
+        super::horses::write_nbt(self, self.kept.as_deref(), &mut nbt);
         if let Some(kept) = &self.kept {
             for (key, tag) in kept.iter() {
                 if nbt.get(key).is_none() && !MANAGED_TAGS.contains(&key) {
@@ -1759,6 +1768,13 @@ impl Mob {
                 .or_else(|| nbt.get("ActiveEffects")),
         );
         mob.sent_pos = mob.pos;
+        super::horses::read_nbt(&mut mob, nbt);
+        if mob.horse.is_some() {
+            mob.health = nbt
+                .get("Health")
+                .and_then(Tag::as_f64)
+                .map_or(mob.max_health(), |h| h as f32);
+        }
         mob.kept = Some(Box::new(nbt.clone()));
         Some(mob)
     }
@@ -2204,6 +2220,9 @@ impl World {
             if mob.kind == MobKind::SnowGolem {
                 self.tick_snow_golem(id, &mut mob);
             }
+            if mob.horse.is_some() {
+                self.tick_horse(id, &mut mob);
+            }
             if mob.kind == MobKind::IronGolem {
                 self.tick_golem(id, &mut mob);
             } else if !mob.kind.is_monster() {
@@ -2223,6 +2242,8 @@ impl World {
             }
             if self.ride_along(&mut mob) {
                 // Sitting in a boat or minecart: carried, not walking.
+            } else if Self::horse_steered(&mob) {
+                // Its rider's client moves it.
             } else if mob.kind.swims() && self.in_water(mob.pos) {
                 self.swim_mob(&mut mob);
             } else if mob.kind.flies() {
@@ -3136,6 +3157,10 @@ impl World {
             if held == "minecraft:iron_ingot" {
                 self.repair_golem(id, target, slot);
             }
+            return;
+        }
+        if super::horses::is_horse(mob.kind) {
+            self.use_on_horse(id, target, slot, held);
             return;
         }
         if super::breeding::is_food(mob.kind, held) {
