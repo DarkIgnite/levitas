@@ -519,6 +519,10 @@ struct Player {
     pub brushing: Option<archaeology::Brushing>,
     /// Gliding with an elytra.
     pub gliding: bool,
+    /// Swimming (sprinting under water).
+    pub swimming: bool,
+    /// The flags and pose last sent to others.
+    pub shown_pose: (u8, i32),
     /// Dimension and position where the player last died (for recovery compass).
     pub last_death: Option<(&'static str, BlockPos)>,
     /// Maps this player's client has been sent in full.
@@ -600,6 +604,8 @@ impl Player {
             using_spyglass: None,
             brushing: None,
             gliding: false,
+            swimming: false,
+            shown_pose: (0, 0),
             last_death: None,
             known_maps: HashSet::new(),
             advancements: advancements::Progress::default(),
@@ -1034,6 +1040,7 @@ impl World {
                 if let Some(p) = self.players.get_mut(&id) {
                     p.sprinting = sprinting;
                 }
+                self.sync_player_pose(id);
             }
             Event::StartGliding { id } => self.start_gliding(id),
             Event::Sneak {
@@ -1045,6 +1052,7 @@ impl World {
                     p.sneaking = sneaking;
                     p.forward = forward;
                 }
+                self.sync_player_pose(id);
                 // Sneaking gets a rider out of their boat.
                 if sneaking {
                     self.get_off(id);
@@ -1862,11 +1870,13 @@ impl World {
             match self.load_chunk(x, z) {
                 Some(chunk) => {
                     self.chunks.insert((x, z), chunk);
+                    self.light.chunk_loaded(&mut self.chunks, (x, z));
                     self.load_mobs(x, z);
                 }
                 None if self.terrain.is_cheap() => {
                     // Cheap terrain is only saved once changed, but its mobs always are.
                     self.chunks.insert((x, z), self.terrain.generate(x, z));
+                    self.light.chunk_loaded(&mut self.chunks, (x, z));
                     self.load_mobs(x, z);
                 }
                 None => {
@@ -1890,6 +1900,7 @@ impl World {
         }
         if let Some(chunk) = self.load_chunk(x, z) {
             self.chunks.insert((x, z), chunk);
+            self.light.chunk_loaded(&mut self.chunks, (x, z));
             self.load_mobs(x, z);
             return true;
         }
@@ -1949,6 +1960,10 @@ impl World {
                 }
             }
             new.push(pos);
+        }
+        // Light runs across the borders with chunks loaded before.
+        for &pos in &new {
+            self.light.chunk_loaded(&mut self.chunks, pos);
         }
         self.spawn_structure_mobs(&structure_mobs);
         for (x, z) in fresh {

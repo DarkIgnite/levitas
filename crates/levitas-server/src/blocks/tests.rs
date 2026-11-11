@@ -630,3 +630,21 @@ fn hanging_signs_hang_like_vanilla_ones() {
         .place(sign, on_side(pos(8, 1, 0), Dir::East, 0.5, 90.0))
         .is_none());
 }
+
+#[test]
+fn blocks_placed_into_still_water_are_waterlogged() {
+    let mut w = World::new();
+    w.set(pos(0, 0, 0), block::WATER);
+    let slab = w
+        .place(state("minecraft:oak_slab"), on_ground(0, 0, NORTH_YAW))
+        .unwrap()[0]
+        .1;
+    assert_eq!(prop(slab, "waterlogged"), Some("true"));
+    // Flowing water is washed out instead.
+    w.set(pos(2, 0, 0), with(block::WATER, "level", "3"));
+    let fence = w
+        .place(state("minecraft:oak_fence"), on_ground(2, 0, NORTH_YAW))
+        .unwrap()[0]
+        .1;
+    assert_eq!(prop(fence, "waterlogged"), Some("false"));
+}

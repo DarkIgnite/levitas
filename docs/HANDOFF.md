@@ -266,11 +266,11 @@ their server.
   `levitas-pumpkin`). Don't switch back to it.
 - Plant placement during generation depends on `Portals::can_place_at`; returning
   `true` everywhere put grass and mushrooms on water.
-- Light: slabs/stairs let light through like air; light is not re-spread across a
-  border when a neighbouring chunk loads; the flat world stores full sky light
-  everywhere (harmless).
-- Fluids: placing a waterloggable block into water does not waterlog it; flowing water
-  does not push items; fluids never tick in chunks until something changes nearby.
+- Light: the flat world stores full sky light everywhere (harmless). Chunks lit by
+  Pumpkin's generator ignore slab/stair face occlusion until a block change relights
+  them. `LightEngine` spreads from each cell's current level, not the queued one:
+  removal may clear a cell after it was queued.
+- Fluids: fluids never tick in chunks until something changes nearby.
 - The minecraft.wiki protocol pages lagged 26.3 in places (light masks, synced
   registries, slot display IDs, item stack templates, and advancements: their screen
   position now follows the telemetry flag, and icons are item stack templates). When a real client disconnects,

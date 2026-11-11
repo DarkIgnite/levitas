@@ -5,6 +5,7 @@
 use levitas_nbt::{Compound, Tag};
 
 use super::*;
+use crate::blocks::fluid::{fluid_at, Fluid};
 
 /// Ticks before an item can be picked up.
 const PICKUP_DELAY_BROKEN: u32 = 10;
@@ -12,6 +13,8 @@ const PICKUP_DELAY_THROWN: u32 = 40;
 /// Items vanish after five minutes.
 const DESPAWN_AGE: u32 = 6000;
 const GRAVITY: f64 = 0.04;
+/// How hard flowing water pushes an item each tick.
+const WATER_PUSH: f64 = 0.014;
 /// Entity data index of the item stack, and the item stack serializer.
 const DATA_ITEM: u8 = 8;
 const SERIALIZER_ITEM_STACK: i32 = 7;
@@ -335,10 +338,31 @@ impl World {
                 item.on_ground = false;
             }
         }
+        // Flowing water carries items along, and they float up through water.
+        let here = cell(item.pos);
+        let in_water = self
+            .loaded_block(here)
+            .and_then(fluid_at)
+            .is_some_and(|f| f.fluid == Fluid::Water);
+        if in_water {
+            let flow = self.flow_vector(here, Fluid::Water);
+            item.vel[0] += flow[0] * WATER_PUSH;
+            item.vel[1] += flow[1] * WATER_PUSH;
+            item.vel[2] += flow[2] * WATER_PUSH;
+            if flow != [0.0; 3] {
+                item.on_ground = false;
+            }
+        }
         if item.on_ground && item.vel[0].abs() < 1e-3 && item.vel[2].abs() < 1e-3 {
             return;
         }
-        if !item.on_ground {
+        if in_water {
+            item.vel[0] *= 0.99;
+            item.vel[2] *= 0.99;
+            if item.vel[1] < 0.06 {
+                item.vel[1] += 5.0e-4;
+            }
+        } else if !item.on_ground {
             item.vel[1] -= GRAVITY;
         }
         for axis in [0, 2] {
@@ -414,6 +438,50 @@ impl World {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn flowing_water_carries_items_downstream() {
+        let dir = std::env::temp_dir().join(format!(
+            "levitas-itemflow-{}-{}",
+            std::process::id(),
+            next_entity_id()
+        ));
+        let (mut w, _) = World::new(
+            dir,
+            NewWorld {
+                kind: WorldKind::Flat,
+                seed: Some(0),
+            },
+        );
+        for cx in -1..=1 {
+            for cz in -1..=1 {
+                w.chunk(cx, cz);
+            }
+        }
+        // A source at x = 0 running east: levels 1 and 2 at x = 1 and 2.
+        w.set_block(BlockPos::new(0, -60, 0), block::WATER);
+        w.set_block(
+            BlockPos::new(1, -60, 0),
+            crate::blocks::with(block::WATER, "level", "1"),
+        );
+        w.set_block(
+            BlockPos::new(2, -60, 0),
+            crate::blocks::with(block::WATER, "level", "2"),
+        );
+        let flow = w.flow_vector(BlockPos::new(1, -60, 0), Fluid::Water);
+        assert!(flow[0] > 0.9, "east: {flow:?}");
+        assert_eq!(
+            w.flow_vector(BlockPos::new(5, -60, 5), Fluid::Water),
+            [0.0; 3]
+        );
+        let stone = ItemInfo::id_of("minecraft:stone").unwrap();
+        w.spawn_item_moving(Stack::new(stone, 1), [1.2, -59.9, 0.5], [0.0; 3]);
+        for _ in 0..20 {
+            w.tick_items();
+        }
+        let item = w.items.values().next().unwrap();
+        assert!(item.pos[0] > 1.5, "pushed east: {:?}", item.pos);
+    }
 
     #[test]
     fn dropped_items_are_saved_with_their_chunk() {

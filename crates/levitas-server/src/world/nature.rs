@@ -48,7 +48,7 @@ impl World {
     }
 
     fn random_tick(&mut self, pos: BlockPos, state: u16) {
-        if self.farm_random_tick(pos, state) {
+        if self.farm_random_tick(pos, state) || self.melt(pos, state) {
             return;
         }
         let above = offset(pos, Dir::Up);
@@ -127,6 +127,40 @@ impl World {
             }
         } else if leaves_decay(state) {
             self.pop_block(pos, state);
+        }
+    }
+
+    /// Ice melts in block light above 11 on any side, into water (into nothing in the
+    /// Nether); snow layers melt all at once in block light of 12 or more. Lava sets
+    /// fires. Returns whether the block was one of these.
+    fn melt(&mut self, pos: BlockPos, state: u16) -> bool {
+        match blocks::name(state) {
+            "minecraft:ice" => {
+                let bright = Dir::ALL.iter().any(|&d| {
+                    self.light_at(offset(pos, d))
+                        .is_some_and(|(_, block)| block > 11)
+                });
+                if bright {
+                    let left = if self.dimension.ultrawarm() {
+                        block::AIR
+                    } else {
+                        block::WATER
+                    };
+                    self.set_block_updating(pos, left);
+                }
+                true
+            }
+            "minecraft:snow" => {
+                if self.light_at(pos).is_some_and(|(_, block)| block >= 12) {
+                    self.set_block_updating(pos, block::AIR);
+                }
+                true
+            }
+            "minecraft:lava" => {
+                self.lava_sets_fire(pos);
+                true
+            }
+            _ => false,
         }
     }
 
@@ -566,6 +600,9 @@ fn ticks_randomly(state: u16) -> bool {
                 | "minecraft:mycelium"
                 | "minecraft:sugar_cane"
                 | "minecraft:cactus"
+                | "minecraft:ice"
+                | "minecraft:snow"
+                | "minecraft:lava"
         )
         || block_has_tag(state, "minecraft:saplings")
         || super::farming::ticks_randomly(state)
@@ -574,6 +611,59 @@ fn ticks_randomly(state: u16) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ice_and_snow_melt_by_bright_block_light_only() {
+        let mut w = flat_world();
+        let ice = BlockPos::new(0, -60, 0);
+        let snow = BlockPos::new(4, -60, 0);
+        w.set_block_updating(ice, block::ICE);
+        w.set_block_updating(snow, block::SNOW);
+        // Daylight alone melts nothing.
+        assert!(w.melt(ice, block::ICE));
+        assert!(w.melt(snow, block::SNOW));
+        assert_eq!(w.block(ice), block::ICE);
+        assert_eq!(w.block(snow), block::SNOW);
+        // A torch (14) two blocks off gives 13 beside the ice: it melts into water.
+        w.set_block_updating(BlockPos::new(0, -60, 2), block::TORCH);
+        w.melt(ice, block::ICE);
+        assert_eq!(w.block(ice), block::WATER);
+        // Glowstone beside the snow (14 there) melts it away.
+        w.set_block_updating(BlockPos::new(5, -60, 0), block::GLOWSTONE);
+        w.melt(snow, block::SNOW);
+        assert_eq!(w.block(snow), block::AIR);
+    }
+
+    #[test]
+    fn lava_sets_fire_to_wood_nearby() {
+        let mut w = flat_world();
+        let lava = BlockPos::new(0, -60, 0);
+        w.set_block(lava, block::LAVA);
+        for dx in -2..=2 {
+            for dz in -2..=2 {
+                if dx != 0 || dz != 0 {
+                    w.set_block(BlockPos::new(dx, -60, dz), block::OAK_PLANKS);
+                }
+            }
+        }
+        let burning = |w: &World| {
+            (-2..=2).any(|dx| {
+                (-2..=2).any(|dz| {
+                    (-59..=-58).any(|y| {
+                        w.loaded_block(BlockPos::new(dx, y, dz))
+                            .is_some_and(|s| blocks::name(s) == "minecraft:fire")
+                    })
+                })
+            })
+        };
+        for _ in 0..200 {
+            w.lava_sets_fire(lava);
+            if burning(&w) {
+                return;
+            }
+        }
+        panic!("lava never set the planks alight");
+    }
 
     /// A flat world (grass at y = -61) in full daylight, chunks around the origin loaded.
     fn flat_world() -> World {

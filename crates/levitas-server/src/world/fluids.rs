@@ -203,6 +203,52 @@ impl World {
 
     /// The sideways directions fluid flows from `pos`: those leading soonest to a way
     /// down, or every open direction if there is none within reach.
+    /// Which way fluid at `pos` runs, as a unit vector (zero for still fluid): toward
+    /// lower neighbours of the same fluid or open space beside it, and down where it
+    /// falls.
+    pub(super) fn flow_vector(&self, pos: BlockPos, fluid: Fluid) -> [f64; 3] {
+        let height = |s: Option<u16>| {
+            s.and_then(fluid_at)
+                .filter(|f| f.fluid == fluid)
+                .map(|f| f64::from(f.amount) / 9.0)
+        };
+        let Some(own) = height(self.loaded_block(pos)) else {
+            return [0.0; 3];
+        };
+        let mut v = [0.0f64; 3];
+        for d in [Dir::North, Dir::South, Dir::West, Dir::East] {
+            let next = offset(pos, d);
+            let state = self.loaded_block(next);
+            let diff = match height(state) {
+                Some(h) => own - h,
+                None if state.is_some_and(crate::blocks::can_fall_through) => {
+                    // Open space: compare with the fluid below it, if any.
+                    match height(self.loaded_block(offset(next, Dir::Down))) {
+                        Some(h) => own - (h - 8.0 / 9.0),
+                        None => own,
+                    }
+                }
+                None => 0.0,
+            };
+            let [dx, _, dz] = d.step();
+            v[0] += f64::from(dx) * diff;
+            v[2] += f64::from(dz) * diff;
+        }
+        if self
+            .loaded_block(pos)
+            .and_then(fluid_at)
+            .is_some_and(|f| f.falling)
+        {
+            v[1] -= 6.0;
+        }
+        let len = (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt();
+        if len < 1e-6 {
+            [0.0; 3]
+        } else {
+            v.map(|c| c / len)
+        }
+    }
+
     fn flow_directions(&self, pos: BlockPos, fluid: Fluid) -> Vec<Dir> {
         let mut best = i32::MAX;
         let mut dirs = Vec::new();

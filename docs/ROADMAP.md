@@ -191,8 +191,9 @@ Known gaps are listed under each phase instead of being hidden.
 - [x] Water and lava flowing, sources, waterlogging, buckets. Flow follows the wiki:
       levels, falling columns, infinite water sources, the nearest way down within 4
       (water) or 2 (lava) blocks; plants and torches wash away. Fluid ticks are saved.
-      Water breaks falls. Known gaps: placing a waterloggable block into water does
-      not waterlog it, and flowing water does not push dropped items.
+      Water breaks falls. Waterloggable blocks placed into a water source are
+      waterlogged; flowing water carries dropped items along and they float up
+      through water (`World::flow_vector`).
 - [x] Lava and water interaction (cobblestone, stone, obsidian, basalt)
 - [x] Drowning, fire and lava damage, burning: 300 ticks of air, 2 drowning damage a
       second; lava 4 and fire 1 (soul fire 2) every half second, setting players alight;
@@ -201,8 +202,13 @@ Known gaps are listed under each phase instead of being hidden.
 - [x] Fire (`world/fire.rs`): flint and steel lights fire, TNT, campfires and candles;
       fire ages, goes out without fuel or in the rain, burns flammable blocks away by
       the wiki's odds and spreads to nearby air; netherrack and magma burn forever.
-      Lava does not set things alight yet.
-- [ ] Swimming physics
+      Lava sets fires on its random ticks: air next to something flammable in the
+      3x3 layer above it, or the 5x5 layer above that when the way up is open, and
+      the tops of flammable blocks beside it (only with fire spreading on).
+- [x] Swimming physics: sprinting with the head under water starts swimming and it
+      lasts while the player sprints in water; the swimming flag and pose go to
+      everyone (`World::update_swimming`). Other players now also see sneaking
+      (crouching pose), sprinting and elytra gliding (fall-flying pose).
 - [x] Falling blocks: sand, gravel, concrete powder, anvils, pointed dripstone.
       Gravity blocks schedule a 2-tick block tick on update, spawn a falling block entity
       (type 49, with state ID), simulate gravity and drag, and land or shatter into items
@@ -213,9 +219,13 @@ Known gaps are listed under each phase instead of being hidden.
       stalagmites pop off without floor and double player fall damage.
 - [x] Real lighting: sky light and block light, propagated and updated on change
       (`levitas_world::lighting`), sent to players as light updates and saved.
-      Known gaps: slabs and stairs let light through like air, and light is not
-      re-spread across the border when a neighboring chunk loads.
-- [ ] Ice melting, snow layers, frosted ice
+      Faces that are solid all over (a bottom slab's underside, the back and bottom of
+      stairs, farmland's underside) stop light both ways (`lighting::full_faces`).
+      When a chunk loads, light runs across its borders both ways
+      (`LightEngine::chunk_loaded`, scanning only sections that differ).
+- [x] Ice melting, snow layers, frosted ice: ice melts in block light above 11 on
+      any side, into water (nothing in the Nether); snow layers melt all at once in
+      block light of 12 or more; frost walker's frosted ice cracks and melts back.
 
 ## Phase 4: Combat and basic entities
 

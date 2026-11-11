@@ -6,12 +6,17 @@
 //! breadth-first: first light that may have come through the changed block is removed,
 //! then light is spread again from every source next to the cleared region and from the
 //! new block itself.
+//!
+//! Some blocks that let light in are solid on one side: a bottom slab's underside, the
+//! back and bottom of stairs. Light does not pass through such a full face, in either
+//! direction, so a bottom slab shades the block beneath it but not the ones beside it.
 
 use std::collections::{HashMap, VecDeque};
 
 use levitas_registry::BlockInfo;
 
 use crate::chunk::{Chunk, MAX_Y, MIN_Y};
+use crate::light::LightLayer;
 
 const DIRECTIONS: [(i32, i32, i32); 6] = [
     (0, -1, 0),
@@ -48,6 +53,65 @@ pub fn filter(state: u16) -> u8 {
     BlockInfo::of(state).light_filter
 }
 
+/// Bit for each of [`DIRECTIONS`] whose face of a block in `state` is solid all over
+/// though the block lets light in elsewhere.
+pub fn full_faces(state: u16) -> u8 {
+    const DOWN: u8 = 1;
+    const UP: u8 = 2;
+    let info = BlockInfo::of(state);
+    if info.light_filter >= 15 {
+        return 0;
+    }
+    let name = info.name;
+    let half = |top: &str| match info.property(state, "half") {
+        Some(h) if h == top => UP,
+        _ => DOWN,
+    };
+    if name.ends_with("_slab") {
+        return match info.property(state, "type") {
+            Some("top") => UP,
+            Some("double") => 0x3F,
+            _ => DOWN,
+        };
+    }
+    if name.ends_with("_stairs") {
+        // Bits 2..=5: west, east, north, south.
+        let side = |d: &str| match d {
+            "west" => 1 << 2,
+            "east" => 1 << 3,
+            "north" => 1 << 4,
+            _ => 1 << 5,
+        };
+        let facing = info.property(state, "facing").unwrap_or("north");
+        let (left, right) = match facing {
+            "north" => ("west", "east"),
+            "east" => ("north", "south"),
+            "south" => ("east", "west"),
+            _ => ("south", "north"),
+        };
+        let back = match info.property(state, "shape") {
+            Some("straight") | None => side(facing),
+            Some("inner_left") => side(facing) | side(left),
+            Some("inner_right") => side(facing) | side(right),
+            _ => 0,
+        };
+        return half("top") | back;
+    }
+    match name {
+        "minecraft:farmland" | "minecraft:dirt_path" => DOWN,
+        _ => 0,
+    }
+}
+
+/// Whether light can go from a block in `from` to its neighbour `to` in direction `d`
+/// (an index into [`DIRECTIONS`]).
+fn passes(from: u16, to: u16, d: usize) -> bool {
+    full_faces(from) & (1 << d) == 0 && full_faces(to) & (1 << (d ^ 1)) == 0
+}
+
+/// The local x/z of a chunk's border column `i` and of the column across from it.
+type BorderCells = fn(usize) -> ([usize; 2], [usize; 2]);
+
 /// Which light: from the sky, or from blocks.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Kind {
@@ -79,11 +143,72 @@ impl LightEngine {
         old: u16,
         new: u16,
     ) {
-        if emission(old) == emission(new) && filter(old) == filter(new) {
+        if emission(old) == emission(new)
+            && filter(old) == filter(new)
+            && full_faces(old) == full_faces(new)
+        {
             return;
         }
         for kind in [Kind::Sky, Kind::Block] {
             self.relight(chunks, pos, kind, new);
+        }
+    }
+
+    /// Light runs across the borders of a chunk that just loaded, both ways: wherever a
+    /// block on one side is at least two levels brighter than the one across from it.
+    pub fn chunk_loaded(&mut self, chunks: &mut HashMap<(i32, i32), Chunk>, at: (i32, i32)) {
+        if !chunks.contains_key(&at) {
+            return;
+        }
+        let (bx, bz) = (at.0 * 16, at.1 * 16);
+        // Neighbour offset, then the local x/z of the border column inside and across.
+        let sides: [((i32, i32), BorderCells); 4] = [
+            ((-1, 0), |i| ([0, i], [15, i])),
+            ((1, 0), |i| ([15, i], [0, i])),
+            ((0, -1), |i| ([i, 0], [i, 15])),
+            ((0, 1), |i| ([i, 15], [i, 0])),
+        ];
+        for kind in [Kind::Sky, Kind::Block] {
+            for ((dx, dz), cells) in sides {
+                let Some(across) = chunks.get(&(at.0 + dx, at.1 + dz)) else {
+                    continue;
+                };
+                let here = &chunks[&at];
+                let (mine, theirs) = match kind {
+                    Kind::Sky => (&here.light.sky, &across.light.sky),
+                    Kind::Block => (&here.light.block, &across.light.block),
+                };
+                for section in 1..mine.len().min(theirs.len()) - 1 {
+                    let (a, b) = (&mine[section], &theirs[section]);
+                    if let (LightLayer::Uniform(la), LightLayer::Uniform(lb)) = (a, b) {
+                        if la.abs_diff(*lb) < 2 {
+                            continue;
+                        }
+                    }
+                    let base_y = MIN_Y + (section as i32 - 1) * 16;
+                    for i in 0..16 {
+                        let ([ax, az], [cx, cz]) = cells(i);
+                        for y in 0..16 {
+                            let (la, lb) = (a.get(ax, y, az), b.get(cx, y, cz));
+                            let world_y = base_y + y as i32;
+                            if la >= lb + 2 {
+                                self.spread
+                                    .push_back(([bx + ax as i32, world_y, bz + az as i32], la));
+                            } else if lb >= la + 2 {
+                                let (ox, oz) = (bx + dx * 16, bz + dz * 16);
+                                self.spread
+                                    .push_back(([ox + cx as i32, world_y, oz + cz as i32], lb));
+                            }
+                        }
+                    }
+                }
+            }
+            let mut world = Access {
+                chunks,
+                changed: &mut self.changed,
+                kind,
+            };
+            spread(&mut self.spread, &mut world);
         }
     }
 
@@ -149,23 +274,38 @@ impl LightEngine {
                 self.spread.push_back((pos, own));
             }
         }
-        while let Some((at, level)) = self.spread.pop_front() {
-            for (dx, dy, dz) in DIRECTIONS {
-                let next = [at[0] + dx, at[1] + dy, at[2] + dz];
-                let Some(state) = world.state(next) else {
-                    continue;
-                };
-                let filter = filter(state);
-                let new = if kind == Kind::Sky && dy == -1 && level == 15 && filter == 0 {
-                    15
-                } else {
-                    level.saturating_sub(filter.max(1))
-                };
-                if new > world.light(next).unwrap_or(15) {
-                    world.set(next, new);
-                    if new > 1 {
-                        self.spread.push_back((next, new));
-                    }
+        spread(&mut self.spread, &mut world);
+    }
+}
+
+/// Spreads the light queued in `queue` as far as it reaches.
+fn spread(queue: &mut VecDeque<([i32; 3], u8)>, world: &mut Access) {
+    let kind = world.kind;
+    while let Some((at, _)) = queue.pop_front() {
+        // What the cell holds now: removal may have cleared it after it was queued.
+        let level = world.light(at).unwrap_or(0);
+        if level <= 1 {
+            continue;
+        }
+        let here = world.state(at).unwrap_or(0);
+        for (d, (dx, dy, dz)) in DIRECTIONS.into_iter().enumerate() {
+            let next = [at[0] + dx, at[1] + dy, at[2] + dz];
+            let Some(state) = world.state(next) else {
+                continue;
+            };
+            if !passes(here, state, d) {
+                continue;
+            }
+            let filter = filter(state);
+            let new = if kind == Kind::Sky && dy == -1 && level == 15 && filter == 0 {
+                15
+            } else {
+                level.saturating_sub(filter.max(1))
+            };
+            if new > world.light(next).unwrap_or(15) {
+                world.set(next, new);
+                if new > 1 {
+                    queue.push_back((next, new));
                 }
             }
         }
@@ -331,6 +471,63 @@ mod tests {
         set(&mut engine, &mut chunks, [5, 63, 5], block::STONE);
         assert_eq!(light(&chunks, Kind::Sky, [5, 50, 5]), 0);
         assert_eq!(light(&chunks, Kind::Sky, [6, 50, 5]), 0);
+    }
+
+    #[test]
+    fn a_bottom_slab_shades_below_it_but_not_beside_it() {
+        let (mut chunks, mut engine) = (stone_world(), LightEngine::new());
+        // A shaft at (5, 5), with a pocket beside its bottom.
+        for y in (55..64).rev() {
+            set(&mut engine, &mut chunks, [5, y, 5], block::AIR);
+        }
+        set(&mut engine, &mut chunks, [6, 60, 5], block::AIR);
+        set(&mut engine, &mut chunks, [6, 59, 5], block::AIR);
+        let slab = BlockInfo::by_name("minecraft:stone_slab").unwrap();
+        let bottom = slab.state_with([("type", "bottom")]);
+        assert_eq!(full_faces(bottom), 1);
+        set(&mut engine, &mut chunks, [5, 60, 5], bottom);
+        // Daylight reaches the slab and the pocket beside it, but not under it straight.
+        assert_eq!(light(&chunks, Kind::Sky, [5, 60, 5]), 15);
+        assert_eq!(light(&chunks, Kind::Sky, [6, 60, 5]), 14);
+        // Under the slab, light only comes round through the pocket.
+        assert_eq!(light(&chunks, Kind::Sky, [5, 59, 5]), 12);
+        // A top slab seals the shaft from above.
+        let top = slab.state_with([("type", "top")]);
+        set(&mut engine, &mut chunks, [5, 60, 5], top);
+        for pos in [[5, 60, 5], [6, 60, 5], [5, 59, 5], [5, 55, 5]] {
+            assert_eq!(light(&chunks, Kind::Sky, pos), 0, "sealed: {pos:?}");
+        }
+        // Stairs facing east are solid on their east side.
+        let stairs = BlockInfo::by_name("minecraft:oak_stairs").unwrap();
+        let east = stairs.state_with([
+            ("facing", "east"),
+            ("half", "bottom"),
+            ("shape", "straight"),
+        ]);
+        assert_eq!(full_faces(east), 1 | 1 << 3);
+    }
+
+    #[test]
+    fn light_runs_across_into_a_chunk_that_loads() {
+        let (mut chunks, mut engine) = (stone_world(), LightEngine::new());
+        // A tunnel along x at y = 10 from chunk (0, 0) into chunk (1, 0).
+        for x in 10..22 {
+            set(&mut engine, &mut chunks, [x, 10, 0], block::AIR);
+        }
+        // Chunk (1, 0) goes away and comes back with its tunnel dark.
+        let mut away = chunks.remove(&(1, 0)).unwrap();
+        set(&mut engine, &mut chunks, [12, 10, 0], block::TORCH);
+        assert_eq!(light(&chunks, Kind::Block, [15, 10, 0]), 11);
+        away.light.block[1] = LightLayer::Uniform(0);
+        chunks.insert((1, 0), away);
+        engine.take_changes();
+        engine.chunk_loaded(&mut chunks, (1, 0));
+        assert_eq!(light(&chunks, Kind::Block, [16, 10, 0]), 10);
+        assert_eq!(light(&chunks, Kind::Block, [20, 10, 0]), 6);
+        assert!(engine
+            .take_changes()
+            .iter()
+            .any(|(pos, _, _)| *pos == (1, 0)));
     }
 
     #[test]

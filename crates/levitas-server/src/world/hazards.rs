@@ -30,6 +30,13 @@ const FLAG_ON_FIRE: u8 = 0x01;
 const FLAG_GLIDING: u8 = 0x80;
 const FLAG_SNEAKING: u8 = 0x02;
 const FLAG_SPRINTING: u8 = 0x08;
+const FLAG_SWIMMING: u8 = 0x10;
+const DATA_POSE: u8 = 6;
+const SERIALIZER_POSE: i32 = 20;
+const POSE_STANDING: i32 = 0;
+const POSE_FALL_FLYING: i32 = 1;
+const POSE_SWIMMING: i32 = 3;
+const POSE_CROUCHING: i32 = 5;
 
 impl World {
     pub(super) fn tick_hazards(&mut self) {
@@ -78,6 +85,7 @@ impl World {
         let rained_on =
             self.weather.is_raining() && self.light_at(at(eye)).is_some_and(|(sky, _)| sky == 15);
 
+        self.update_swimming(id, underwater, in_water);
         let mut hits = Vec::new();
         let p = self.players.get_mut(&id).expect("listed");
         let was_burning = p.fire_ticks > 0;
@@ -214,7 +222,48 @@ impl World {
         if p.gliding {
             flags |= FLAG_GLIDING;
         }
+        if p.swimming {
+            flags |= FLAG_SWIMMING;
+        }
         flags
+    }
+
+    /// The pose others see a player in (sleeping is sent on its own).
+    fn player_pose(&self, id: i32) -> i32 {
+        let p = &self.players[&id];
+        if p.gliding {
+            POSE_FALL_FLYING
+        } else if p.swimming {
+            POSE_SWIMMING
+        } else if p.sneaking {
+            POSE_CROUCHING
+        } else {
+            POSE_STANDING
+        }
+    }
+
+    /// Sends a player's flags and pose again if they changed since last sent.
+    pub(super) fn sync_player_pose(&mut self, id: i32) {
+        let Some(p) = self.players.get(&id) else {
+            return;
+        };
+        let shown = p.shown_pose;
+        if shown != (self.player_flags(id), self.player_pose(id)) {
+            self.send_player_flags(id);
+        }
+    }
+
+    /// Swimming: sprinting with the head under water starts it, and it lasts while the
+    /// player keeps sprinting in water.
+    fn update_swimming(&mut self, id: i32, underwater: bool, in_water: bool) {
+        let Some(p) = self.players.get_mut(&id) else {
+            return;
+        };
+        let swimming = p.sprinting && in_water && p.riding.is_none() && (p.swimming || underwater);
+        if swimming != p.swimming {
+            p.swimming = swimming;
+            self.sync_player_pose(id);
+        }
     }
 
     /// Sends a player's entity flags to everyone, the player too: the client starts
@@ -224,15 +273,32 @@ impl World {
             return;
         }
         let flags = self.player_flags(id);
+        let pose = self.player_pose(id);
+        let sleeping = self.players[&id].sleeping.is_some();
+        if let Some(p) = self.players.get_mut(&id) {
+            p.shown_pose = (flags, pose);
+        }
         self.broadcast(
             Writer::packet(clientbound::SET_ENTITY_DATA)
                 .varint(id)
-                .u8(0)
-                .varint(0)
+                .u8(DATA_FLAGS)
+                .varint(SERIALIZER_BYTE)
                 .u8(flags)
                 .u8(0xFF),
             None,
         );
+        // The player's own client works out its pose itself.
+        if !sleeping {
+            self.broadcast(
+                Writer::packet(clientbound::SET_ENTITY_DATA)
+                    .varint(id)
+                    .u8(DATA_POSE)
+                    .varint(SERIALIZER_POSE)
+                    .varint(pose)
+                    .u8(0xFF),
+                Some(id),
+            );
+        }
     }
 }
 
@@ -267,6 +333,33 @@ mod tests {
             .players
             .insert(id, Player::new(profile, out, [0.5, -60.0, 0.5]));
         (world, id, frames)
+    }
+
+    #[test]
+    fn sprinting_under_water_swims_until_the_sprint_stops() {
+        let (mut world, id, _frames) = world_with_player();
+        for y in [-60, -59] {
+            world.set_block(BlockPos::new(0, y, 0), block::WATER);
+        }
+        world.player_hazards(id);
+        assert!(!world.players[&id].swimming, "not sprinting");
+        world.players.get_mut(&id).unwrap().sprinting = true;
+        world.player_hazards(id);
+        assert!(world.players[&id].swimming);
+        assert_eq!(world.player_flags(id) & FLAG_SWIMMING, FLAG_SWIMMING);
+        assert_eq!(world.player_pose(id), POSE_SWIMMING);
+        assert_eq!(
+            world.players[&id].shown_pose,
+            (world.player_flags(id), POSE_SWIMMING)
+        );
+        // Head out of the water but still in it: still swimming.
+        world.set_block(BlockPos::new(0, -59, 0), block::AIR);
+        world.player_hazards(id);
+        assert!(world.players[&id].swimming);
+        world.players.get_mut(&id).unwrap().sprinting = false;
+        world.player_hazards(id);
+        assert!(!world.players[&id].swimming);
+        assert_eq!(world.player_pose(id), POSE_STANDING);
     }
 
     #[test]

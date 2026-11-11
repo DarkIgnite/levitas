@@ -187,6 +187,63 @@ impl World {
         }
     }
 
+    /// Lava's random tick: it may set fire to the air next to something flammable, one
+    /// or two blocks above it (the 3x3 layer just above, or the 5x5 layer above that if
+    /// the way up is open), or light the top of a flammable block beside it.
+    pub(super) fn lava_sets_fire(&mut self, pos: BlockPos) {
+        if crate::rules::int("fire_spread_radius_around_player") == 0 {
+            return;
+        }
+        let ignites = |w: &World, at: BlockPos| {
+            Dir::ALL.iter().any(|&d| {
+                w.loaded_block(offset(at, d))
+                    .and_then(flammability)
+                    .is_some_and(|f| f.ignite > 0)
+            })
+        };
+        let steps = self.rng.below(3);
+        if steps > 0 {
+            let mut at = pos;
+            for _ in 0..steps {
+                at = BlockPos::new(
+                    at.x + self.rng.below(3) as i32 - 1,
+                    at.y + 1,
+                    at.z + self.rng.below(3) as i32 - 1,
+                );
+                let Some(state) = self.loaded_block(at) else {
+                    return;
+                };
+                if is_air(state) {
+                    if ignites(self, at) {
+                        if let Some(fire) = fire_for(at, &mut |q| self.block(q)) {
+                            self.light_fire(at, fire);
+                        }
+                        return;
+                    }
+                } else if !blocks::can_fall_through(state) {
+                    return;
+                }
+            }
+        } else {
+            for _ in 0..3 {
+                let at = BlockPos::new(
+                    pos.x + self.rng.below(3) as i32 - 1,
+                    pos.y,
+                    pos.z + self.rng.below(3) as i32 - 1,
+                );
+                let above = offset(at, Dir::Up);
+                let fuel = self.loaded_block(at).and_then(flammability);
+                if fuel.is_some_and(|f| f.ignite > 0)
+                    && self.loaded_block(above).is_some_and(is_air)
+                {
+                    if let Some(fire) = fire_for(above, &mut |q| self.block(q)) {
+                        self.light_fire(above, fire);
+                    }
+                }
+            }
+        }
+    }
+
     /// Whether rain falls on `pos` or right beside it.
     fn rained_on(&self, pos: BlockPos) -> bool {
         self.weather.is_raining()
