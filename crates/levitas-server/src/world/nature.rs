@@ -164,6 +164,7 @@ impl World {
                 self.turtle_egg_tick(pos, state);
                 true
             }
+            _ if super::kin::block_tick(self, pos, state) => true,
             _ => false,
         }
     }
@@ -611,6 +612,7 @@ fn ticks_randomly(state: u16) -> bool {
         )
         || block_has_tag(state, "minecraft:saplings")
         || super::farming::ticks_randomly(state)
+        || super::kin::ticks_randomly(state)
 }
 
 #[cfg(test)]

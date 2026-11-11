@@ -91,7 +91,7 @@ impl World {
         let eaten = if mob.age < 0 {
             mob.age += -mob.age / 10;
             true
-        } else if mob.age == 0 && mob.love == 0 {
+        } else if mob.age == 0 && mob.love == 0 && super::kin::may_love(self, &mob) {
             mob.love = LOVE_TICKS;
             mob.helped_by = Some(player);
             self.send_to_viewers(&mob, entity_event(target, ENTITY_EVENT_LOVE_HEARTS));
@@ -224,6 +224,8 @@ impl World {
         if kind == MobKind::Turtle {
             // Turtles carry an egg home instead.
             self.turtle_bred(id, mob);
+        } else if super::kin::bred(self, id, mob) {
+            // Its module made what breeding brings (frogs lay frogspawn).
         } else {
             self.mobs.insert(next_entity_id(), baby);
         }

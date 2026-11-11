@@ -1257,6 +1257,9 @@ pub struct Mob {
     /// Turtles: carrying an egg home, and the beach that is home.
     pub egg: bool,
     pub home: Option<BlockPos>,
+    /// State of a mob whose module keeps its own (see `kin.rs`), downcast there.
+    #[allow(dead_code)]
+    pub kin: Option<Box<dyn std::any::Any + Send>>,
 }
 
 impl Mob {
@@ -1347,6 +1350,7 @@ impl Mob {
             bee: (kind == MobKind::Bee).then(Box::default),
             egg: false,
             home: None,
+            kin: None,
             owner: None,
             variant: match kind {
                 MobKind::Cat => rng.below(cat_variants().max(1)) as u8,
@@ -1488,6 +1492,7 @@ impl Mob {
         packets.extend(super::horses::spawn_extras(id, self));
         packets.extend(super::shulkers::spawn_extras(id, self));
         packets.extend(super::critters::spawn_extras(id, self));
+        packets.extend(super::kin::spawn_extras(id, self));
         if self.kind == MobKind::Parrot && self.owner.is_some() {
             packets.push(super::wolves::wolf_data(self, id));
         }
@@ -1699,6 +1704,7 @@ impl Mob {
         super::horses::write_nbt(self, self.kept.as_deref(), &mut nbt);
         super::bees::write_nbt(self, &mut nbt);
         super::critters::write_nbt(self, &mut nbt);
+        super::kin::write_nbt(self, &mut nbt);
         if let (MobKind::Parrot, Some(owner)) = (self.kind, self.owner) {
             let owner = [
                 (owner >> 96) as i32,
@@ -1820,6 +1826,7 @@ impl Mob {
         super::horses::read_nbt(&mut mob, nbt);
         super::bees::read_nbt(&mut mob, nbt);
         super::critters::read_nbt(&mut mob, nbt);
+        super::kin::read_nbt(&mut mob, nbt);
         if mob.horse.is_some() {
             mob.health = nbt
                 .get("Health")
@@ -2047,6 +2054,7 @@ impl World {
                     if kind == MobKind::Fox {
                         mob.variant = World::fox_variant_for(&biome);
                     }
+                    super::kin::spawned(self, &mut mob, &biome);
                     self.mobs.insert(next_entity_id(), mob);
                 }
             }
@@ -2326,7 +2334,8 @@ impl World {
                 continue; // gone into its hive
             }
             let resting =
-                self.tick_critter(id, &mut mob) && mob.kind == MobKind::Fox && mob.sitting;
+                (self.tick_critter(id, &mut mob) && mob.kind == MobKind::Fox && mob.sitting)
+                    | super::kin::tick(self, id, &mut mob);
             if mob.kind.is_monster()
                 && !admiring
                 && mob.kind != MobKind::Shulker
@@ -2337,7 +2346,12 @@ impl World {
             if mob.kind.family() == MobKind::MagmaCube {
                 self.hop(&mut mob);
             }
-            if mob.kind.swims() && !self.in_water(mob.pos) && self.tick.is_multiple_of(20) {
+            // Dolphins keep their own moisture (`dolphins.rs`).
+            if mob.kind.swims()
+                && mob.kind != MobKind::Dolphin
+                && !self.in_water(mob.pos)
+                && self.tick.is_multiple_of(20)
+            {
                 self.hurt_mob(id, &mut mob, 1.0, "minecraft:dry_out");
             }
             if self.ride_along(&mut mob) {
@@ -3073,6 +3087,7 @@ impl World {
         if mob.health > 0.0 {
             self.shulker_hurt(&mut mob);
         }
+        super::kin::hurt(self, target, &mut mob, by_player);
         let anger_piglins = by_player.filter(|_| mob.kind == MobKind::ZombifiedPiglin);
         let kind_of_hit = mob.kind;
         if let (Some(attacker), MobKind::Enderman) = (by_player, mob.kind) {
@@ -3280,13 +3295,16 @@ impl World {
         if held == "minecraft:water_bucket" && self.scoop_mob(id, target, slot) {
             return;
         }
-        let Some(mob) = self.mobs.get(&target) else {
-            return;
-        };
         if kind == MobKind::Parrot {
             self.use_on_parrot(id, target, slot, held);
             return;
         }
+        if super::kin::use_on(self, id, target, slot, held) {
+            return;
+        }
+        let Some(mob) = self.mobs.get(&target) else {
+            return;
+        };
         if super::horses::is_horse(mob.kind) {
             self.use_on_horse(id, target, slot, held);
             return;
