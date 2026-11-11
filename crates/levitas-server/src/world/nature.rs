@@ -160,6 +160,10 @@ impl World {
                 self.lava_sets_fire(pos);
                 true
             }
+            "minecraft:turtle_egg" => {
+                self.turtle_egg_tick(pos, state);
+                true
+            }
             _ => false,
         }
     }
@@ -603,6 +607,7 @@ fn ticks_randomly(state: u16) -> bool {
                 | "minecraft:ice"
                 | "minecraft:snow"
                 | "minecraft:lava"
+                | "minecraft:turtle_egg"
         )
         || block_has_tag(state, "minecraft:saplings")
         || super::farming::ticks_randomly(state)

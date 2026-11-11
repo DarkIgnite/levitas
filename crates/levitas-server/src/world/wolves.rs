@@ -113,6 +113,10 @@ pub fn wolf_data(mob: &Mob, id: i32) -> Writer {
     if mob.kind == MobKind::Cat {
         return cat_data(mob, packet);
     }
+    // A parrot shares only the tamed animal's part.
+    if mob.kind == MobKind::Parrot {
+        return packet.u8(0xFF);
+    }
     packet
         .u8(DATA_COLLAR)
         .varint(SERIALIZER_VARINT)

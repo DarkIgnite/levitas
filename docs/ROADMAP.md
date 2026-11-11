@@ -336,6 +336,19 @@ Known gaps are listed under each phase instead of being hidden.
       angry; hitting a bee angers those near. A bee stings once (poison 10 s on
       Normal, 18 s on Hard) and dies some time later. Missing: bees kept in a silk
       touch hive item, pollen particles, dispensers harvesting.
+      Foxes, parrots, turtles and axolotls (`world/critters.rs`): foxes are red or
+      white (snowy biomes), sleep by day, keep away from players and hunt chickens,
+      rabbits and fish at night. Parrots come in five colours; seeds tame one in ten
+      tries; tamed ones sit or follow their owner, flying, and a cookie kills them.
+      Turtles remember their home beach; one that bred carries an egg home and lays
+      one to four on sand, which crack (nearly always at night) and hatch; babies
+      drop a scute when grown. Axolotls come in four colours (blue one in 1200 by
+      breeding), hunt fish, squid, drowned and guardians in water, dry out after five
+      minutes on land, and breed on tropical fish buckets (the water bucket comes
+      back). Water buckets catch cod, salmon, pufferfish, tropical fish, axolotls and
+      tadpoles; emptying the filled bucket lets them out. Missing: what a bucket
+      remembers of its mob (colour, health), foxes carrying items and eating berries,
+      parrots on shoulders, dancing and mimicking, axolotls playing dead.
 - [ ] Pathfinding and AI goals. A* over walkable blocks (`world/pathfinding.rs`):
       walking, one-block jumps, drops of up to three blocks, avoiding lava; monsters
       (except climbing spiders) follow paths to their target. Animals still wander

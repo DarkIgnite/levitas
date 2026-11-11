@@ -1254,6 +1254,9 @@ pub struct Mob {
     pub persistent: bool,
     /// Bees: hive, flower, nectar, sting.
     pub bee: Option<Box<super::bees::Bee>>,
+    /// Turtles: carrying an egg home, and the beach that is home.
+    pub egg: bool,
+    pub home: Option<BlockPos>,
 }
 
 impl Mob {
@@ -1342,12 +1345,15 @@ impl Mob {
             admiring: None,
             persistent: false,
             bee: (kind == MobKind::Bee).then(Box::default),
+            egg: false,
+            home: None,
             owner: None,
             variant: match kind {
                 MobKind::Cat => rng.below(cat_variants().max(1)) as u8,
                 MobKind::Wolf => wolf_variant_id("minecraft:pale").unwrap_or(0),
                 MobKind::Piglin => rng.below(2) as u8,
-                other => super::horses::roll_variant(other, rng),
+                other => super::critters::roll_variant(other, rng)
+                    .unwrap_or_else(|| super::horses::roll_variant(other, rng)),
             },
             sitting: false,
             collar: super::wolves::DEFAULT_COLLAR,
@@ -1481,6 +1487,10 @@ impl Mob {
         }
         packets.extend(super::horses::spawn_extras(id, self));
         packets.extend(super::shulkers::spawn_extras(id, self));
+        packets.extend(super::critters::spawn_extras(id, self));
+        if self.kind == MobKind::Parrot && self.owner.is_some() {
+            packets.push(super::wolves::wolf_data(self, id));
+        }
         if self.bee.as_ref().is_some_and(|b| b.nectar || b.stung)
             || (self.bee.is_some() && self.anger > 0)
         {
@@ -1688,6 +1698,16 @@ impl Mob {
         }
         super::horses::write_nbt(self, self.kept.as_deref(), &mut nbt);
         super::bees::write_nbt(self, &mut nbt);
+        super::critters::write_nbt(self, &mut nbt);
+        if let (MobKind::Parrot, Some(owner)) = (self.kind, self.owner) {
+            let owner = [
+                (owner >> 96) as i32,
+                (owner >> 64) as i32,
+                (owner >> 32) as i32,
+                owner as i32,
+            ];
+            nbt.insert("Owner", owner.to_vec());
+        }
         if let Some(kept) = &self.kept {
             for (key, tag) in kept.iter() {
                 if nbt.get(key).is_none() && !MANAGED_TAGS.contains(&key) {
@@ -1799,6 +1819,7 @@ impl Mob {
         mob.sent_pos = mob.pos;
         super::horses::read_nbt(&mut mob, nbt);
         super::bees::read_nbt(&mut mob, nbt);
+        super::critters::read_nbt(&mut mob, nbt);
         if mob.horse.is_some() {
             mob.health = nbt
                 .get("Health")
@@ -2022,6 +2043,9 @@ impl World {
                     let mut mob = Mob::new(kind, pos, &mut self.rng);
                     if kind == MobKind::Wolf {
                         mob.variant = wolf_variant_for(&biome);
+                    }
+                    if kind == MobKind::Fox {
+                        mob.variant = World::fox_variant_for(&biome);
                     }
                     self.mobs.insert(next_entity_id(), mob);
                 }
@@ -2301,6 +2325,8 @@ impl World {
             if mob.bee.is_some() && self.tick_bee(id, &mut mob) {
                 continue; // gone into its hive
             }
+            let resting =
+                self.tick_critter(id, &mut mob) && mob.kind == MobKind::Fox && mob.sitting;
             if mob.kind.is_monster()
                 && !admiring
                 && mob.kind != MobKind::Shulker
@@ -2318,9 +2344,11 @@ impl World {
                 // Sitting in a boat or minecart: carried, not walking.
             } else if Self::horse_steered(&mob) {
                 // Its rider's client moves it.
-            } else if mob.kind == MobKind::Shulker {
-                // Fixed to its block.
-            } else if mob.kind.swims() && self.in_water(mob.pos) {
+            } else if mob.kind == MobKind::Shulker || resting {
+                // Fixed to its block, or a fox asleep.
+            } else if (mob.kind.swims() || super::critters::amphibious(mob.kind))
+                && self.in_water(mob.pos)
+            {
                 self.swim_mob(&mut mob);
             } else if mob.kind.flies() {
                 self.fly_mob(&mut mob);
@@ -2439,7 +2467,8 @@ impl World {
             return;
         }
         // Rabbits and wild cats bolt from players who come close.
-        let shy = mob.kind == MobKind::Rabbit || (mob.kind == MobKind::Cat && mob.owner.is_none());
+        let shy = mob.kind == MobKind::Rabbit
+            || (matches!(mob.kind, MobKind::Cat | MobKind::Fox) && mob.owner.is_none());
         if shy
             && !panicking
             && self.players.values().any(|p| {
@@ -3245,6 +3274,17 @@ impl World {
             if held == "minecraft:iron_ingot" {
                 self.repair_golem(id, target, slot);
             }
+            return;
+        }
+        let kind = mob.kind;
+        if held == "minecraft:water_bucket" && self.scoop_mob(id, target, slot) {
+            return;
+        }
+        let Some(mob) = self.mobs.get(&target) else {
+            return;
+        };
+        if kind == MobKind::Parrot {
+            self.use_on_parrot(id, target, slot, held);
             return;
         }
         if super::horses::is_horse(mob.kind) {

@@ -104,7 +104,15 @@ impl World {
             self.play_sound_at(&sound, mob.pos, 1.0, 1.0, None);
         }
         self.mobs.insert(target, mob);
-        if eaten && self.players.get(&player).is_some_and(|p| p.survival()) {
+        let held = self
+            .players
+            .get(&player)
+            .and_then(|p| ItemInfo::get(p.inventory.slots[slot].item))
+            .map_or("", |i| i.name);
+        if eaten && held.ends_with("_bucket") {
+            // A tropical fish bucket leaves its water bucket.
+            self.bucket_food_returns(player, slot, held);
+        } else if eaten && self.players.get(&player).is_some_and(|p| p.survival()) {
             let p = self.players.get_mut(&player).expect("player exists");
             p.inventory.take(slot, 1);
             let update = p.inventory.set_slot_packet(slot);
@@ -119,6 +127,7 @@ impl World {
             mob.age += 1;
             if mob.age == 0 {
                 self.send_to_viewers(mob, baby_data(id, false));
+                self.turtle_grew_up(mob);
             }
         } else if mob.age > 0 {
             mob.age -= 1;
@@ -207,8 +216,17 @@ impl World {
                 self.mobs[&pid].color
             };
         }
+        if kind == MobKind::Axolotl {
+            let other = self.mobs[&pid].variant;
+            baby.variant = self.axolotl_baby_variant(mob.variant, other);
+        }
         let child = baby.kind.entity_type();
-        self.mobs.insert(next_entity_id(), baby);
+        if kind == MobKind::Turtle {
+            // Turtles carry an egg home instead.
+            self.turtle_bred(id, mob);
+        } else {
+            self.mobs.insert(next_entity_id(), baby);
+        }
         mob.love = 0;
         mob.age = BREED_COOLDOWN;
         mob.target = None;

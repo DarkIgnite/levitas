@@ -485,6 +485,7 @@ impl World {
             "minecraft:bucket" => None,
             "minecraft:water_bucket" => Some(Fluid::Water),
             "minecraft:lava_bucket" => Some(Fluid::Lava),
+            name if super::critters::mob_in_bucket(name).is_some() => Some(Fluid::Water),
             _ => return false,
         };
         let (eye, look, reach) = p.eye_ray();
@@ -552,6 +553,7 @@ impl World {
                     (pos, FluidState::source(fluid).block())
                 };
                 self.set_block_updating(pos, target);
+                self.release_from_bucket(item_name, pos);
                 let sound = match fluid {
                     Fluid::Water => "empty",
                     Fluid::Lava => "empty_lava",

@@ -23,6 +23,7 @@ mod commands_extra;
 mod conduit;
 mod containers;
 mod crafter;
+mod critters;
 mod devices;
 pub mod dimension;
 mod dragon;
