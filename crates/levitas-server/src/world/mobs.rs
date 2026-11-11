@@ -1252,6 +1252,8 @@ pub struct Mob {
     pub admiring: Option<(u32, i32)>,
     /// Never despawns (placed by a structure, or a player made it stay).
     pub persistent: bool,
+    /// Bees: hive, flower, nectar, sting.
+    pub bee: Option<Box<super::bees::Bee>>,
 }
 
 impl Mob {
@@ -1339,6 +1341,7 @@ impl Mob {
             horse,
             admiring: None,
             persistent: false,
+            bee: (kind == MobKind::Bee).then(Box::default),
             owner: None,
             variant: match kind {
                 MobKind::Cat => rng.below(cat_variants().max(1)) as u8,
@@ -1478,6 +1481,11 @@ impl Mob {
         }
         packets.extend(super::horses::spawn_extras(id, self));
         packets.extend(super::shulkers::spawn_extras(id, self));
+        if self.bee.as_ref().is_some_and(|b| b.nectar || b.stung)
+            || (self.bee.is_some() && self.anger > 0)
+        {
+            packets.push(super::bees::bee_data(id, self));
+        }
         if self.kind == MobKind::SnowGolem && self.sheared {
             packets.push(super::golems::snow_golem_data(id, false));
         }
@@ -1679,6 +1687,7 @@ impl Mob {
             );
         }
         super::horses::write_nbt(self, self.kept.as_deref(), &mut nbt);
+        super::bees::write_nbt(self, &mut nbt);
         if let Some(kept) = &self.kept {
             for (key, tag) in kept.iter() {
                 if nbt.get(key).is_none() && !MANAGED_TAGS.contains(&key) {
@@ -1789,6 +1798,7 @@ impl Mob {
         );
         mob.sent_pos = mob.pos;
         super::horses::read_nbt(&mut mob, nbt);
+        super::bees::read_nbt(&mut mob, nbt);
         if mob.horse.is_some() {
             mob.health = nbt
                 .get("Health")
@@ -2288,6 +2298,9 @@ impl World {
             if mob.kind == MobKind::Shulker {
                 self.tick_shulker(id, &mut mob);
             }
+            if mob.bee.is_some() && self.tick_bee(id, &mut mob) {
+                continue; // gone into its hive
+            }
             if mob.kind.is_monster()
                 && !admiring
                 && mob.kind != MobKind::Shulker
@@ -2557,6 +2570,8 @@ impl World {
         } else if let Some(p) = prey.filter(|_| mob.kind != MobKind::Ghast) {
             // Vexes and phantoms swoop at their prey.
             mob.fly_goal = Some([p[0], p[1] + 0.5, p[2]]);
+        } else if mob.bee.as_ref().is_some_and(|b| b.heading) {
+            // A bee on its way to a flower or home keeps its course.
         } else if reached || self.rng.below(100) == 0 {
             let r = |rng: &mut Rng| (rng.f64() * 2.0 - 1.0) * wander;
             mob.fly_goal = Some([
@@ -3105,6 +3120,9 @@ impl World {
         }
         if let Some(attacker) = by_player.filter(|_| super::piglins::is_piglin(kind_of_hit)) {
             self.piglins_angered_at(at, attacker);
+        }
+        if let Some(attacker) = by_player.filter(|_| kind_of_hit == MobKind::Bee) {
+            self.anger_bees(at, attacker);
         }
         if let Some(attacker) = by_player.filter(|_| !killed) {
             self.rally_wolves(attacker, target);

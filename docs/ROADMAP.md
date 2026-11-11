@@ -326,6 +326,16 @@ Known gaps are listed under each phase instead of being hidden.
       20 armour; hurt below half health one may teleport within 8 blocks. Missing:
       shulkers duplicating, dye colours, attaching to walls and ceilings when they
       teleport.
+      Bees (`world/bees.rs`): nests and hives hold up to three bees (saved as
+      vanilla's `bees` list); nests in generated trees get two or three. By day in
+      fair weather bees go out to `bee_attractive` flowers within 5 blocks, gather
+      nectar, help `bee_growables` crops on the way back and raise the honey level;
+      at night and in the rain they stay in or go home. Full hives give three
+      honeycombs to shears or a honey bottle to a glass bottle; without a campfire
+      below, or when the hive is broken (not with silk touch), the bees come out
+      angry; hitting a bee angers those near. A bee stings once (poison 10 s on
+      Normal, 18 s on Hard) and dies some time later. Missing: bees kept in a silk
+      touch hive item, pollen particles, dispensers harvesting.
 - [ ] Pathfinding and AI goals. A* over walkable blocks (`world/pathfinding.rs`):
       walking, one-block jumps, drops of up to three blocks, avoiding lava; monsters
       (except climbing spiders) follow paths to their target. Animals still wander

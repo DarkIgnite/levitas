@@ -42,6 +42,7 @@ pub enum BlockEntity {
     Crafter(Box<super::crafter::Crafter>),
     Lectern(Box<super::lectern::Lectern>),
     Banner(Box<Banner>),
+    Beehive(Box<super::bees::Beehive>),
 }
 
 /// A banner's block entity: its layers.
@@ -122,6 +123,7 @@ impl BlockEntity {
             BlockEntity::Crafter(c) => ("minecraft:crafter", &c.items[..]),
             BlockEntity::Lectern(_) => ("minecraft:lectern", &[][..]),
             BlockEntity::Banner(_) => ("minecraft:banner", &[][..]),
+            BlockEntity::Beehive(_) => ("minecraft:beehive", &[][..]),
         };
         let mut nbt = Compound::new()
             .with("id", id)
@@ -139,6 +141,7 @@ impl BlockEntity {
                 | BlockEntity::Jukebox(_)
                 | BlockEntity::Lectern(_)
                 | BlockEntity::Banner(_)
+                | BlockEntity::Beehive(_)
         ) {
             nbt.insert("Items", items_to_nbt(items.iter().copied().enumerate()));
         }
@@ -185,6 +188,9 @@ impl BlockEntity {
         }
         if let BlockEntity::Lectern(l) = self {
             l.write_nbt(&mut nbt);
+        }
+        if let BlockEntity::Beehive(h) = self {
+            h.write_nbt(&mut nbt);
         }
         if let BlockEntity::Banner(b) = self {
             if b.patterns.is_some() {
@@ -252,6 +258,9 @@ impl BlockEntity {
             }
             "minecraft:lectern" => {
                 BlockEntity::Lectern(Box::new(super::lectern::Lectern::read_nbt(nbt)))
+            }
+            "minecraft:beehive" => {
+                BlockEntity::Beehive(Box::new(super::bees::Beehive::read_nbt(nbt)))
             }
             "minecraft:banner" => BlockEntity::Banner(Box::new(Banner {
                 patterns: nbt.list("patterns").and_then(crate::banners::from_nbt),
@@ -344,6 +353,9 @@ impl BlockEntity {
             "minecraft:jukebox" => Some(BlockEntity::Jukebox(Box::default())),
             "minecraft:crafter" => Some(BlockEntity::Crafter(Box::default())),
             "minecraft:lectern" => Some(BlockEntity::Lectern(Box::default())),
+            "minecraft:bee_nest" | "minecraft:beehive" => {
+                Some(BlockEntity::Beehive(Box::default()))
+            }
             n if crate::banners::banner_color(n).is_some() => {
                 Some(BlockEntity::Banner(Box::default()))
             }
@@ -374,6 +386,7 @@ impl BlockEntity {
             BlockEntity::Crafter(_) => block_entity_type::CRAFTER,
             BlockEntity::Lectern(_) => block_entity_type::LECTERN,
             BlockEntity::Banner(_) => block_entity_type::BANNER,
+            BlockEntity::Beehive(_) => block_entity_type::BEEHIVE,
         }
     }
 
@@ -402,7 +415,8 @@ impl BlockEntity {
             | BlockEntity::Beacon(_)
             | BlockEntity::Conduit(_)
             | BlockEntity::Brushable(_)
-            | BlockEntity::Banner(_) => &[],
+            | BlockEntity::Banner(_)
+            | BlockEntity::Beehive(_) => &[],
         }
     }
 
@@ -422,7 +436,8 @@ impl BlockEntity {
             | BlockEntity::Beacon(_)
             | BlockEntity::Conduit(_)
             | BlockEntity::Brushable(_)
-            | BlockEntity::Banner(_) => &mut [],
+            | BlockEntity::Banner(_)
+            | BlockEntity::Beehive(_) => &mut [],
         }
     }
 
@@ -443,6 +458,7 @@ impl BlockEntity {
             BlockEntity::Crafter(c) => &mut c.viewers,
             BlockEntity::Lectern(l) => &mut l.viewers,
             BlockEntity::Banner(b) => &mut b.viewers,
+            BlockEntity::Beehive(h) => &mut h.viewers,
         }
     }
 }

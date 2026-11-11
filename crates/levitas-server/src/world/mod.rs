@@ -9,6 +9,7 @@ mod armor_stands;
 mod arrows;
 mod attributes;
 mod beacon;
+mod bees;
 mod boats;
 mod breeding;
 mod brewing;
@@ -1569,6 +1570,16 @@ impl World {
 
     fn break_block(&mut self, id: i32, pos: BlockPos, state: u16) {
         self.piglins_guard(id, pos, state);
+        if bees::is_hive(state) {
+            let silk = self.players.get(&id).is_some_and(|p| {
+                p.inventory
+                    .held(p.held)
+                    .enchants
+                    .level_of("minecraft:silk_touch")
+                    > 0
+            });
+            self.hive_broken(id, pos, silk);
+        }
         if let Some(p) = self.players.get_mut(&id) {
             let block = i32::from(levitas_registry::STATE_BLOCK[usize::from(state)]);
             p.stats.add(levitas_registry::stat_type::MINED, block, 1);
@@ -1798,6 +1809,7 @@ impl World {
         self.tick_fireballs();
         self.tick_thrown();
         self.tick_bullets();
+        self.tick_hives();
         self.tick_bobbers();
         self.tick_area_effect_clouds();
         self.tick_boats();
@@ -2016,6 +2028,9 @@ impl World {
             self.light.chunk_loaded(&mut self.chunks, pos);
         }
         self.spawn_structure_mobs(&structure_mobs);
+        for &(x, z) in &fresh {
+            self.settle_nests((x, z));
+        }
         for (x, z) in fresh {
             self.find_spawners(x, z);
             self.spawn_animals_in_chunk(x, z);
