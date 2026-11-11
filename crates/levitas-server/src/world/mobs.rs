@@ -1250,6 +1250,8 @@ pub struct Mob {
     pub horse: Option<Box<super::horses::Horse>>,
     /// Piglins: the gold they admire, and for how many more ticks.
     pub admiring: Option<(u32, i32)>,
+    /// Never despawns (placed by a structure, or a player made it stay).
+    pub persistent: bool,
 }
 
 impl Mob {
@@ -1336,6 +1338,7 @@ impl Mob {
             kept: None,
             horse,
             admiring: None,
+            persistent: false,
             owner: None,
             variant: match kind {
                 MobKind::Cat => rng.below(cat_variants().max(1)) as u8,
@@ -1652,6 +1655,9 @@ impl Mob {
         if self.is_patrol_leader {
             nbt.insert("PatrolLeader", true);
         }
+        if self.persistent {
+            nbt.insert("PersistenceRequired", true);
+        }
         if let Some(raid_id) = self.raid_id {
             nbt.insert("RaidId", raid_id as i32);
         }
@@ -1780,6 +1786,7 @@ impl Mob {
                 .and_then(Tag::as_f64)
                 .map_or(mob.max_health(), |h| h as f32);
         }
+        mob.persistent = nbt.int("PersistenceRequired").unwrap_or(0) != 0;
         mob.kept = Some(Box::new(nbt.clone()));
         Some(mob)
     }
@@ -1876,6 +1883,33 @@ fn spawners(list: &Value) -> Vec<Spawner> {
             })
         })
         .collect()
+}
+
+/// What spawns inside structures instead of the biome's mobs (`spawn_overrides`):
+/// fortresses, monuments, pillager outposts and swamp huts.
+pub struct StructureSpawns {
+    monsters: HashMap<String, Vec<Spawner>>,
+}
+
+impl StructureSpawns {
+    pub fn load() -> Self {
+        let all: serde_json::Map<String, Value> =
+            serde_json::from_str(levitas_registry::STRUCTURES_JSON)
+                .expect("structures are valid JSON");
+        let monsters = all
+            .into_iter()
+            .filter_map(|(name, s)| {
+                let list = spawners(&s["spawn_overrides"]["monster"]["spawns"]);
+                (!list.is_empty()).then_some((name, list))
+            })
+            .collect();
+        StructureSpawns { monsters }
+    }
+
+    /// A monster group for the inside of `structure`.
+    pub fn pick_monster(&self, structure: &str, rng: &mut Rng) -> Option<(MobKind, u32)> {
+        pick(self.monsters.get(structure)?, rng)
+    }
 }
 
 /// A weighted pick from a spawn list, with a group size.
@@ -2226,6 +2260,7 @@ impl World {
             if mob.horse.is_some() {
                 self.tick_horse(id, &mut mob);
             }
+            self.elder_guardian_curse(&mob);
             if mob.kind == MobKind::IronGolem {
                 self.tick_golem(id, &mut mob);
             } else if !mob.kind.is_monster() {
@@ -4235,6 +4270,44 @@ mod path_tests {
             levitas_registry::SpawnPlace::InWater
         );
         assert_eq!(MobKind::Drowned.family(), MobKind::Zombie);
+    }
+
+    #[test]
+    fn structures_bring_their_own_monsters() {
+        let spawns = StructureSpawns::load();
+        let mut rng = Rng::new(3);
+        let fortress: Vec<MobKind> = (0..200)
+            .filter_map(|_| spawns.pick_monster("minecraft:fortress", &mut rng))
+            .map(|(k, _)| k)
+            .collect();
+        assert!(fortress.contains(&MobKind::WitherSkeleton));
+        assert!(fortress.contains(&MobKind::Blaze));
+        assert_eq!(
+            spawns
+                .pick_monster("minecraft:monument", &mut rng)
+                .map(|p| p.0),
+            Some(MobKind::Guardian)
+        );
+        assert_eq!(
+            spawns
+                .pick_monster("minecraft:swamp_hut", &mut rng)
+                .map(|p| p.0),
+            Some(MobKind::Witch)
+        );
+        assert!(spawns
+            .pick_monster("minecraft:village_plains", &mut rng)
+            .is_none());
+    }
+
+    #[test]
+    fn structure_mobs_stay_when_no_one_is_near() {
+        let mut world = flat_world();
+        let mut nbt = Mob::new(MobKind::ElderGuardian, [2.5, -60.0, 2.5], &mut world.rng).to_nbt();
+        nbt.insert("PersistenceRequired", true);
+        let elder = Mob::from_nbt(&nbt, &mut world.rng).unwrap();
+        assert!(elder.persistent);
+        assert!(!world.despawns(&elder), "kept although no one is near");
+        assert!(elder.to_nbt().int("PersistenceRequired") == Some(1));
     }
 
     #[test]

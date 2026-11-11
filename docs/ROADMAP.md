@@ -311,7 +311,15 @@ Known gaps are listed under each phase instead of being hidden.
       once when a chunk is generated. Monsters spawn in groups from the biome's list
       where block light is 0 and the night-dimmed sky light is low, 24+ blocks from
       players, up to 70 per player, and despawn beyond 128 blocks (sometimes beyond 32).
-      Missing: animals respawning later, structure-specific spawns, spawners.
+      Inside structures their own monsters spawn instead (`spawn_overrides` of the
+      structure data): fortresses on their nether brick floors (blazes, wither
+      skeletons, ...), swamp huts on their spruce floors (witches), and ocean
+      monuments and pillager outposts in the space around them (guardians in water
+      and pillagers, neither needing the dark). Mobs a structure places (elder
+      guardians, mansion illagers, hut witches, end city shulkers) never despawn.
+      Guardians lock a beam on their prey for four seconds (elder three) and hurt it
+      for 6 (8); elder guardians give Mining Fatigue III to players within 50 blocks
+      every minute. Missing: animals respawning later.
 - [ ] Pathfinding and AI goals. A* over walkable blocks (`world/pathfinding.rs`):
       walking, one-block jumps, drops of up to three blocks, avoiding lava; monsters
       (except climbing spiders) follow paths to their target. Animals still wander

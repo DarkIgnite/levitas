@@ -256,6 +256,10 @@ impl World {
             self.witch_attack(id, mob, target, distance);
             return false;
         }
+        if matches!(mob.kind, MobKind::Guardian | MobKind::ElderGuardian) {
+            self.guardian_attack(id, mob, target, target_is_mob);
+            return false;
+        }
         if mob.kind == MobKind::Ghast {
             self.ghast_attack(id, mob, target);
             return false;
@@ -562,6 +566,80 @@ impl World {
         mob.attack_cooldown = SKELETON_SHOT_TICKS;
     }
 
+    /// A guardian's beam: it locks on to its prey in sight within 16 blocks, charges for
+    /// four seconds (three for an elder guardian) and then hurts it for 6 (elder 8);
+    /// losing sight breaks it off.
+    fn guardian_attack(&mut self, id: i32, mob: &mut Mob, target: [f64; 3], at_mob: bool) {
+        let elder = mob.kind == MobKind::ElderGuardian;
+        let eye = [mob.pos[0], mob.pos[1] + mob.size().1 * 0.5, mob.pos[2]];
+        let aim = [target[0], target[1] + 1.0, target[2]];
+        let d = (0..3)
+            .map(|i| (aim[i] - eye[i]).powi(2))
+            .sum::<f64>()
+            .sqrt();
+        let prey = mob.hunting.filter(|_| !at_mob);
+        let locked = prey.is_some() && d <= 16.0 && self.line_of_sight(eye, aim);
+        if !locked {
+            if mob.charge > 0 {
+                mob.charge = 0;
+                self.send_to_viewers(mob, guardian_beam(id, 0));
+            }
+            return;
+        }
+        let pid = prey.expect("checked");
+        mob.target = None;
+        mob.path.clear();
+        if mob.charge == 0 {
+            self.send_to_viewers(mob, guardian_beam(id, pid));
+        }
+        mob.charge += 1;
+        let charge_ticks = if elder { 60 } else { 80 };
+        if mob.charge >= charge_ticks {
+            mob.charge = 0;
+            let damage = if elder { 8.0 } else { 6.0 };
+            self.damage_from(pid, damage, Damage::Mob(mob.kind.display()), Some(id));
+            self.send_to_viewers(mob, guardian_beam(id, 0));
+        }
+    }
+
+    /// Every minute an elder guardian gives players within 50 blocks Mining Fatigue III
+    /// for five minutes, with its ghostly face, unless they have it already.
+    pub(super) fn elder_guardian_curse(&mut self, mob: &Mob) {
+        if mob.kind != MobKind::ElderGuardian || !self.tick.is_multiple_of(1200) {
+            return;
+        }
+        let fatigue = levitas_registry::mob_effect::MINING_FATIGUE;
+        let cursed: Vec<i32> = self
+            .players
+            .iter()
+            .filter(|(_, p)| {
+                p.alive
+                    && p.survival()
+                    && (0..3).map(|i| (p.pos[i] - mob.pos[i]).powi(2)).sum::<f64>() <= 2500.0
+                    && p.effect(fatigue)
+                        .is_none_or(|e| e.amplifier < 2 || e.duration < 1200)
+            })
+            .map(|(&pid, _)| pid)
+            .collect();
+        for pid in cursed {
+            self.add_effect(
+                pid,
+                levitas_registry::Effect {
+                    id: fatigue,
+                    duration: 6000,
+                    amplifier: 2,
+                },
+            );
+            // The elder guardian's face, and its curse sound.
+            self.send(
+                pid,
+                Writer::packet(clientbound::GAME_EVENT)
+                    .u8(GAME_EVENT_ELDER_GUARDIAN)
+                    .f32(1.0),
+            );
+        }
+    }
+
     /// Whether nothing solid is between two points.
     pub(super) fn line_of_sight(&self, from: [f64; 3], to: [f64; 3]) -> bool {
         let d = [to[0] - from[0], to[1] - from[1], to[2] - from[2]];
@@ -720,7 +798,11 @@ impl World {
     pub(super) fn despawns(&mut self, mob: &Mob) -> bool {
         // Named mobs stay, and so do raiders: a raid is won by fighting them.
         // A zombie villager being cured stays too.
+        // Structure mobs (elder guardians, mansion illagers, witches in huts) and
+        // shulkers stay put.
         if !mob.kind.is_monster()
+            || mob.persistent
+            || mob.kind == MobKind::Shulker
             || mob.name.is_some()
             || mob.raid_id.is_some()
             || mob.converting.is_some()
@@ -860,9 +942,18 @@ impl World {
         let Some(biome) = self.biome_at(x, y, z) else {
             return;
         };
-        let Some((kind, size)) = self.biome_spawns.pick_monster(&biome, &mut self.rng) else {
+        // Inside a fortress, monument, outpost or swamp hut, its own monsters.
+        let structure = self.spawn_structure(BlockPos::new(x, y, z));
+        let picked = match structure {
+            Some(s) => self.structure_spawns.pick_monster(s, &mut self.rng),
+            None => self.biome_spawns.pick_monster(&biome, &mut self.rng),
+        };
+        let Some((kind, size)) = picked else {
             return;
         };
+        // Outpost pillagers and monument guardians do not need the dark.
+        let any_light =
+            matches!(kind, MobKind::Pillager | MobKind::Guardian) && structure.is_some();
         // Ghasts turn up only one time in twenty.
         if kind == MobKind::Ghast && self.rng.below(20) != 0 {
             return;
@@ -878,9 +969,9 @@ impl World {
                 .stats()
                 .is_some_and(|s| s.spawns_in == levitas_registry::SpawnPlace::InWater);
             let placed = if in_water {
-                self.monster_can_spawn_in_water(pos)
+                self.monster_can_spawn_in_water(pos, any_light)
             } else {
-                self.monster_can_spawn(pos) && self.mob_fits(kind, at)
+                self.monster_can_spawn(pos, any_light) && self.mob_fits(kind, at)
             };
             if placed && self.sky_allows(kind, pos) {
                 let actual_kind = if kind == MobKind::Zombie && self.rng.below(20) == 0 {
@@ -896,7 +987,7 @@ impl World {
 
     /// Whether a water monster (a drowned) may appear at `pos`: in water two blocks deep,
     /// far enough from players, and dark enough.
-    fn monster_can_spawn_in_water(&mut self, pos: BlockPos) -> bool {
+    fn monster_can_spawn_in_water(&mut self, pos: BlockPos, any_light: bool) -> bool {
         let water = |w: &World, dy: i32| {
             w.loaded_block_at(BlockPos::new(pos.x, pos.y + dy, pos.z))
                 .and_then(fluid_at)
@@ -914,10 +1005,16 @@ impl World {
             let d: f64 = (0..3).map(|i| (p.pos[i] - centre[i]).powi(2)).sum();
             d.sqrt() < SPAWN_DISTANCE
         });
-        !too_close
-            && self
-                .light_at(pos)
-                .is_some_and(|(sky, block)| block == 0 && i32::from(sky) - self.sky_darken() <= 7)
+        if too_close {
+            return false;
+        }
+        if any_light {
+            // Guardians: one try in twenty where the sky shows through the water.
+            let open = self.light_at(pos).is_some_and(|(sky, _)| sky >= 15);
+            return !open || self.rng.below(20) == 0;
+        }
+        self.light_at(pos)
+            .is_some_and(|(sky, block)| block == 0 && i32::from(sky) - self.sky_darken() <= 7)
     }
 
     /// The y of the highest block in a loaded column that is not air.
@@ -931,7 +1028,7 @@ impl World {
 
     /// Whether a monster may appear standing at `pos`: on a solid block mobs can spawn on,
     /// with room for its body, far enough from players, and dark enough.
-    fn monster_can_spawn(&mut self, pos: BlockPos) -> bool {
+    fn monster_can_spawn(&mut self, pos: BlockPos, any_light: bool) -> bool {
         let centre = [
             f64::from(pos.x) + 0.5,
             f64::from(pos.y),
@@ -965,11 +1062,71 @@ impl World {
         let Some((sky, light)) = self.light_at(pos) else {
             return false;
         };
+        if any_light {
+            // Pillagers at their outpost: anywhere not brightly lit by blocks.
+            return light <= 8;
+        }
         if light > 0 || u32::from(sky) > self.rng.below(32) {
             return false;
         }
         let level = (i32::from(sky) - self.sky_darken()).max(0);
         level <= self.rng.below(8) as i32
+    }
+
+    /// The structure whose own monsters spawn at `pos`, if any: a nether fortress (on its
+    /// nether brick floors), a swamp hut (on its spruce floor in a swamp), an ocean
+    /// monument or a pillager outpost (anywhere in the space around them).
+    pub(super) fn spawn_structure(&mut self, pos: BlockPos) -> Option<&'static str> {
+        let below = self.loaded_block_at(BlockPos::new(pos.x, pos.y - 1, pos.z))?;
+        let floor = crate::blocks::name(below);
+        if self.dimension == super::dimension::Dimension::Nether {
+            return floor
+                .starts_with("minecraft:nether_brick")
+                .then_some("minecraft:fortress");
+        }
+        if !self.dimension.has_sky() {
+            return None;
+        }
+        if floor == "minecraft:spruce_planks"
+            && self.biome_at(pos.x, pos.y, pos.z).as_deref() == Some("minecraft:swamp")
+        {
+            return Some("minecraft:swamp_hut");
+        }
+        let sea = self.dimension.sea_level();
+        let chunk = pos.chunk();
+        if !self.structure_cache.contains_key(&chunk) {
+            if self.structure_cache.len() > 4096 {
+                self.structure_cache.clear();
+            }
+            let (cx, cz) = (chunk.0 * 16 + 8, chunk.1 * 16 + 8);
+            let found: Vec<(&'static str, [i32; 3])> =
+                ["minecraft:monument", "minecraft:pillager_outpost"]
+                    .into_iter()
+                    .filter_map(|s| {
+                        let at = self.terrain.structure_near(s, cx, cz, 1)?;
+                        ((at[0] - cx).abs() <= 64 && (at[2] - cz).abs() <= 64).then_some((s, at))
+                    })
+                    .collect();
+            self.structure_cache.insert(chunk, found);
+        }
+        self.structure_cache[&chunk].iter().find_map(|&(s, at)| {
+            // Monuments are 58 blocks across, from the sea floor up to the surface;
+            // outposts reach about 32 blocks round their tower.
+            let (centre_x, centre_z) = ((at[0] & !15) + 8, (at[2] & !15) + 8);
+            let inside = match s {
+                "minecraft:monument" => {
+                    (pos.x - centre_x).abs() <= 29
+                        && (pos.z - centre_z).abs() <= 29
+                        && (sea - 25..=sea).contains(&pos.y)
+                }
+                _ => {
+                    (pos.x - centre_x).abs() <= 32
+                        && (pos.z - centre_z).abs() <= 32
+                        && pos.y >= sea - 10
+                }
+            };
+            inside.then_some(s)
+        })
     }
 
     pub(super) fn loaded_block_at(&self, pos: BlockPos) -> Option<u16> {
@@ -979,6 +1136,20 @@ impl World {
         let chunk = self.chunks.get(&pos.chunk())?;
         Some(chunk.get((pos.x & 15) as usize, pos.y, (pos.z & 15) as usize))
     }
+}
+
+/// Game event showing the elder guardian's face.
+const GAME_EVENT_ELDER_GUARDIAN: u8 = 10;
+
+/// Entity data pointing a guardian's beam at an entity (0 for none).
+pub(super) fn guardian_beam(id: i32, target: i32) -> Writer {
+    const DATA_BEAM_TARGET: u8 = 17;
+    Writer::packet(clientbound::SET_ENTITY_DATA)
+        .varint(id)
+        .u8(DATA_BEAM_TARGET)
+        .varint(1)
+        .varint(target)
+        .u8(0xFF)
 }
 
 pub(super) fn horizontal_distance(a: [f64; 3], b: [f64; 3]) -> f64 {

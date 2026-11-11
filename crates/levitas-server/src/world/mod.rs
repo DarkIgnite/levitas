@@ -136,6 +136,8 @@ const DIG_FINISH: i32 = 2;
 /// A dig is accepted once the client's time would have broken 70% of the block, which
 /// allows for network lag, as vanilla does.
 const DIG_TOLERANCE: f32 = 0.7;
+/// A structure and where it starts.
+type StructureSite = (&'static str, [i32; 3]);
 const ENTITY_EVENT_MAINHAND_BREAK: i8 = 47;
 /// Breaking sound and particles for a helmet; the other armor slots follow it.
 const ENTITY_EVENT_HEAD_BREAK: i8 = 49;
@@ -687,6 +689,9 @@ struct World {
     kept_entities: HashMap<(i32, i32), Vec<levitas_nbt::Compound>>,
     unreadable_entities: HashSet<(i32, i32)>,
     biome_spawns: mobs::BiomeSpawns,
+    structure_spawns: mobs::StructureSpawns,
+    /// Monuments and pillager outposts found near each chunk monsters tried to spawn in.
+    structure_cache: HashMap<(i32, i32), Vec<StructureSite>>,
     chunks: HashMap<(i32, i32), Chunk>,
     /// Chunks changed since they were last saved.
     dirty: HashSet<(i32, i32)>,
@@ -831,6 +836,8 @@ impl World {
             kept_entities: HashMap::new(),
             unreadable_entities: HashSet::new(),
             biome_spawns: mobs::BiomeSpawns::load(),
+            structure_spawns: mobs::StructureSpawns::load(),
+            structure_cache: HashMap::new(),
             dir,
             chunks: HashMap::new(),
             dirty: HashSet::new(),

@@ -154,6 +154,14 @@ fn main() {
     embed_json_dir(
         &data,
         &out_dir,
+        "worldgen/structure",
+        "STRUCTURES_JSON",
+        "Structures as JSON (`minecraft:fortress`, ...), for their spawn overrides.",
+        &mut out,
+    );
+    embed_json_dir(
+        &data,
+        &out_dir,
         "predicate",
         "PREDICATES_JSON",
         "Named loot predicates as JSON (`minecraft:tool/can_silk_touch`, ...).",
