@@ -71,7 +71,7 @@ impl World {
             },
             Some("summon") => match args.next() {
                 Some(mob) => self.summon(id, mob),
-                None => format!("Usage: /summon <{}>", mobs::SUMMONABLE.join("|")),
+                None => format!("Usage: /summon <{}>", mobs::summonable().join("|")),
             },
             Some("effect") => {
                 let rest: Vec<&str> = args.collect();
@@ -481,7 +481,7 @@ pub(super) fn command_tree(op: bool) -> Writer {
     t.literal(root, "seed", true);
     t.literal(root, "save-all", true);
     let summon = t.literal(root, "summon", false);
-    for mob in mobs::SUMMONABLE {
+    for mob in mobs::summonable() {
         t.literal(summon, mob, true);
     }
     let time = t.literal(root, "time", false);

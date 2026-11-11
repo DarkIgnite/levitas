@@ -263,7 +263,11 @@ impl World {
 
         let (width, _) = mob.size();
         let reach = ((width * 2.0).powi(2) + 0.6).sqrt();
-        if distance <= reach && dy.abs() < 1.5 && mob.attack_cooldown == 0 {
+        if distance <= reach
+            && dy.abs() < 1.5
+            && mob.attack_cooldown == 0
+            && mob.attack_damage() > 0.0
+        {
             mob.attack_cooldown = ATTACK_TICKS;
             self.send_to_viewers(mob, super::swing(id, 0));
             if mob.kind == MobKind::Ravager {

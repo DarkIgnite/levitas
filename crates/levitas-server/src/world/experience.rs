@@ -103,9 +103,14 @@ impl World {
     }
 
     /// Experience from a mob a player killed.
-    pub(super) fn mob_xp(&mut self, pos: [f64; 3], monster: bool) {
-        let xp = if monster {
-            5
+    pub(super) fn mob_xp(&mut self, pos: [f64; 3], kind: super::mobs::MobKind) {
+        // Animals give 1 to 3; others what the data generator says (5 for most monsters,
+        // 10 for blazes and elder guardians, 50 for the wither).
+        let base = kind.stats().map_or(0, |s| s.xp as i32);
+        let xp = if kind.is_monster() {
+            base.max(5)
+        } else if base == 0 {
+            0
         } else {
             1 + self.rng.below(3) as i32
         };

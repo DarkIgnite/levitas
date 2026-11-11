@@ -318,6 +318,12 @@ Known gaps are listed under each phase instead of being hidden.
       straight, and there are no other AI goals (doors, avoiding water, ...).
 - [ ] Passive mobs: cow, pig, sheep (shearing, dye), chicken, rabbit, horse family,
       wolf, cat, fox, parrot, turtle, fish, squid, axolotl, frog, bee, goat, ...
+      Every 26.3 mob now exists (`KINDS` in `world/mobs.rs`): base health, hitbox,
+      speed, damage, sight and experience come from the data generator's attribute
+      defaults (through Pumpkin's entity data, `levitas_registry::MobStats`); they
+      spawn from the biome lists, wander, swim or fly, and monsters hunt and hit.
+      Mobs keep the saved tags Levitas does not handle yet. Their own behaviours are
+      listed below as they land.
       Done: cows (milking), pigs, sheep (natural wool colours, shearing, regrowing wool
       by eating grass), chickens (eggs, slow falling). They wander, panic when hit,
       swim, look at players and make their sounds. Missing: breeding, babies, temptation

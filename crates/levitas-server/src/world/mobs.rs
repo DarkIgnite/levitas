@@ -105,9 +105,811 @@ pub enum MobKind {
     Cod,
     Salmon,
     Cat,
+    Allay,
+    Armadillo,
+    Axolotl,
+    Bat,
+    Bee,
+    Bogged,
+    Breeze,
+    Camel,
+    CamelHusk,
+    CopperGolem,
+    Creaking,
+    Dolphin,
+    Donkey,
+    Drowned,
+    ElderGuardian,
+    Endermite,
+    Fox,
+    Frog,
+    Giant,
+    GlowSquid,
+    Goat,
+    Guardian,
+    HappyGhast,
+    Hoglin,
+    Horse,
+    Illusioner,
+    Llama,
+    Mooshroom,
+    Mule,
+    Nautilus,
+    Ocelot,
+    Panda,
+    Parched,
+    Parrot,
+    Phantom,
+    Piglin,
+    PiglinBrute,
+    PolarBear,
+    Pufferfish,
+    Shulker,
+    Silverfish,
+    SkeletonHorse,
+    Sniffer,
+    SnowGolem,
+    Strider,
+    SulfurCube,
+    Tadpole,
+    TropicalFish,
+    Turtle,
+    Vex,
+    Warden,
+    Wither,
+    WitherSkeleton,
+    Zoglin,
+    ZombieHorse,
+    ZombieNautilus,
 }
 
+const MONSTER: u8 = 1;
+const UNDEAD: u8 = 2;
+const SWIMS: u8 = 4;
+const FLIES: u8 = 8;
+const BURNS: u8 = 16;
+const RAIDER: u8 = 32;
+
+/// One row of [`KINDS`]: kind, entity name, display name, sound family, flags, type ID.
+type KindRow = (MobKind, &'static str, &'static str, &'static str, u8, i32);
+
+/// Every mob: kind, entity name, display name, sound family (as in
+/// `minecraft:entity.<family>.hurt`), behaviour flags and entity type ID, in the order
+/// of [`MobKind`].
+const KINDS: &[KindRow] = &[
+    (
+        MobKind::Cow,
+        "minecraft:cow",
+        "Cow",
+        "cow",
+        0,
+        entity_type::COW,
+    ),
+    (
+        MobKind::Pig,
+        "minecraft:pig",
+        "Pig",
+        "pig",
+        0,
+        entity_type::PIG,
+    ),
+    (
+        MobKind::Sheep,
+        "minecraft:sheep",
+        "Sheep",
+        "sheep",
+        0,
+        entity_type::SHEEP,
+    ),
+    (
+        MobKind::Chicken,
+        "minecraft:chicken",
+        "Chicken",
+        "chicken",
+        0,
+        entity_type::CHICKEN,
+    ),
+    (
+        MobKind::Zombie,
+        "minecraft:zombie",
+        "Zombie",
+        "zombie",
+        MONSTER | UNDEAD | BURNS,
+        entity_type::ZOMBIE,
+    ),
+    (
+        MobKind::Spider,
+        "minecraft:spider",
+        "Spider",
+        "spider",
+        MONSTER,
+        entity_type::SPIDER,
+    ),
+    (
+        MobKind::Creeper,
+        "minecraft:creeper",
+        "Creeper",
+        "creeper",
+        MONSTER,
+        entity_type::CREEPER,
+    ),
+    (
+        MobKind::Skeleton,
+        "minecraft:skeleton",
+        "Skeleton",
+        "skeleton",
+        MONSTER | UNDEAD | BURNS,
+        entity_type::SKELETON,
+    ),
+    (
+        MobKind::ZombifiedPiglin,
+        "minecraft:zombified_piglin",
+        "Zombified Piglin",
+        "zombified_piglin",
+        MONSTER | UNDEAD,
+        entity_type::ZOMBIFIED_PIGLIN,
+    ),
+    (
+        MobKind::MagmaCube,
+        "minecraft:magma_cube",
+        "Magma Cube",
+        "magma_cube",
+        MONSTER,
+        entity_type::MAGMA_CUBE,
+    ),
+    (
+        MobKind::Ghast,
+        "minecraft:ghast",
+        "Ghast",
+        "ghast",
+        MONSTER | FLIES,
+        entity_type::GHAST,
+    ),
+    (
+        MobKind::Blaze,
+        "minecraft:blaze",
+        "Blaze",
+        "blaze",
+        MONSTER | FLIES,
+        entity_type::BLAZE,
+    ),
+    (
+        MobKind::Enderman,
+        "minecraft:enderman",
+        "Enderman",
+        "enderman",
+        MONSTER,
+        entity_type::ENDERMAN,
+    ),
+    (
+        MobKind::Villager,
+        "minecraft:villager",
+        "Villager",
+        "villager",
+        0,
+        entity_type::VILLAGER,
+    ),
+    (
+        MobKind::IronGolem,
+        "minecraft:iron_golem",
+        "Iron Golem",
+        "iron_golem",
+        0,
+        entity_type::IRON_GOLEM,
+    ),
+    (
+        MobKind::Pillager,
+        "minecraft:pillager",
+        "Pillager",
+        "pillager",
+        MONSTER | RAIDER,
+        entity_type::PILLAGER,
+    ),
+    (
+        MobKind::Vindicator,
+        "minecraft:vindicator",
+        "Vindicator",
+        "vindicator",
+        MONSTER | RAIDER,
+        entity_type::VINDICATOR,
+    ),
+    (
+        MobKind::Ravager,
+        "minecraft:ravager",
+        "Ravager",
+        "ravager",
+        MONSTER | RAIDER,
+        entity_type::RAVAGER,
+    ),
+    (
+        MobKind::Witch,
+        "minecraft:witch",
+        "Witch",
+        "witch",
+        MONSTER | RAIDER,
+        entity_type::WITCH,
+    ),
+    (
+        MobKind::Evoker,
+        "minecraft:evoker",
+        "Evoker",
+        "evoker",
+        MONSTER | RAIDER,
+        entity_type::EVOKER,
+    ),
+    (
+        MobKind::WanderingTrader,
+        "minecraft:wandering_trader",
+        "Wandering Trader",
+        "wandering_trader",
+        0,
+        entity_type::WANDERING_TRADER,
+    ),
+    (
+        MobKind::TraderLlama,
+        "minecraft:trader_llama",
+        "Trader Llama",
+        "llama",
+        0,
+        entity_type::TRADER_LLAMA,
+    ),
+    (
+        MobKind::ZombieVillager,
+        "minecraft:zombie_villager",
+        "Zombie Villager",
+        "zombie_villager",
+        MONSTER | UNDEAD | BURNS,
+        entity_type::ZOMBIE_VILLAGER,
+    ),
+    (
+        MobKind::Husk,
+        "minecraft:husk",
+        "Husk",
+        "husk",
+        MONSTER | UNDEAD,
+        entity_type::HUSK,
+    ),
+    (
+        MobKind::Stray,
+        "minecraft:stray",
+        "Stray",
+        "stray",
+        MONSTER | UNDEAD | BURNS,
+        entity_type::STRAY,
+    ),
+    (
+        MobKind::CaveSpider,
+        "minecraft:cave_spider",
+        "Cave Spider",
+        "spider",
+        MONSTER,
+        entity_type::CAVE_SPIDER,
+    ),
+    (
+        MobKind::Slime,
+        "minecraft:slime",
+        "Slime",
+        "slime",
+        MONSTER,
+        entity_type::SLIME,
+    ),
+    (
+        MobKind::Wolf,
+        "minecraft:wolf",
+        "Wolf",
+        "wolf",
+        0,
+        entity_type::WOLF,
+    ),
+    (
+        MobKind::Rabbit,
+        "minecraft:rabbit",
+        "Rabbit",
+        "rabbit",
+        0,
+        entity_type::RABBIT,
+    ),
+    (
+        MobKind::Squid,
+        "minecraft:squid",
+        "Squid",
+        "squid",
+        SWIMS,
+        entity_type::SQUID,
+    ),
+    (
+        MobKind::Cod,
+        "minecraft:cod",
+        "Cod",
+        "cod",
+        SWIMS,
+        entity_type::COD,
+    ),
+    (
+        MobKind::Salmon,
+        "minecraft:salmon",
+        "Salmon",
+        "salmon",
+        SWIMS,
+        entity_type::SALMON,
+    ),
+    (
+        MobKind::Cat,
+        "minecraft:cat",
+        "Cat",
+        "cat",
+        0,
+        entity_type::CAT,
+    ),
+    (
+        MobKind::Allay,
+        "minecraft:allay",
+        "Allay",
+        "allay",
+        FLIES,
+        entity_type::ALLAY,
+    ),
+    (
+        MobKind::Armadillo,
+        "minecraft:armadillo",
+        "Armadillo",
+        "armadillo",
+        0,
+        entity_type::ARMADILLO,
+    ),
+    (
+        MobKind::Axolotl,
+        "minecraft:axolotl",
+        "Axolotl",
+        "axolotl",
+        0,
+        entity_type::AXOLOTL,
+    ),
+    (
+        MobKind::Bat,
+        "minecraft:bat",
+        "Bat",
+        "bat",
+        FLIES,
+        entity_type::BAT,
+    ),
+    (
+        MobKind::Bee,
+        "minecraft:bee",
+        "Bee",
+        "bee",
+        FLIES,
+        entity_type::BEE,
+    ),
+    (
+        MobKind::Bogged,
+        "minecraft:bogged",
+        "Bogged",
+        "bogged",
+        MONSTER | UNDEAD | BURNS,
+        entity_type::BOGGED,
+    ),
+    (
+        MobKind::Breeze,
+        "minecraft:breeze",
+        "Breeze",
+        "breeze",
+        MONSTER,
+        entity_type::BREEZE,
+    ),
+    (
+        MobKind::Camel,
+        "minecraft:camel",
+        "Camel",
+        "camel",
+        0,
+        entity_type::CAMEL,
+    ),
+    (
+        MobKind::CamelHusk,
+        "minecraft:camel_husk",
+        "Camel Husk",
+        "camel_husk",
+        UNDEAD,
+        entity_type::CAMEL_HUSK,
+    ),
+    (
+        MobKind::CopperGolem,
+        "minecraft:copper_golem",
+        "Copper Golem",
+        "copper_golem",
+        0,
+        entity_type::COPPER_GOLEM,
+    ),
+    (
+        MobKind::Creaking,
+        "minecraft:creaking",
+        "Creaking",
+        "creaking",
+        MONSTER,
+        entity_type::CREAKING,
+    ),
+    (
+        MobKind::Dolphin,
+        "minecraft:dolphin",
+        "Dolphin",
+        "dolphin",
+        SWIMS,
+        entity_type::DOLPHIN,
+    ),
+    (
+        MobKind::Donkey,
+        "minecraft:donkey",
+        "Donkey",
+        "donkey",
+        0,
+        entity_type::DONKEY,
+    ),
+    (
+        MobKind::Drowned,
+        "minecraft:drowned",
+        "Drowned",
+        "drowned",
+        MONSTER | UNDEAD | BURNS,
+        entity_type::DROWNED,
+    ),
+    (
+        MobKind::ElderGuardian,
+        "minecraft:elder_guardian",
+        "Elder Guardian",
+        "elder_guardian",
+        MONSTER | SWIMS,
+        entity_type::ELDER_GUARDIAN,
+    ),
+    (
+        MobKind::Endermite,
+        "minecraft:endermite",
+        "Endermite",
+        "endermite",
+        MONSTER,
+        entity_type::ENDERMITE,
+    ),
+    (
+        MobKind::Fox,
+        "minecraft:fox",
+        "Fox",
+        "fox",
+        0,
+        entity_type::FOX,
+    ),
+    (
+        MobKind::Frog,
+        "minecraft:frog",
+        "Frog",
+        "frog",
+        0,
+        entity_type::FROG,
+    ),
+    (
+        MobKind::Giant,
+        "minecraft:giant",
+        "Giant",
+        "zombie",
+        UNDEAD,
+        entity_type::GIANT,
+    ),
+    (
+        MobKind::GlowSquid,
+        "minecraft:glow_squid",
+        "Glow Squid",
+        "glow_squid",
+        SWIMS,
+        entity_type::GLOW_SQUID,
+    ),
+    (
+        MobKind::Goat,
+        "minecraft:goat",
+        "Goat",
+        "goat",
+        0,
+        entity_type::GOAT,
+    ),
+    (
+        MobKind::Guardian,
+        "minecraft:guardian",
+        "Guardian",
+        "guardian",
+        MONSTER | SWIMS,
+        entity_type::GUARDIAN,
+    ),
+    (
+        MobKind::HappyGhast,
+        "minecraft:happy_ghast",
+        "Happy Ghast",
+        "happy_ghast",
+        FLIES,
+        entity_type::HAPPY_GHAST,
+    ),
+    (
+        MobKind::Hoglin,
+        "minecraft:hoglin",
+        "Hoglin",
+        "hoglin",
+        MONSTER,
+        entity_type::HOGLIN,
+    ),
+    (
+        MobKind::Horse,
+        "minecraft:horse",
+        "Horse",
+        "horse",
+        0,
+        entity_type::HORSE,
+    ),
+    (
+        MobKind::Illusioner,
+        "minecraft:illusioner",
+        "Illusioner",
+        "illusioner",
+        MONSTER | RAIDER,
+        entity_type::ILLUSIONER,
+    ),
+    (
+        MobKind::Llama,
+        "minecraft:llama",
+        "Llama",
+        "llama",
+        0,
+        entity_type::LLAMA,
+    ),
+    (
+        MobKind::Mooshroom,
+        "minecraft:mooshroom",
+        "Mooshroom",
+        "cow",
+        0,
+        entity_type::MOOSHROOM,
+    ),
+    (
+        MobKind::Mule,
+        "minecraft:mule",
+        "Mule",
+        "mule",
+        0,
+        entity_type::MULE,
+    ),
+    (
+        MobKind::Nautilus,
+        "minecraft:nautilus",
+        "Nautilus",
+        "nautilus",
+        SWIMS,
+        entity_type::NAUTILUS,
+    ),
+    (
+        MobKind::Ocelot,
+        "minecraft:ocelot",
+        "Ocelot",
+        "ocelot",
+        0,
+        entity_type::OCELOT,
+    ),
+    (
+        MobKind::Panda,
+        "minecraft:panda",
+        "Panda",
+        "panda",
+        0,
+        entity_type::PANDA,
+    ),
+    (
+        MobKind::Parched,
+        "minecraft:parched",
+        "Parched",
+        "parched",
+        MONSTER | UNDEAD,
+        entity_type::PARCHED,
+    ),
+    (
+        MobKind::Parrot,
+        "minecraft:parrot",
+        "Parrot",
+        "parrot",
+        FLIES,
+        entity_type::PARROT,
+    ),
+    (
+        MobKind::Phantom,
+        "minecraft:phantom",
+        "Phantom",
+        "phantom",
+        MONSTER | UNDEAD | FLIES | BURNS,
+        entity_type::PHANTOM,
+    ),
+    (
+        MobKind::Piglin,
+        "minecraft:piglin",
+        "Piglin",
+        "piglin",
+        MONSTER,
+        entity_type::PIGLIN,
+    ),
+    (
+        MobKind::PiglinBrute,
+        "minecraft:piglin_brute",
+        "Piglin Brute",
+        "piglin_brute",
+        MONSTER,
+        entity_type::PIGLIN_BRUTE,
+    ),
+    (
+        MobKind::PolarBear,
+        "minecraft:polar_bear",
+        "Polar Bear",
+        "polar_bear",
+        0,
+        entity_type::POLAR_BEAR,
+    ),
+    (
+        MobKind::Pufferfish,
+        "minecraft:pufferfish",
+        "Pufferfish",
+        "puffer_fish",
+        SWIMS,
+        entity_type::PUFFERFISH,
+    ),
+    (
+        MobKind::Shulker,
+        "minecraft:shulker",
+        "Shulker",
+        "shulker",
+        MONSTER,
+        entity_type::SHULKER,
+    ),
+    (
+        MobKind::Silverfish,
+        "minecraft:silverfish",
+        "Silverfish",
+        "silverfish",
+        MONSTER,
+        entity_type::SILVERFISH,
+    ),
+    (
+        MobKind::SkeletonHorse,
+        "minecraft:skeleton_horse",
+        "Skeleton Horse",
+        "skeleton_horse",
+        UNDEAD,
+        entity_type::SKELETON_HORSE,
+    ),
+    (
+        MobKind::Sniffer,
+        "minecraft:sniffer",
+        "Sniffer",
+        "sniffer",
+        0,
+        entity_type::SNIFFER,
+    ),
+    (
+        MobKind::SnowGolem,
+        "minecraft:snow_golem",
+        "Snow Golem",
+        "snow_golem",
+        0,
+        entity_type::SNOW_GOLEM,
+    ),
+    (
+        MobKind::Strider,
+        "minecraft:strider",
+        "Strider",
+        "strider",
+        0,
+        entity_type::STRIDER,
+    ),
+    (
+        MobKind::SulfurCube,
+        "minecraft:sulfur_cube",
+        "Sulfur Cube",
+        "small_sulfur_cube",
+        0,
+        entity_type::SULFUR_CUBE,
+    ),
+    (
+        MobKind::Tadpole,
+        "minecraft:tadpole",
+        "Tadpole",
+        "tadpole",
+        SWIMS,
+        entity_type::TADPOLE,
+    ),
+    (
+        MobKind::TropicalFish,
+        "minecraft:tropical_fish",
+        "Tropical Fish",
+        "tropical_fish",
+        SWIMS,
+        entity_type::TROPICAL_FISH,
+    ),
+    (
+        MobKind::Turtle,
+        "minecraft:turtle",
+        "Turtle",
+        "turtle",
+        0,
+        entity_type::TURTLE,
+    ),
+    (
+        MobKind::Vex,
+        "minecraft:vex",
+        "Vex",
+        "vex",
+        MONSTER | FLIES,
+        entity_type::VEX,
+    ),
+    (
+        MobKind::Warden,
+        "minecraft:warden",
+        "Warden",
+        "warden",
+        MONSTER,
+        entity_type::WARDEN,
+    ),
+    (
+        MobKind::Wither,
+        "minecraft:wither",
+        "Wither",
+        "wither",
+        MONSTER | UNDEAD | FLIES,
+        entity_type::WITHER,
+    ),
+    (
+        MobKind::WitherSkeleton,
+        "minecraft:wither_skeleton",
+        "Wither Skeleton",
+        "wither_skeleton",
+        MONSTER | UNDEAD,
+        entity_type::WITHER_SKELETON,
+    ),
+    (
+        MobKind::Zoglin,
+        "minecraft:zoglin",
+        "Zoglin",
+        "zoglin",
+        MONSTER | UNDEAD,
+        entity_type::ZOGLIN,
+    ),
+    (
+        MobKind::ZombieHorse,
+        "minecraft:zombie_horse",
+        "Zombie Horse",
+        "zombie_horse",
+        UNDEAD,
+        entity_type::ZOMBIE_HORSE,
+    ),
+    (
+        MobKind::ZombieNautilus,
+        "minecraft:zombie_nautilus",
+        "Zombie Nautilus",
+        "zombie_nautilus",
+        UNDEAD | SWIMS,
+        entity_type::ZOMBIE_NAUTILUS,
+    ),
+];
+
 impl MobKind {
+    fn row(self) -> &'static KindRow {
+        &KINDS[self as usize]
+    }
+
+    fn flag(self, flag: u8) -> bool {
+        self.row().4 & flag != 0
+    }
+
+    /// Every mob kind.
+    pub fn all() -> impl Iterator<Item = MobKind> {
+        KINDS.iter().map(|r| r.0)
+    }
+
+    /// Base stats from the data generator.
+    pub fn stats(self) -> Option<&'static levitas_registry::MobStats> {
+        levitas_registry::MobStats::of(self.name())
+    }
+
     /// The mob whose behaviour it shares: husks act as zombies, strays as skeletons, cave
     /// spiders as spiders and slimes as magma cubes (with their own differences).
     pub fn family(self) -> MobKind {
@@ -116,175 +918,38 @@ impl MobKind {
             MobKind::Stray => MobKind::Skeleton,
             MobKind::CaveSpider => MobKind::Spider,
             MobKind::Slime => MobKind::MagmaCube,
+            MobKind::Drowned => MobKind::Zombie,
+            MobKind::Bogged | MobKind::Parched => MobKind::Skeleton,
             other => other,
         }
     }
 
     pub fn from_name(name: &str) -> Option<MobKind> {
-        match name {
-            "minecraft:cow" => Some(MobKind::Cow),
-            "minecraft:pig" => Some(MobKind::Pig),
-            "minecraft:sheep" => Some(MobKind::Sheep),
-            "minecraft:chicken" => Some(MobKind::Chicken),
-            "minecraft:zombie" => Some(MobKind::Zombie),
-            "minecraft:spider" => Some(MobKind::Spider),
-            "minecraft:creeper" => Some(MobKind::Creeper),
-            "minecraft:skeleton" => Some(MobKind::Skeleton),
-            "minecraft:zombified_piglin" => Some(MobKind::ZombifiedPiglin),
-            "minecraft:magma_cube" => Some(MobKind::MagmaCube),
-            "minecraft:ghast" => Some(MobKind::Ghast),
-            "minecraft:blaze" => Some(MobKind::Blaze),
-            "minecraft:enderman" => Some(MobKind::Enderman),
-            "minecraft:villager" => Some(MobKind::Villager),
-            "minecraft:iron_golem" => Some(MobKind::IronGolem),
-            "minecraft:pillager" => Some(MobKind::Pillager),
-            "minecraft:vindicator" => Some(MobKind::Vindicator),
-            "minecraft:ravager" => Some(MobKind::Ravager),
-            "minecraft:witch" => Some(MobKind::Witch),
-            "minecraft:evoker" => Some(MobKind::Evoker),
-            "minecraft:wandering_trader" => Some(MobKind::WanderingTrader),
-            "minecraft:trader_llama" => Some(MobKind::TraderLlama),
-            "minecraft:zombie_villager" => Some(MobKind::ZombieVillager),
-            "minecraft:husk" => Some(MobKind::Husk),
-            "minecraft:stray" => Some(MobKind::Stray),
-            "minecraft:cave_spider" => Some(MobKind::CaveSpider),
-            "minecraft:slime" => Some(MobKind::Slime),
-            "minecraft:wolf" => Some(MobKind::Wolf),
-            "minecraft:rabbit" => Some(MobKind::Rabbit),
-            "minecraft:squid" => Some(MobKind::Squid),
-            "minecraft:cod" => Some(MobKind::Cod),
-            "minecraft:salmon" => Some(MobKind::Salmon),
-            "minecraft:cat" => Some(MobKind::Cat),
-            _ => None,
-        }
+        KINDS.iter().find(|r| r.1 == name).map(|r| r.0)
     }
 
     pub fn name(self) -> &'static str {
-        match self {
-            MobKind::Cow => "minecraft:cow",
-            MobKind::Pig => "minecraft:pig",
-            MobKind::Sheep => "minecraft:sheep",
-            MobKind::Chicken => "minecraft:chicken",
-            MobKind::Zombie => "minecraft:zombie",
-            MobKind::Spider => "minecraft:spider",
-            MobKind::Creeper => "minecraft:creeper",
-            MobKind::Skeleton => "minecraft:skeleton",
-            MobKind::ZombifiedPiglin => "minecraft:zombified_piglin",
-            MobKind::MagmaCube => "minecraft:magma_cube",
-            MobKind::Ghast => "minecraft:ghast",
-            MobKind::Blaze => "minecraft:blaze",
-            MobKind::Enderman => "minecraft:enderman",
-            MobKind::Villager => "minecraft:villager",
-            MobKind::IronGolem => "minecraft:iron_golem",
-            MobKind::Pillager => "minecraft:pillager",
-            MobKind::Vindicator => "minecraft:vindicator",
-            MobKind::Ravager => "minecraft:ravager",
-            MobKind::Witch => "minecraft:witch",
-            MobKind::Evoker => "minecraft:evoker",
-            MobKind::WanderingTrader => "minecraft:wandering_trader",
-            MobKind::TraderLlama => "minecraft:trader_llama",
-            MobKind::ZombieVillager => "minecraft:zombie_villager",
-            MobKind::Husk => "minecraft:husk",
-            MobKind::Stray => "minecraft:stray",
-            MobKind::CaveSpider => "minecraft:cave_spider",
-            MobKind::Slime => "minecraft:slime",
-            MobKind::Wolf => "minecraft:wolf",
-            MobKind::Rabbit => "minecraft:rabbit",
-            MobKind::Squid => "minecraft:squid",
-            MobKind::Cod => "minecraft:cod",
-            MobKind::Salmon => "minecraft:salmon",
-            MobKind::Cat => "minecraft:cat",
-        }
+        self.row().1
     }
 
     /// The name in death messages.
     pub fn display(self) -> &'static str {
-        match self {
-            MobKind::Cow => "Cow",
-            MobKind::Pig => "Pig",
-            MobKind::Sheep => "Sheep",
-            MobKind::Chicken => "Chicken",
-            MobKind::Zombie => "Zombie",
-            MobKind::Spider => "Spider",
-            MobKind::Creeper => "Creeper",
-            MobKind::Skeleton => "Skeleton",
-            MobKind::ZombifiedPiglin => "Zombified Piglin",
-            MobKind::MagmaCube => "Magma Cube",
-            MobKind::Ghast => "Ghast",
-            MobKind::Blaze => "Blaze",
-            MobKind::Enderman => "Enderman",
-            MobKind::Villager => "Villager",
-            MobKind::IronGolem => "Iron Golem",
-            MobKind::Pillager => "Pillager",
-            MobKind::Vindicator => "Vindicator",
-            MobKind::Ravager => "Ravager",
-            MobKind::Witch => "Witch",
-            MobKind::Evoker => "Evoker",
-            MobKind::WanderingTrader => "Wandering Trader",
-            MobKind::TraderLlama => "Trader Llama",
-            MobKind::ZombieVillager => "Zombie Villager",
-            MobKind::Husk => "Husk",
-            MobKind::Stray => "Stray",
-            MobKind::CaveSpider => "Cave Spider",
-            MobKind::Slime => "Slime",
-            MobKind::Wolf => "Wolf",
-            MobKind::Rabbit => "Rabbit",
-            MobKind::Squid => "Squid",
-            MobKind::Cod => "Cod",
-            MobKind::Salmon => "Salmon",
-            MobKind::Cat => "Cat",
-        }
+        self.row().2
     }
 
     pub fn is_monster(self) -> bool {
-        matches!(
-            self,
-            MobKind::Zombie
-                | MobKind::Spider
-                | MobKind::Creeper
-                | MobKind::Skeleton
-                | MobKind::ZombifiedPiglin
-                | MobKind::MagmaCube
-                | MobKind::Ghast
-                | MobKind::Blaze
-                | MobKind::Enderman
-                | MobKind::Pillager
-                | MobKind::Vindicator
-                | MobKind::Ravager
-                | MobKind::Witch
-                | MobKind::Evoker
-                | MobKind::ZombieVillager
-                | MobKind::Husk
-                | MobKind::Stray
-                | MobKind::CaveSpider
-                | MobKind::Slime
-        )
+        self.flag(MONSTER)
     }
 
     /// Whether it takes part in raids against villages.
     pub fn is_raider(self) -> bool {
-        matches!(
-            self,
-            MobKind::Pillager
-                | MobKind::Vindicator
-                | MobKind::Ravager
-                | MobKind::Witch
-                | MobKind::Evoker
-        )
+        self.flag(RAIDER) && self != MobKind::Illusioner
     }
 
     /// Whether it belongs to the undead (hurt by healing, healed by harming, immune to
     /// poison and regeneration).
     pub fn is_undead(self) -> bool {
-        matches!(
-            self,
-            MobKind::Zombie
-                | MobKind::Skeleton
-                | MobKind::ZombifiedPiglin
-                | MobKind::ZombieVillager
-                | MobKind::Husk
-                | MobKind::Stray
-        )
+        self.flag(UNDEAD)
     }
 
     /// Whether fire and lava leave it unhurt.
@@ -292,17 +957,17 @@ impl MobKind {
         matches!(
             self,
             MobKind::ZombifiedPiglin | MobKind::MagmaCube | MobKind::Ghast | MobKind::Blaze
-        )
+        ) || self.stats().is_some_and(|s| s.fire_immune)
     }
 
     /// Whether it lives in water: it swims about in it and suffocates out of it.
     pub fn swims(self) -> bool {
-        matches!(self, MobKind::Squid | MobKind::Cod | MobKind::Salmon)
+        self.flag(SWIMS)
     }
 
     /// Whether it flies instead of walking.
     pub fn flies(self) -> bool {
-        matches!(self, MobKind::Ghast | MobKind::Blaze)
+        self.flag(FLIES)
     }
 
     /// Melee damage on Normal difficulty.
@@ -318,6 +983,8 @@ impl MobKind {
             MobKind::Ravager => 12.0,
             MobKind::Evoker => 6.0,
             MobKind::Wolf => 4.0,
+            MobKind::WitherSkeleton => 8.0,
+            other if other.is_monster() => other.stats().map_or(0.0, |s| s.attack),
             _ => 0.0,
         }
     }
@@ -336,54 +1003,26 @@ impl MobKind {
             | MobKind::Ravager
             | MobKind::Witch
             | MobKind::Evoker => 32.0,
-            _ => 16.0,
+            MobKind::Spider
+            | MobKind::CaveSpider
+            | MobKind::Creeper
+            | MobKind::Skeleton
+            | MobKind::Stray
+            | MobKind::MagmaCube
+            | MobKind::Slime
+            | MobKind::Wolf
+            | MobKind::Cat => 16.0,
+            other => other.stats().map_or(16.0, |s| s.follow),
         }
     }
 
+    /// Whether the sun sets it alight (husks are the zombies it leaves alone).
     pub fn burns_in_daylight(self) -> bool {
-        // Husks are the zombies the sun leaves alone.
-        matches!(
-            self,
-            MobKind::Zombie | MobKind::Skeleton | MobKind::Stray | MobKind::ZombieVillager
-        )
+        self.flag(BURNS)
     }
 
     pub(super) fn entity_type(self) -> i32 {
-        match self {
-            MobKind::Cow => entity_type::COW,
-            MobKind::Pig => entity_type::PIG,
-            MobKind::Sheep => entity_type::SHEEP,
-            MobKind::Chicken => entity_type::CHICKEN,
-            MobKind::Zombie => entity_type::ZOMBIE,
-            MobKind::Spider => entity_type::SPIDER,
-            MobKind::Creeper => entity_type::CREEPER,
-            MobKind::Skeleton => entity_type::SKELETON,
-            MobKind::ZombifiedPiglin => entity_type::ZOMBIFIED_PIGLIN,
-            MobKind::MagmaCube => entity_type::MAGMA_CUBE,
-            MobKind::Ghast => entity_type::GHAST,
-            MobKind::Blaze => entity_type::BLAZE,
-            MobKind::Enderman => entity_type::ENDERMAN,
-            MobKind::Villager => entity_type::VILLAGER,
-            MobKind::IronGolem => entity_type::IRON_GOLEM,
-            MobKind::Pillager => entity_type::PILLAGER,
-            MobKind::Vindicator => entity_type::VINDICATOR,
-            MobKind::Ravager => entity_type::RAVAGER,
-            MobKind::Witch => entity_type::WITCH,
-            MobKind::Evoker => entity_type::EVOKER,
-            MobKind::WanderingTrader => entity_type::WANDERING_TRADER,
-            MobKind::TraderLlama => entity_type::TRADER_LLAMA,
-            MobKind::ZombieVillager => entity_type::ZOMBIE_VILLAGER,
-            MobKind::Husk => entity_type::HUSK,
-            MobKind::Stray => entity_type::STRAY,
-            MobKind::CaveSpider => entity_type::CAVE_SPIDER,
-            MobKind::Slime => entity_type::SLIME,
-            MobKind::Wolf => entity_type::WOLF,
-            MobKind::Rabbit => entity_type::RABBIT,
-            MobKind::Squid => entity_type::SQUID,
-            MobKind::Cod => entity_type::COD,
-            MobKind::Salmon => entity_type::SALMON,
-            MobKind::Cat => entity_type::CAT,
-        }
+        self.row().5
     }
 
     pub fn max_health(self) -> f32 {
@@ -414,6 +1053,9 @@ impl MobKind {
             MobKind::Pillager | MobKind::Vindicator | MobKind::Evoker => 24.0,
             MobKind::Witch => 26.0,
             MobKind::Ravager => 100.0,
+            // Horses and their kin roll their health between 15 and 30.
+            MobKind::Horse | MobKind::Donkey | MobKind::Mule | MobKind::Llama => 22.0,
+            other => other.stats().map_or(20.0, |s| s.health),
         }
     }
 
@@ -449,6 +1091,7 @@ impl MobKind {
             MobKind::Ravager => (1.95, 2.2),
             MobKind::WanderingTrader | MobKind::ZombieVillager => (0.6, 1.95),
             MobKind::TraderLlama => (0.9, 1.87),
+            other => other.stats().map_or((0.6, 1.8), |s| (s.width, s.height)),
         }
     }
 
@@ -478,47 +1121,27 @@ impl MobKind {
             MobKind::Ravager => 0.12,
             MobKind::Witch => 0.11,
             MobKind::Evoker => 0.13,
+            MobKind::Cow
+            | MobKind::Pig
+            | MobKind::Sheep
+            | MobKind::Villager
+            | MobKind::IronGolem
+            | MobKind::WanderingTrader
+            | MobKind::TraderLlama => 0.1,
+            MobKind::Dolphin => 0.15,
+            other if other.swims() => 0.08,
+            MobKind::Shulker | MobKind::Giant => 0.0,
+            // Walking at about half the speed attribute, as the mobs above do.
+            other if !other.flies() && other.stats().is_some_and(|s| s.speed < 0.6) => {
+                other.stats().map_or(0.1, |s| s.speed * 0.5)
+            }
             _ => 0.1,
         }
     }
 
     /// The sound family, as in `minecraft:entity.<family>.hurt`.
     pub fn sound(self) -> &'static str {
-        match self {
-            MobKind::Cow => "cow",
-            MobKind::Pig => "pig",
-            MobKind::Sheep => "sheep",
-            MobKind::Chicken => "chicken",
-            MobKind::Zombie => "zombie",
-            MobKind::Spider => "spider",
-            MobKind::Creeper => "creeper",
-            MobKind::Skeleton => "skeleton",
-            MobKind::ZombifiedPiglin => "zombified_piglin",
-            MobKind::MagmaCube => "magma_cube",
-            MobKind::Ghast => "ghast",
-            MobKind::Blaze => "blaze",
-            MobKind::Enderman => "enderman",
-            MobKind::Villager => "villager",
-            MobKind::IronGolem => "iron_golem",
-            MobKind::Pillager => "pillager",
-            MobKind::Vindicator => "vindicator",
-            MobKind::Ravager => "ravager",
-            MobKind::Witch => "witch",
-            MobKind::Evoker => "evoker",
-            MobKind::WanderingTrader => "wandering_trader",
-            MobKind::TraderLlama => "llama",
-            MobKind::ZombieVillager => "zombie_villager",
-            MobKind::Husk => "husk",
-            MobKind::Stray => "stray",
-            MobKind::CaveSpider => "cave_spider",
-            MobKind::Slime => "slime",
-            MobKind::Wolf => "wolf",
-            MobKind::Rabbit => "rabbit",
-            MobKind::Squid => "squid",
-            MobKind::Cod => "cod",
-            MobKind::Salmon => "salmon",
-            MobKind::Cat => "cat",
-        }
+        self.row().3
     }
 }
 
@@ -617,6 +1240,9 @@ pub struct Mob {
     pub leader: Option<i32>,
     /// Ticks remaining of panic state (e.g. villagers fleeing monsters).
     pub panic_ticks: u32,
+    /// What it was loaded from, so that tags Levitas does not handle (a horse's saddle,
+    /// a fox's trusted players) are saved back.
+    kept: Option<Box<Compound>>,
 }
 
 impl Mob {
@@ -698,6 +1324,7 @@ impl Mob {
             despawn_timer: None,
             leader: None,
             panic_ticks: 0,
+            kept: None,
             owner: None,
             variant: match kind {
                 MobKind::Cat => rng.below(cat_variants().max(1)) as u8,
@@ -995,6 +1622,13 @@ impl Mob {
                 super::effects::effects_to_nbt(&self.effects),
             );
         }
+        if let Some(kept) = &self.kept {
+            for (key, tag) in kept.iter() {
+                if nbt.get(key).is_none() && !MANAGED_TAGS.contains(&key) {
+                    nbt.insert(key, tag.clone());
+                }
+            }
+        }
         nbt
     }
 
@@ -1092,9 +1726,25 @@ impl Mob {
                 .or_else(|| nbt.get("ActiveEffects")),
         );
         mob.sent_pos = mob.pos;
+        mob.kept = Some(Box::new(nbt.clone()));
         Some(mob)
     }
 }
+
+/// Saved mob tags Levitas writes only while they apply: a kept copy must not bring them
+/// back once they are gone.
+const MANAGED_TAGS: &[&str] = &[
+    "active_effects",
+    "ActiveEffects",
+    "ConversionTime",
+    "DespawnDelay",
+    "RaidId",
+    "PatrolLeader",
+    "CustomName",
+    "Owner",
+    "powered",
+    "AngerTime",
+];
 
 /// A natural wool colour, with vanilla's odds: mostly white, sometimes grey, black or
 /// brown, and rarely pink.
@@ -1132,42 +1782,12 @@ struct SpawnList {
     water: Vec<Spawner>,
 }
 
-/// Mobs `/summon` knows.
-pub const SUMMONABLE: [&str; 33] = [
-    "cow",
-    "pig",
-    "sheep",
-    "chicken",
-    "zombie",
-    "spider",
-    "creeper",
-    "skeleton",
-    "zombified_piglin",
-    "magma_cube",
-    "ghast",
-    "blaze",
-    "enderman",
-    "villager",
-    "iron_golem",
-    "pillager",
-    "vindicator",
-    "ravager",
-    "witch",
-    "evoker",
-    "wandering_trader",
-    "trader_llama",
-    "zombie_villager",
-    "husk",
-    "stray",
-    "cave_spider",
-    "slime",
-    "wolf",
-    "rabbit",
-    "squid",
-    "cod",
-    "salmon",
-    "cat",
-];
+/// Mobs `/summon` knows, without the `minecraft:` prefix.
+pub fn summonable() -> Vec<&'static str> {
+    MobKind::all()
+        .map(|k| k.name().trim_start_matches("minecraft:"))
+        .collect()
+}
 
 fn spawners(list: &Value) -> Vec<Spawner> {
     list.as_array()
@@ -1798,6 +2418,12 @@ impl World {
             .is_none_or(|g| (0..3).map(|i| (g[i] - mob.pos[i]).powi(2)).sum::<f64>() < 1.0);
         if let (MobKind::Blaze, Some(p)) = (mob.kind, prey) {
             mob.fly_goal = Some([p[0], p[1] + 1.0 + self.rng.f64() * 2.0, p[2]]);
+        } else if let (MobKind::Wither, Some(p)) = (mob.kind, prey) {
+            // The wither hovers above its prey.
+            mob.fly_goal = Some([p[0], p[1] + 4.0, p[2]]);
+        } else if let Some(p) = prey.filter(|_| mob.kind != MobKind::Ghast) {
+            // Vexes and phantoms swoop at their prey.
+            mob.fly_goal = Some([p[0], p[1] + 0.5, p[2]]);
         } else if reached || self.rng.below(100) == 0 {
             let r = |rng: &mut Rng| (rng.f64() * 2.0 - 1.0) * wander;
             mob.fly_goal = Some([
@@ -2419,7 +3045,7 @@ impl World {
             self.scatter_item(mob.pos, Stack::new(item, count));
         }
         if mob.killed_by_player && crate::rules::bool("mob_drops") {
-            self.mob_xp(mob.pos, mob.kind.is_monster());
+            self.mob_xp(mob.pos, mob.kind);
         }
         if let Some(raid_id) = mob.raid_id {
             self.raider_killed(raid_id, id);
@@ -2890,7 +3516,7 @@ impl World {
             format!("minecraft:{name}")
         };
         let Some(kind) = MobKind::from_name(&full) else {
-            return format!("Cannot summon {full} yet: {}", SUMMONABLE.join(", "));
+            return format!("Cannot summon {full} yet: {}", summonable().join(", "));
         };
         let Some(p) = self.players.get(&id) else {
             return String::new();
@@ -3325,7 +3951,7 @@ mod path_tests {
     fn entities_levitas_does_not_know_are_saved_back() {
         let mut world = flat_world();
         let horse = Compound::new()
-            .with("id", "minecraft:horse")
+            .with("id", "minecraft:mannequin")
             .with(
                 "Pos",
                 vec![Tag::Double(2.5), Tag::Double(-60.0), Tag::Double(2.5)],
@@ -3354,8 +3980,21 @@ mod path_tests {
             .filter_map(Tag::as_compound)
             .filter_map(|e| e.str("id"))
             .collect();
-        assert!(ids.contains(&"minecraft:horse"), "{ids:?}");
+        assert!(ids.contains(&"minecraft:mannequin"), "{ids:?}");
         assert!(ids.contains(&"minecraft:cow"), "{ids:?}");
+        // A known mob keeps the tags Levitas does not handle.
+        let mut tame_horse = Compound::new()
+            .with("id", "minecraft:horse")
+            .with(
+                "Pos",
+                vec![Tag::Double(2.5), Tag::Double(-60.0), Tag::Double(2.5)],
+            )
+            .with("Tame", 1i8);
+        tame_horse.insert("ActiveEffects", Tag::List(Vec::new()));
+        let horse = Mob::from_nbt(&tame_horse, &mut world.rng).unwrap();
+        let saved = horse.to_nbt();
+        assert_eq!(saved.int("Tame"), Some(1));
+        assert!(saved.get("ActiveEffects").is_none());
     }
 
     #[test]
@@ -3365,7 +4004,7 @@ mod path_tests {
             Some(MobKind::Rabbit)
         );
         assert_eq!(MobKind::Rabbit.max_health(), 3.0);
-        assert!(SUMMONABLE.contains(&"rabbit"));
+        assert!(summonable().contains(&"rabbit"));
         assert!(super::super::breeding::is_food(
             MobKind::Rabbit,
             "minecraft:carrot"
@@ -3390,6 +4029,25 @@ mod path_tests {
             .insert(1, Player::new(profile, tx, [4.5, -60.0, 2.5]));
         world.think(&mut rabbit);
         assert!(rabbit.panic > 0);
+    }
+
+    #[test]
+    fn the_kind_table_is_in_order_and_complete() {
+        let sounds = |name: &str| levitas_registry::sound_id(name).is_some();
+        for (i, row) in KINDS.iter().enumerate() {
+            assert_eq!(row.0 as usize, i, "{} out of order", row.1);
+            assert_eq!(MobKind::from_name(row.1), Some(row.0));
+            assert!(row.0.stats().is_some(), "no stats for {}", row.1);
+            let hurt = format!("minecraft:entity.{}.hurt", row.3);
+            let land = format!("minecraft:entity.{}.hurt_land", row.3);
+            // The creaking's hurt sound is the generic hostile one.
+            let land = if row.3 == "creaking" {
+                format!("minecraft:entity.{}.ambient", row.3)
+            } else {
+                land
+            };
+            assert!(sounds(&hurt) || sounds(&land), "no sound {hurt}");
+        }
     }
 
     #[test]

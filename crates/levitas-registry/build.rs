@@ -82,6 +82,7 @@ fn main() {
     )
     .unwrap();
     items_and_entities(&data, &block_defaults, &mut out);
+    mob_stats(&mut out);
     let synced = synced_registries(&data, &mut out);
     tags(&data, &synced, &mut out);
 
@@ -1012,4 +1013,66 @@ fn resolve_tag(
         }
     }
     stack.pop();
+}
+
+/// Base stats of every mob from Pumpkin's entity data (GPL-3.0, Pumpkin-MC/Pumpkin, from
+/// the data generator's attribute defaults): health, hitbox, speed, damage, sight.
+fn mob_stats(out: &mut String) {
+    use pumpkin_data::attributes::Attributes;
+    use pumpkin_data::entity::EntityType;
+    let registry = read_json(
+        &PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap())
+            .join("../../generated")
+            .join(VERSION)
+            .join("reports/registries.json"),
+    );
+    let names: Vec<String> = registry["minecraft:entity_type"]["entries"]
+        .as_object()
+        .unwrap()
+        .keys()
+        .cloned()
+        .collect();
+    let mut rows = Vec::new();
+    for name in &names {
+        let Some(e) = EntityType::from_name(name) else {
+            continue;
+        };
+        if !e.mob {
+            continue;
+        }
+        let attr = |a: Attributes| {
+            e.attributes
+                .iter()
+                .find(|(b, _)| *b == a)
+                .map_or(0.0, |&(_, v)| v)
+        };
+        rows.push(format!(
+            "({name:?}, MobStats {{ health: {:?}, width: {:?}, height: {:?}, speed: {:?},              flying_speed: {:?}, attack: {:?}, follow: {:?}, armor: {:?}, knockback_resistance: {:?},              fire_immune: {}, enemy: {}, xp: {}, friendly: {} }})",
+            attr(Attributes::MAX_HEALTH) as f32,
+            e.dimension[0] as f64,
+            e.dimension[1] as f64,
+            attr(Attributes::MOVEMENT_SPEED),
+            attr(Attributes::FLYING_SPEED),
+            attr(Attributes::ATTACK_DAMAGE) as f32,
+            attr(Attributes::FOLLOW_RANGE),
+            attr(Attributes::ARMOR) as f32,
+            attr(Attributes::KNOCKBACK_RESISTANCE),
+            e.fire_immune,
+            e.is_enemy,
+            e.experience_reward,
+            e.category.is_friendly,
+        ));
+    }
+    rows.sort();
+    writeln!(
+        out,
+        "/// Base stats of mobs by entity name, sorted by name.
+         pub static MOB_STATS: &[(&str, MobStats)] = &[{}];
+",
+        rows.join(
+            ",
+"
+        )
+    )
+    .unwrap();
 }

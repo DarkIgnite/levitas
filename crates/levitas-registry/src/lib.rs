@@ -307,6 +307,37 @@ pub struct ToolRule {
     pub speed: Option<f32>,
 }
 
+/// A mob's base stats, from the data generator's attribute defaults.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct MobStats {
+    pub health: f32,
+    pub width: f64,
+    pub height: f64,
+    /// The `movement_speed` attribute.
+    pub speed: f64,
+    pub flying_speed: f64,
+    pub attack: f32,
+    pub follow: f64,
+    pub armor: f32,
+    pub knockback_resistance: f64,
+    pub fire_immune: bool,
+    /// Counted as an enemy (the `is_enemy` flag: monsters players hunt).
+    pub enemy: bool,
+    pub xp: u32,
+    /// Its spawn category is a friendly one (animals, water creatures).
+    pub friendly: bool,
+}
+
+impl MobStats {
+    /// The stats of the mob called `name` (`minecraft:zombie`).
+    pub fn of(name: &str) -> Option<&'static MobStats> {
+        MOB_STATS
+            .binary_search_by(|(n, _)| (*n).cmp(name))
+            .ok()
+            .map(|i| &MOB_STATS[i].1)
+    }
+}
+
 include!(concat!(env!("OUT_DIR"), "/generated.rs"));
 
 #[cfg(test)]
