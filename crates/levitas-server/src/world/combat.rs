@@ -37,6 +37,7 @@ impl World {
     /// A player hits an entity with what they hold.
     pub(super) fn attack(&mut self, attacker: i32, target: i32) {
         if self.deflect_fireball(attacker, target)
+            || self.hit_bullet(target)
             || self.attack_dragon_or_crystal(attacker, target)
             || self.hit_boat(attacker, target)
             || self.hit_cart(attacker, target)

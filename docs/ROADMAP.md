@@ -320,6 +320,12 @@ Known gaps are listed under each phase instead of being hidden.
       Guardians lock a beam on their prey for four seconds (elder three) and hurt it
       for 6 (8); elder guardians give Mining Fatigue III to players within 50 blocks
       every minute. Missing: animals respawning later.
+      Shulkers (`world/shulkers.rs`) sit fixed to their face, open up at players in
+      sight within 16 blocks and fire homing bullets every 1 to 5.5 seconds (4 damage
+      and Levitation for 10 seconds; players can knock them down); a closed shell has
+      20 armour; hurt below half health one may teleport within 8 blocks. Missing:
+      shulkers duplicating, dye colours, attaching to walls and ceilings when they
+      teleport.
 - [ ] Pathfinding and AI goals. A* over walkable blocks (`world/pathfinding.rs`):
       walking, one-block jumps, drops of up to three blocks, avoiding lava; monsters
       (except climbing spiders) follow paths to their target. Animals still wander

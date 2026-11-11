@@ -60,6 +60,7 @@ mod redstone;
 mod rockets;
 mod saved_entities;
 mod shields;
+mod shulkers;
 mod signs;
 mod spawners;
 mod stats;
@@ -709,6 +710,7 @@ struct World {
     fireballs: HashMap<i32, fireballs::Fireball>,
     /// Ender pearls, snowballs and eggs in flight.
     thrown: HashMap<i32, thrown::Thrown>,
+    bullets: HashMap<i32, shulkers::Bullet>,
     /// Fishing bobbers out, by entity ID.
     bobbers: HashMap<i32, fishing::Bobber>,
     /// Lightning bolts on show: their entity IDs and the tick they go.
@@ -852,6 +854,7 @@ impl World {
             tnt: HashMap::new(),
             fireballs: HashMap::new(),
             thrown: HashMap::new(),
+            bullets: HashMap::new(),
             bobbers: HashMap::new(),
             bolts: Vec::new(),
             area_effect_clouds: HashMap::new(),
@@ -1295,6 +1298,7 @@ impl World {
         packets.extend(self.arrow_packets());
         packets.extend(self.fireball_packets());
         packets.extend(self.thrown_packets());
+        packets.extend(self.bullet_packets());
         packets.extend(self.bobber_packets());
         packets.extend(self.area_effect_cloud_packets());
         packets.extend(self.evoker_fangs_packets());
@@ -1793,6 +1797,7 @@ impl World {
         self.tick_arrows();
         self.tick_fireballs();
         self.tick_thrown();
+        self.tick_bullets();
         self.tick_bobbers();
         self.tick_area_effect_clouds();
         self.tick_boats();

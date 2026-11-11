@@ -1477,6 +1477,7 @@ impl Mob {
             packets.push(super::wolves::wolf_data(self, id));
         }
         packets.extend(super::horses::spawn_extras(id, self));
+        packets.extend(super::shulkers::spawn_extras(id, self));
         if self.kind == MobKind::SnowGolem && self.sheared {
             packets.push(super::golems::snow_golem_data(id, false));
         }
@@ -1620,6 +1621,10 @@ impl Mob {
                 nbt.insert("Type", if self.variant == 1 { "brown" } else { "red" });
             }
             MobKind::SnowGolem => nbt.insert("Pumpkin", !self.sheared),
+            MobKind::Shulker => {
+                nbt.insert("AttachFace", self.variant as i8);
+                nbt.insert("Peek", self.charge as i8);
+            }
             MobKind::Wolf | MobKind::Cat => {
                 let name = if self.kind == MobKind::Cat {
                     cat_variant_name(self.variant)
@@ -1716,6 +1721,10 @@ impl Mob {
             MobKind::Cat => nbt.str("variant").and_then(cat_variant_id),
             MobKind::Wolf => nbt.str("variant").and_then(wolf_variant_id),
             MobKind::Mooshroom => Some(u8::from(nbt.str("Type") == Some("brown"))),
+            MobKind::Shulker => {
+                mob.charge = nbt.int("Peek").unwrap_or(0).clamp(0, 100) as i32;
+                nbt.int("AttachFace").map(|f| f.clamp(0, 5) as u8)
+            }
             _ => None,
         };
         if let Some(v) = variant {
@@ -2276,7 +2285,14 @@ impl World {
             ) {
                 self.zombify(id, &mut mob);
             }
-            if mob.kind.is_monster() && !admiring && self.hunt(id, &mut mob) {
+            if mob.kind == MobKind::Shulker {
+                self.tick_shulker(id, &mut mob);
+            }
+            if mob.kind.is_monster()
+                && !admiring
+                && mob.kind != MobKind::Shulker
+                && self.hunt(id, &mut mob)
+            {
                 continue; // exploded
             }
             if mob.kind.family() == MobKind::MagmaCube {
@@ -2289,6 +2305,8 @@ impl World {
                 // Sitting in a boat or minecart: carried, not walking.
             } else if Self::horse_steered(&mob) {
                 // Its rider's client moves it.
+            } else if mob.kind == MobKind::Shulker {
+                // Fixed to its block.
             } else if mob.kind.swims() && self.in_water(mob.pos) {
                 self.swim_mob(&mut mob);
             } else if mob.kind.flies() {
@@ -2979,7 +2997,7 @@ impl World {
             self.mobs.insert(target, mob);
             return false;
         }
-        let mut damage = damage;
+        let mut damage = super::shulkers::through_shell(&mob, damage);
         let resistance = mob.effect_level(levitas_registry::mob_effect::RESISTANCE);
         if resistance > 0 {
             damage *= (1.0 - 0.2 * resistance as f32).max(0.0);
@@ -3008,6 +3026,9 @@ impl World {
         }
         mob.hurt_ticks = HURT_TICKS;
         mob.health -= dealt;
+        if mob.health > 0.0 {
+            self.shulker_hurt(&mut mob);
+        }
         let anger_piglins = by_player.filter(|_| mob.kind == MobKind::ZombifiedPiglin);
         let kind_of_hit = mob.kind;
         if let (Some(attacker), MobKind::Enderman) = (by_player, mob.kind) {
