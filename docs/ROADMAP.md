@@ -351,7 +351,7 @@ Known gaps are listed under each phase instead of being hidden.
       parrots on shoulders, dancing and mimicking, axolotls playing dead.
       Goats, frogs, llamas, dolphins and pandas each live in a module of their own
       behind `world/kin.rs`. Goats: screaming goats (own sounds, inherited), horns,
-      ramming still targets 4 to 16 blocks off (horns snap off into goat horns on
+      ramming at things standing still 4 to 16 blocks off (horns snap into goat horns on
       `snaps_goat_horn` blocks), milking. Frogs: biome variants, eating small slimes
       and magma cubes (slime balls, froglights), frogspawn on water after breeding,
       hatching after 3600 to 12000 ticks into tadpoles, which grow into frogs of
