@@ -349,6 +349,19 @@ Known gaps are listed under each phase instead of being hidden.
       tadpoles; emptying the filled bucket lets them out. Missing: what a bucket
       remembers of its mob (colour, health), foxes carrying items and eating berries,
       parrots on shoulders, dancing and mimicking, axolotls playing dead.
+      Goats, frogs, llamas, dolphins and pandas each live in a module of their own
+      behind `world/kin.rs`. Goats: screaming goats (own sounds, inherited), horns,
+      ramming still targets 4 to 16 blocks off (horns snap off into goat horns on
+      `snaps_goat_horn` blocks), milking. Frogs: biome variants, eating small slimes
+      and magma cubes (slime balls, froglights), frogspawn on water after breeding,
+      hatching after 3600 to 12000 ticks into tadpoles, which grow into frogs of
+      the biome they grow up in. Llamas spit at wolves and attackers and wear
+      carpets. Dolphins dry out on land, must surface for air, give Dolphin's Grace,
+      lead players fed fish to structures and fight back as a group. Pandas have
+      main and hidden genes and the seven personalities, sneeze, eat bamboo and
+      cake, and mate only near bamboo. Missing: llama spit removal when the llama
+      despawns, frogspawn breaking at once when its water goes, a mob index for
+      goats' target scans.
 - [ ] Pathfinding and AI goals. A* over walkable blocks (`world/pathfinding.rs`):
       walking, one-block jumps, drops of up to three blocks, avoiding lava; monsters
       (except climbing spiders) follow paths to their target. Animals still wander
