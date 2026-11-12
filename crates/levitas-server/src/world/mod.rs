@@ -12,6 +12,7 @@ mod beacon;
 mod bees;
 mod boats;
 mod breeding;
+mod breezes;
 mod brewing;
 mod building;
 mod campfire;
@@ -23,6 +24,7 @@ mod commands_extra;
 mod conduit;
 mod containers;
 mod crafter;
+mod creakings;
 mod critters;
 mod devices;
 pub mod dimension;
@@ -82,7 +84,9 @@ mod tnt;
 pub mod travel;
 mod village_life;
 mod villagers;
+mod wardens;
 mod weather;
+mod withers;
 mod wolves;
 
 use std::collections::{HashMap, HashSet};
@@ -719,6 +723,9 @@ struct World {
     /// Ender pearls, snowballs and eggs in flight.
     thrown: HashMap<i32, thrown::Thrown>,
     bullets: HashMap<i32, shulkers::Bullet>,
+    /// Module-wide state of the mob modules behind `kin.rs`, by module name.
+    #[allow(dead_code)]
+    kin_state: HashMap<&'static str, Box<dyn std::any::Any + Send>>,
     /// Fishing bobbers out, by entity ID.
     bobbers: HashMap<i32, fishing::Bobber>,
     /// Lightning bolts on show: their entity IDs and the tick they go.
@@ -863,6 +870,7 @@ impl World {
             fireballs: HashMap::new(),
             thrown: HashMap::new(),
             bullets: HashMap::new(),
+            kin_state: HashMap::new(),
             bobbers: HashMap::new(),
             bolts: Vec::new(),
             area_effect_clouds: HashMap::new(),
@@ -1577,6 +1585,7 @@ impl World {
 
     fn break_block(&mut self, id: i32, pos: BlockPos, state: u16) {
         self.piglins_guard(id, pos, state);
+        kin::block_broken(self, id, pos, state);
         if bees::is_hive(state) {
             let silk = self.players.get(&id).is_some_and(|p| {
                 p.inventory
@@ -1817,6 +1826,7 @@ impl World {
         self.tick_thrown();
         self.tick_bullets();
         self.tick_hives();
+        kin::tick_world(self);
         self.tick_bobbers();
         self.tick_area_effect_clouds();
         self.tick_boats();

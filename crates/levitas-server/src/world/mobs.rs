@@ -2341,6 +2341,7 @@ impl World {
             if mob.kind.is_monster()
                 && !admiring
                 && mob.kind != MobKind::Shulker
+                && !super::kin::own_ai(mob.kind)
                 && self.hunt(id, &mut mob)
             {
                 continue; // exploded
@@ -3054,6 +3055,12 @@ impl World {
         {
             let at = mob.pos;
             self.teleport_enderman(&mut mob, at, 32.0);
+            self.mobs.insert(target, mob);
+            return false;
+        }
+        let damage =
+            super::kin::damage_taken(self, target, &mut mob, damage, damage_type, by_player);
+        if damage <= 0.0 {
             self.mobs.insert(target, mob);
             return false;
         }

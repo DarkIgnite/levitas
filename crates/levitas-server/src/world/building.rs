@@ -123,6 +123,7 @@ impl World {
                         self.play_sound_at(&sound, at, 1.0, 0.8, Some(id));
                         self.sign_placed(id, q);
                         self.try_build_golem(q);
+                        super::kin::block_placed(self, id, q, placed);
                     }
                     let used = self.players[&id].inventory.slots[slot].item;
                     self.stat(id, levitas_registry::stat_type::USED, used, 1);
