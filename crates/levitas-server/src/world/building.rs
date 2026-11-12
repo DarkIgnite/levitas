@@ -372,6 +372,9 @@ impl World {
                 continue;
             }
             self.lectern_tick(tick.pos, state);
+            if crate::blocks::name(state) == "minecraft:frogspawn" {
+                super::kin::scheduled_tick(self, tick.pos);
+            }
             if block_has_tag(state, "minecraft:lightning_rods")
                 && prop(state, "powered") == Some("true")
             {

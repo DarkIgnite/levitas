@@ -20,12 +20,12 @@ use super::mobs::{Mob, MobKind};
 use super::*;
 use crate::blocks::{prop, with};
 
-const DATA_FOX_TYPE: u8 = 17;
-const DATA_FOX_FLAGS: u8 = 18;
+const DATA_FOX_TYPE: u8 = 18;
+const DATA_FOX_FLAGS: u8 = 19;
 const FOX_SLEEPING: u8 = 0x20;
-const DATA_PARROT_VARIANT: u8 = 19;
-const DATA_TURTLE_HAS_EGG: u8 = 17;
-const DATA_AXOLOTL_VARIANT: u8 = 17;
+const DATA_PARROT_VARIANT: u8 = 20;
+const DATA_TURTLE_HAS_EGG: u8 = 18;
+const DATA_AXOLOTL_VARIANT: u8 = 18;
 const SERIALIZER_BYTE: i32 = 0;
 const SERIALIZER_INT: i32 = 1;
 const SERIALIZER_BOOL: i32 = 8;

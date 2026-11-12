@@ -37,7 +37,7 @@ const DEFAULT_CREATURE_PROBABILITY: f64 = 0.1;
 const DATA_SHEEP_WOOL: u8 = 18;
 const DATA_SLIME_SIZE: u8 = 18;
 /// A mooshroom's colour: 0 red, 1 brown.
-const DATA_MOOSHROOM_VARIANT: u8 = 17;
+const DATA_MOOSHROOM_VARIANT: u8 = 18;
 const SERIALIZER_INT: i32 = 1;
 /// How long an enderman stays angry after being looked at or hit.
 pub const ENDERMAN_ANGER: u32 = 600;
@@ -1368,6 +1368,8 @@ impl Mob {
     pub fn max_health(&self) -> f32 {
         if let Some(h) = &self.horse {
             h.max_health
+        } else if let Some(max) = super::kin::max_health(self) {
+            max
         } else if self.kind == MobKind::Wolf && self.owner.is_some() {
             super::wolves::TAMED_HEALTH
         } else {
@@ -2886,7 +2888,7 @@ impl World {
         mob.ambient += 1;
         if self.rng.below(1000) < mob.ambient.max(0) as u32 {
             mob.ambient = -80;
-            let sound = format!("minecraft:entity.{}.ambient", mob.kind.sound());
+            let sound = format!("minecraft:entity.{}.ambient", super::kin::sound_name(mob));
             self.mob_sound(mob, &sound);
         }
         match mob.kind {
@@ -3137,7 +3139,7 @@ impl World {
         if mob.health <= 0.0 {
             self.kill_mob(target, &mut mob);
         } else {
-            let sound = format!("minecraft:entity.{}.hurt", mob.kind.sound());
+            let sound = format!("minecraft:entity.{}.hurt", super::kin::sound_name(&mob));
             self.mob_sound(&mob, &sound);
         }
         let at = mob.pos;
@@ -3223,7 +3225,7 @@ impl World {
                 self.mobs.insert(next_entity_id(), small);
             }
         }
-        let sound = format!("minecraft:entity.{}.death", mob.kind.sound());
+        let sound = format!("minecraft:entity.{}.death", super::kin::sound_name(mob));
         self.mob_sound(mob, &sound);
         if mob.age < 0 {
             return; // babies drop nothing
@@ -3502,27 +3504,7 @@ impl World {
                 }
             }
         }
-        if mob.attack_cooldown == 0 {
-            let threat = self
-                .mobs
-                .iter()
-                .find(|(_, m)| {
-                    m.alive()
-                        && m.kind.is_monster()
-                        && (m.pos[0] - mob.pos[0]).hypot(m.pos[2] - mob.pos[2]) <= 8.0
-                })
-                .map(|(&mid, m)| (mid, m.pos));
-            if let Some((mid, target_pos)) = threat {
-                mob.attack_cooldown = 40;
-                mob.head_yaw = super::monsters::yaw_towards(mob.pos, target_pos);
-                self.play_sound_at("minecraft:entity.llama.spit", mob.pos, 1.0, 1.0, None);
-                if let Some(mut target_mob) = self.mobs.remove(&mid) {
-                    self.hurt_mob(mid, &mut target_mob, 1.0, "minecraft:mob_projectile");
-                    // Dead ones too: their death plays out and clients drop them.
-                    self.mobs.insert(mid, target_mob);
-                }
-            }
-        }
+        // Spitting at threats is in llamas.rs.
     }
 
     /// Mobs and dropped items in a chunk being saved or unloaded, in the vanilla entity

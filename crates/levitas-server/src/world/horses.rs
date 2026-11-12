@@ -16,10 +16,10 @@ use super::*;
 
 /// Entity data: the horse flags byte (0x02 tame, 0x08 bred, 0x20 rearing), a horse's
 /// variant (colour + markings * 256), a llama's strength and variant.
-const DATA_HORSE_FLAGS: u8 = 17;
-const DATA_HORSE_VARIANT: u8 = 18;
-const DATA_LLAMA_STRENGTH: u8 = 19;
-const DATA_LLAMA_VARIANT: u8 = 20;
+const DATA_HORSE_FLAGS: u8 = 18;
+const DATA_HORSE_VARIANT: u8 = 19;
+const DATA_LLAMA_STRENGTH: u8 = 20;
+const DATA_LLAMA_VARIANT: u8 = 21;
 const FLAG_TAME: u8 = 0x02;
 const FLAG_REARING: u8 = 0x20;
 const SERIALIZER_BYTE: i32 = 0;

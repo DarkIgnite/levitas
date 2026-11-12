@@ -117,6 +117,42 @@ pub(super) fn bred(w: &mut World, id: i32, mob: &mut Mob) -> bool {
     }
 }
 
+/// Whether a mob in love may go on to find a partner now (pandas need bamboo about).
+pub(super) fn may_mate(w: &World, mob: &mut Mob) -> bool {
+    match mob.kind {
+        MobKind::Panda => super::pandas::may_mate(w, mob),
+        _ => true,
+    }
+}
+
+/// A baby just made from `a` and `b`, before it is shown: it takes after them.
+pub(super) fn baby_made(rng: &mut Rng, a: &Mob, b: &Mob, baby: &mut Mob) {
+    if baby.kind == MobKind::Goat {
+        super::goats::bred_baby(rng, a, b, baby);
+    }
+}
+
+/// The sound family to use in place of `MobKind::sound()` (screaming goats).
+pub(super) fn sound_name(mob: &Mob) -> &'static str {
+    match mob.kind {
+        MobKind::Goat => super::goats::sound_name(mob).unwrap_or(mob.kind.sound()),
+        _ => mob.kind.sound(),
+    }
+}
+
+/// Full health for mobs whose module decides it (weak pandas have less).
+pub(super) fn max_health(mob: &Mob) -> Option<f32> {
+    match mob.kind {
+        MobKind::Panda => super::pandas::max_health(mob),
+        _ => None,
+    }
+}
+
+/// A scheduled block tick for these modules' blocks (frogspawn hatching).
+pub(super) fn scheduled_tick(w: &mut World, pos: BlockPos) {
+    super::frogs::hatch(w, pos);
+}
+
 /// Random ticks of blocks these mobs own. Returns whether `state` was one of them.
 pub(super) fn block_tick(w: &mut World, pos: BlockPos, state: u16) -> bool {
     super::frogs::block_tick(w, pos, state)

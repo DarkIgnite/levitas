@@ -144,6 +144,9 @@ impl World {
             };
             self.send_to_viewers(mob, entity_event(id, event));
         }
+        if !super::kin::may_mate(self, mob) {
+            return;
+        }
         let partner = self
             .mobs
             .iter()
@@ -173,6 +176,9 @@ impl World {
         let kind = World::foal_kind(mob.kind, partner_kind).unwrap_or(mob.kind);
         let mut baby = Mob::new(kind, at, &mut self.rng);
         baby.age = BABY_AGE;
+        if let Some(partner) = self.mobs.get(&pid) {
+            super::kin::baby_made(&mut self.rng, mob, partner, &mut baby);
+        }
         // A foal takes after its parents, and is born tame.
         if let (Some(a), Some(b)) = (mob.horse.clone(), self.mobs[&pid].horse.clone()) {
             self.foal_stats(&mut baby, &a, &b);

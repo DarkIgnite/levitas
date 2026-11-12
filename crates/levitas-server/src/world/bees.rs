@@ -32,8 +32,8 @@ const MAX_HONEY: u8 = 5;
 const ANGER_TICKS: u32 = 400;
 const ALERT_RANGE: f64 = 16.0;
 
-const DATA_BEE_FLAGS: u8 = 17;
-const DATA_BEE_ANGER: u8 = 18;
+const DATA_BEE_FLAGS: u8 = 18;
+const DATA_BEE_ANGER: u8 = 19;
 const SERIALIZER_BYTE: i32 = 0;
 const SERIALIZER_VARLONG: i32 = 2;
 const FLAG_ANGRY: u8 = 0x02;
