@@ -1543,11 +1543,8 @@ impl World {
             if !have.is_empty() && !have.same_kind(&cost.with_count(have.count)) {
                 continue;
             }
-            for s in 0..crate::inventory::SLOTS {
-                if !(9..45).contains(&s) {
-                    continue;
-                }
-                let stack = p.inventory.slots[s];
+            for held in p.inventory.slots.iter_mut().take(45).skip(9) {
+                let stack = *held;
                 if stack.item != cost.item || stack.potion != cost.potion {
                     continue;
                 }
@@ -1557,7 +1554,7 @@ impl World {
                     break;
                 }
                 have = stack.with_count(have.count + take);
-                p.inventory.slots[s] = stack.with_count(stack.count - take);
+                *held = stack.with_count(stack.count - take);
             }
             p.open.as_mut().expect("checked above").grid[slot] = have;
         }

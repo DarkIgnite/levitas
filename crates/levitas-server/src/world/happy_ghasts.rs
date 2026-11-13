@@ -1389,7 +1389,10 @@ mod tests {
         }
         run(&mut w, id, 4000);
         let pos = w.mobs[&id].pos;
-        assert!(pos[1] < -40.0 + f64::from(HOME_RADIUS) + 10.0, "came back: {pos:?}");
+        assert!(
+            pos[1] < -40.0 + f64::from(HOME_RADIUS) + 10.0,
+            "came back: {pos:?}"
+        );
     }
 
     #[test]

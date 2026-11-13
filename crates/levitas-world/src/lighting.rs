@@ -372,7 +372,7 @@ impl Access<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::light::{ChunkLight, LightLayer, LIGHT_SECTIONS};
+    use crate::light::{ChunkLight, LightLayer};
     use crate::paletted::Kind as Palette;
     use levitas_registry::block;
 
@@ -391,11 +391,9 @@ mod tests {
                     }
                 }
                 let mut light = ChunkLight::full_sky();
-                for section in 0..LIGHT_SECTIONS {
-                    // Sections 0..=8 hold y < 64.
-                    if section <= 8 {
-                        light.sky[section] = LightLayer::Uniform(0);
-                    }
+                // Sections 0..=8 hold y < 64.
+                for layer in light.sky.iter_mut().take(9) {
+                    *layer = LightLayer::Uniform(0);
                 }
                 chunk.light = light;
                 chunks.insert((cx, cz), chunk);

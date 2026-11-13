@@ -418,8 +418,8 @@ impl World {
         }
         let p = &self.players[&id];
         let mut points = 0;
-        for slot in 5..9 {
-            let e = p.inventory.slots[slot].enchants;
+        for worn in &p.inventory.slots[5..9] {
+            let e = worn.enchants;
             points += e.level_of("minecraft:protection");
             points += match kind {
                 k if k.is_fire() => 2 * e.level_of("minecraft:fire_protection"),

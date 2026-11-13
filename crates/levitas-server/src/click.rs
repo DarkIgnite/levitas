@@ -510,8 +510,8 @@ fn take_result(w: &mut Window) -> Stack {
             if result.is_empty() {
                 return Stack::EMPTY;
             }
-            for s in 0..3 {
-                w.slots[s] = w.slots[s].with_count(w.slots[s].count - 1);
+            for slot in w.slots.iter_mut().take(3) {
+                *slot = slot.with_count(slot.count - 1);
             }
             w.crafted.push(result);
             refresh_result(w);
@@ -523,8 +523,8 @@ fn take_result(w: &mut Window) -> Stack {
                 return Stack::EMPTY;
             }
             // The banner and the dye are used; the pattern item stays.
-            for s in 0..2 {
-                w.slots[s] = w.slots[s].with_count(w.slots[s].count - 1);
+            for slot in w.slots.iter_mut().take(2) {
+                *slot = slot.with_count(slot.count - 1);
             }
             refresh_result(w);
             return result;
@@ -546,8 +546,8 @@ fn take_result(w: &mut Window) -> Stack {
             let Some((result, xp)) = repair::grindstone(w.slots[0], w.slots[1]) else {
                 return Stack::EMPTY;
             };
-            for s in 0..2 {
-                w.slots[s] = w.slots[s].with_count(w.slots[s].count - 1);
+            for slot in w.slots.iter_mut().take(2) {
+                *slot = slot.with_count(slot.count - 1);
             }
             w.used = Some(Used::Experience(xp));
             refresh_result(w);
@@ -558,9 +558,9 @@ fn take_result(w: &mut Window) -> Stack {
             if result.is_empty() {
                 return Stack::EMPTY;
             }
-            for s in 0..2 {
-                if !w.slots[s].is_empty() {
-                    w.slots[s] = w.slots[s].with_count(w.slots[s].count - 1);
+            for slot in w.slots.iter_mut().take(2) {
+                if !slot.is_empty() {
+                    *slot = slot.with_count(slot.count - 1);
                 }
             }
             w.used = Some(Used::Cartography);
