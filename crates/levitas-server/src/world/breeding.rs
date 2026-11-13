@@ -60,6 +60,7 @@ pub fn is_food(kind: MobKind, item: &str) -> bool {
         | MobKind::Bee
         | MobKind::Armadillo
         | MobKind::Camel
+        | MobKind::CamelHusk
         | MobKind::Sniffer
         | MobKind::Ocelot
         | MobKind::Strider

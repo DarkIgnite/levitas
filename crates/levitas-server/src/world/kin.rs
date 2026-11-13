@@ -231,6 +231,7 @@ pub(super) fn baby_made(rng: &mut Rng, a: &Mob, b: &Mob, baby: &mut Mob) {
 pub(super) fn sound_name(mob: &Mob) -> &'static str {
     match mob.kind {
         MobKind::Goat => super::goats::sound_name(mob).unwrap_or(mob.kind.sound()),
+        MobKind::CopperGolem => super::copper_golems::sound_name(mob),
         _ => mob.kind.sound(),
     }
 }

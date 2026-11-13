@@ -73,6 +73,8 @@ impl World {
             return;
         }
         self.block_event(pos, state, 0, 0);
+        // Allays near it hear it.
+        super::allays::note_played(self, pos);
     }
 
     /// Using a note block raises its note and plays it.

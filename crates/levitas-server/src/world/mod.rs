@@ -277,6 +277,11 @@ pub enum Event {
         title: Option<String>,
     },
     /// The player opened their elytra.
+    /// The rider of a mob jumps (a camel's dash).
+    RiderJump {
+        id: i32,
+        power: i32,
+    },
     StartGliding {
         id: i32,
     },
@@ -1081,6 +1086,9 @@ impl World {
                 self.sync_player_pose(id);
             }
             Event::StartGliding { id } => self.start_gliding(id),
+            Event::RiderJump { id, power } => {
+                camels::rider_jumped(self, id, power);
+            }
             Event::Sneak {
                 id,
                 sneaking,
@@ -1098,6 +1106,14 @@ impl World {
             }
             Event::MoveVehicle { id, pos, yaw } => {
                 match self.players.get(&id).and_then(|p| p.riding) {
+                    Some(v)
+                        if self
+                            .mobs
+                            .get(&v)
+                            .is_some_and(|m| m.kind == mobs::MobKind::HappyGhast) =>
+                    {
+                        happy_ghasts::ghast_moved(self, id, v, pos, yaw);
+                    }
                     Some(horse) if self.mobs.contains_key(&horse) => {
                         self.horse_moved(id, horse, pos, yaw)
                     }

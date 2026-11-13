@@ -26,6 +26,8 @@ const MAX_COMPONENTS: i32 = 64;
 const PLAYER_COMMAND_START_SPRINTING: i32 = 1;
 const PLAYER_COMMAND_STOP_SPRINTING: i32 = 2;
 const PLAYER_COMMAND_START_GLIDING: i32 = 6;
+/// A rider starts a jump (camels dash, horses leap), with its jump boost.
+const PLAYER_COMMAND_START_RIDING_JUMP: i32 = 3;
 
 pub async fn run(conn: Conn, profile: Profile, world: mpsc::Sender<Event>) -> io::Result<()> {
     let Conn {
@@ -410,6 +412,10 @@ fn decode(id: i32, packet: &[u8]) -> io::Result<Option<Event>> {
                     sprinting: false,
                 },
                 PLAYER_COMMAND_START_GLIDING => Event::StartGliding { id },
+                PLAYER_COMMAND_START_RIDING_JUMP => Event::RiderJump {
+                    id,
+                    power: r.varint().unwrap_or(0),
+                },
                 _ => return Ok(None),
             }
         }

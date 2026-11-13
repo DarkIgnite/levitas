@@ -3220,6 +3220,12 @@ impl World {
         if mob.dying.is_some() {
             return;
         }
+        // Its riders fall off (a horse, a camel, a happy ghast).
+        for p in self.players.values_mut() {
+            if p.riding == Some(id) {
+                p.riding = None;
+            }
+        }
         mob.dying = Some(0);
         mob.health = 0.0;
         mob.effects.clear();

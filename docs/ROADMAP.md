@@ -376,6 +376,20 @@ Known gaps are listed under each phase instead of being hidden.
       heart lives, dies with it and vanishes at dawn. Missing: sonic boom and wither
       skull death messages, warning levels saved with players, projectiles shown to
       players who join mid-flight, natural hearts noticed when their chunk loads.
+      Armadillos roll up at threats (undead, sprinting or riding players, attackers)
+      and take less damage rolled, shed scutes and give them to brushes; spiders keep
+      away from them. Camels dash when their rider jumps, sit down now and then and
+      take a second rider; camel husks are their undead kin. Sniffers sniff, dig
+      seeds from `sniffer_diggable_block` (gameplay/sniffer_digging) and lay eggs
+      that hatch faster on moss. Allays fetch the item they were given to their
+      player or a note block they heard, dance by jukeboxes and duplicate on
+      amethyst. Bats hang from ceilings, flutter about and spawn in dark caves.
+      Copper golems are built from copper blocks and a pumpkin, oxidize into
+      statues, are scraped and waxed, and sort items from copper chests into chests.
+      Dried ghasts hydrate in water into ghastlings that grow into happy ghasts;
+      harnessed ones carry four players, steered by the first. Missing: camel husk
+      jockeys, leads, the riding input beyond what Move Vehicle and riding jumps
+      carry, copper weathering of other blocks.
 - [ ] Pathfinding and AI goals. A* over walkable blocks (`world/pathfinding.rs`):
       walking, one-block jumps, drops of up to three blocks, avoiding lava; monsters
       (except climbing spiders) follow paths to their target. Animals still wander
