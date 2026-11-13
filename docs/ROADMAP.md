@@ -480,8 +480,9 @@ Known gaps are listed under each phase instead of being hidden.
 - [ ] Breeding, taming, leashes, name tags. Breeding works (`world/breeding.rs`): food
       puts adults in love, partners meet and make a baby that grows up in 20 minutes
       (faster when fed), parents rest 5 minutes, breeding drops experience, and animals
-      follow players holding their food. Wolves can be tamed; name tags work. Taming of
-      cats, horses and parrots, and leashes, are missing.
+      follow players holding their food. Wolves can be tamed; name tags work. Leads
+      work (`world/leads.rs`): leashing, pulling and snapping, leash knots on fences,
+      saved as vanilla. Taming of cats, horses and parrots is missing.
 
 ## Phase 6: Farming, nature and time
 

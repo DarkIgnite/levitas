@@ -58,6 +58,7 @@ mod huge_mushroom;
 mod items;
 mod jukebox;
 mod kin;
+mod leads;
 mod lectern;
 mod llamas;
 mod maps;
@@ -1075,6 +1076,7 @@ impl World {
                     && !self.board_boat(id, target)
                     && !self.board_cart(id, target)
                     && !self.use_hanging(id, target, hand)
+                    && !self.use_knot(id, target)
                 {
                     self.use_on_mob(id, target, hand);
                 }
@@ -1345,6 +1347,7 @@ impl World {
         packets.extend(self.cart_packets());
         packets.extend(self.rocket_packets());
         packets.extend(self.hanging_packets());
+        packets.extend(self.knot_packets());
         packets.extend(self.armor_stand_packets());
         packets.extend(self.eye_packets());
         packets.extend(self.dragon_packets());
@@ -1844,6 +1847,7 @@ impl World {
         self.tick_falling_blocks();
         self.tick_tnt();
         self.tick_mobs();
+        self.tick_leads();
         self.tick_arrows();
         self.tick_fireballs();
         self.tick_thrown();

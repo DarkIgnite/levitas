@@ -52,6 +52,9 @@ impl World {
         if hand == 0 && self.use_bell(id, pos, clicked, face, cursor[1]) {
             return self.ack(id, sequence);
         }
+        if hand == 0 && self.use_fence(id, pos, clicked) {
+            return self.ack(id, sequence);
+        }
         if self.use_hive(id, slot, pos, clicked) {
             return self.ack(id, sequence);
         }

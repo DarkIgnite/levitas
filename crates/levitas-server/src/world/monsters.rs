@@ -813,6 +813,7 @@ impl World {
             || mob.name.is_some()
             || mob.raid_id.is_some()
             || mob.converting.is_some()
+            || mob.leash.is_some()
         {
             return false;
         }

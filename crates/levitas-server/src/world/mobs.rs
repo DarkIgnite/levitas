@@ -1260,6 +1260,8 @@ pub struct Mob {
     /// State of a mob whose module keeps its own (see `kin.rs`), downcast there.
     #[allow(dead_code)]
     pub kin: Option<Box<dyn std::any::Any + Send>>,
+    /// What holds it on a lead (`leads.rs`).
+    pub leash: Option<super::leads::Leash>,
 }
 
 impl Mob {
@@ -1351,6 +1353,7 @@ impl Mob {
             egg: false,
             home: None,
             kin: None,
+            leash: None,
             owner: None,
             variant: match kind {
                 MobKind::Cat => rng.below(cat_variants().max(1)) as u8,
@@ -1500,6 +1503,7 @@ impl Mob {
         packets.extend(super::shulkers::spawn_extras(id, self));
         packets.extend(super::critters::spawn_extras(id, self));
         packets.extend(super::kin::spawn_extras(id, self));
+        packets.extend(super::leads::spawn_extras(id, self));
         if self.kind == MobKind::Parrot && self.owner.is_some() {
             packets.push(super::wolves::wolf_data(self, id));
         }
@@ -1712,6 +1716,7 @@ impl Mob {
         super::bees::write_nbt(self, &mut nbt);
         super::critters::write_nbt(self, &mut nbt);
         super::kin::write_nbt(self, &mut nbt);
+        super::leads::write_nbt(self, &mut nbt);
         if let (MobKind::Parrot, Some(owner)) = (self.kind, self.owner) {
             let owner = [
                 (owner >> 96) as i32,
@@ -1834,6 +1839,7 @@ impl Mob {
         super::bees::read_nbt(&mut mob, nbt);
         super::critters::read_nbt(&mut mob, nbt);
         super::kin::read_nbt(&mut mob, nbt);
+        super::leads::read_nbt(&mut mob, nbt);
         if mob.horse.is_some() {
             mob.health = nbt
                 .get("Health")
@@ -1859,6 +1865,7 @@ const MANAGED_TAGS: &[&str] = &[
     "Owner",
     "powered",
     "AngerTime",
+    "leash",
 ];
 
 /// What a mob holds in its main hand when it spawns, for mobs Levitas does not arm in
@@ -3290,6 +3297,12 @@ impl World {
         }
         let slot = p.hand_slot(hand);
         let held = ItemInfo::get(p.inventory.slots[slot].item).map_or("", |i| i.name);
+        if self.use_lead_on_mob(id, target, slot) {
+            return;
+        }
+        let Some(mob) = self.mobs.get(&target) else {
+            return;
+        };
         if held == "minecraft:name_tag" {
             self.name_mob(id, target, slot);
             return;

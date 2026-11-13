@@ -64,6 +64,7 @@ impl World {
                 .filter(|f| f.chunk() == (cx, cz))
                 .map(falling::FallingBlock::to_nbt),
         );
+        out.extend(self.saved_knots(cx, cz));
         out
     }
 
@@ -78,6 +79,7 @@ impl World {
                     .values()
                     .map(falling::FallingBlock::chunk),
             )
+            .chain(self.knot_chunks())
             .collect()
     }
 
@@ -101,7 +103,8 @@ impl World {
             .filter(|(_, f)| f.chunk() == (cx, cz))
             .map(|(&id, _)| id)
             .collect();
-        let any = !(arrows.is_empty() && orbs.is_empty() && falling.is_empty());
+        let knots = self.unload_knots(cx, cz);
+        let any = knots || !(arrows.is_empty() && orbs.is_empty() && falling.is_empty());
         for id in arrows {
             self.arrows.remove(&id);
             self.broadcast(items::remove_entity(id), None);
@@ -119,6 +122,9 @@ impl World {
 
     /// Brings one back from a loaded chunk's entities. Returns whether it was one.
     pub(super) fn load_extra(&mut self, nbt: &Compound) -> bool {
+        if self.load_knot(nbt) {
+            return true;
+        }
         let owner = nbt.int_array("Owner").and_then(uuid_of).and_then(|u| {
             self.players
                 .iter()
