@@ -55,6 +55,9 @@ impl World {
         if self.use_hive(id, slot, pos, clicked) {
             return self.ack(id, sequence);
         }
+        if hand == 0 && super::kin::block_used(self, id, slot, pos, clicked) {
+            return self.ack(id, sequence);
+        }
         if may_use
             && (self.use_sign(id, slot, pos, clicked)
                 || self.open_container(id, pos, clicked)
@@ -373,9 +376,7 @@ impl World {
                 continue;
             }
             self.lectern_tick(tick.pos, state);
-            if crate::blocks::name(state) == "minecraft:frogspawn" {
-                super::kin::scheduled_tick(self, tick.pos);
-            }
+            super::kin::scheduled_tick(self, tick.pos, state);
             if block_has_tag(state, "minecraft:lightning_rods")
                 && prop(state, "powered") == Some("true")
             {
