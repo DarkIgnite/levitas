@@ -756,7 +756,11 @@ impl World {
 
     /// Damage from the world (fire, explosions) rather than a player.
     pub(super) fn hurt_mob(&mut self, id: i32, mob: &mut Mob, amount: f32, damage_type: &str) {
-        let mut amount = amount;
+        // Mobs whose module decides what hurts them (creakings, withers, ...).
+        let mut amount = super::kin::damage_taken(self, id, mob, amount, damage_type, None);
+        if amount <= 0.0 {
+            return;
+        }
         let resistance = mob.effect_level(levitas_registry::mob_effect::RESISTANCE);
         if resistance > 0 {
             amount *= (1.0 - 0.2 * resistance as f32).max(0.0);
@@ -788,8 +792,9 @@ impl World {
         if mob.health <= 0.0 {
             self.kill_mob(id, mob);
         } else {
-            let sound = format!("minecraft:entity.{}.hurt", mob.kind.sound());
+            let sound = format!("minecraft:entity.{}.hurt", super::kin::sound_name(mob));
             self.play_sound_at(&sound, mob.pos, 1.0, 1.0, None);
+            super::kin::hurt(self, id, mob, None);
         }
     }
 
@@ -800,9 +805,11 @@ impl World {
         // A zombie villager being cured stays too.
         // Structure mobs (elder guardians, mansion illagers, witches in huts) and
         // shulkers stay put.
+        // Wardens leave only by digging back down.
         if !mob.kind.is_monster()
             || mob.persistent
             || mob.kind == MobKind::Shulker
+            || mob.kind == MobKind::Warden
             || mob.name.is_some()
             || mob.raid_id.is_some()
             || mob.converting.is_some()

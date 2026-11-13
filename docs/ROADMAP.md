@@ -362,6 +362,20 @@ Known gaps are listed under each phase instead of being hidden.
       cake, and mate only near bamboo. Missing: llama spit removal when the llama
       despawns, frogspawn breaking at once when its water goes, a mob index for
       goats' target scans.
+      Breezes, wardens, withers and creakings run their own AI (`kin::own_ai`).
+      Breezes leap about, keep their distance, shoot wind charges whose bursts throw
+      entities and flip doors, levers and buttons, and deflect projectiles. Wardens
+      come from can_summon shriekers set off through sculk sensors (warning levels
+      1 to 4, Darkness), track vibrations and smell, grow anger, roar, sniff, emerge
+      and dig back down, hit for 30 and fire sonic booms, and spread Darkness.
+      Withers are built from soul sand and three wither skeleton skulls, charge up
+      invulnerable with a boss bar and blow up, fly and fire black and blue skulls,
+      get armour against arrows below half health, break blocks when hurt and heal
+      over time. Creaking hearts between pale oak logs wake at night, spawn a
+      creaking bound to them that freezes while watched, cannot be hurt while its
+      heart lives, dies with it and vanishes at dawn. Missing: sonic boom and wither
+      skull death messages, warning levels saved with players, projectiles shown to
+      players who join mid-flight, natural hearts noticed when their chunk loads.
 - [ ] Pathfinding and AI goals. A* over walkable blocks (`world/pathfinding.rs`):
       walking, one-block jumps, drops of up to three blocks, avoiding lava; monsters
       (except climbing spiders) follow paths to their target. Animals still wander

@@ -106,6 +106,10 @@ impl World {
     pub(super) fn mob_xp(&mut self, pos: [f64; 3], kind: super::mobs::MobKind) {
         // Animals give 1 to 3; others what the data generator says (5 for most monsters,
         // 10 for blazes and elder guardians, 50 for the wither).
+        // Creakings drop no experience.
+        if kind == super::mobs::MobKind::Creaking {
+            return;
+        }
         let base = kind.stats().map_or(0, |s| s.xp as i32);
         let xp = if kind.is_monster() {
             base.max(5)

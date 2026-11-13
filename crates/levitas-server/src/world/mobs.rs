@@ -1442,6 +1442,11 @@ impl Mob {
         self.on_ground
     }
 
+    /// For mobs whose module moves them itself (breezes).
+    pub(super) fn set_on_ground(&mut self, on_ground: bool) {
+        self.on_ground = on_ground;
+    }
+
     /// Entity data with a mooshroom's colour.
     pub(super) fn mooshroom_data(&self, id: i32) -> Writer {
         Writer::packet(clientbound::SET_ENTITY_DATA)
@@ -3123,10 +3128,13 @@ impl World {
                 mob.panic = PANIC_TICKS;
                 mob.target = None;
             }
-            mob.knockback[0] = mob.knockback[0] / 2.0 + away[0] * KNOCKBACK;
-            mob.knockback[1] = mob.knockback[1] / 2.0 + away[1] * KNOCKBACK;
-            if mob.on_ground {
-                mob.vel[1] = (mob.vel[1] / 2.0 + KNOCKBACK).min(KNOCKBACK);
+            // Wardens are not knocked back at all.
+            if mob.kind != MobKind::Warden {
+                mob.knockback[0] = mob.knockback[0] / 2.0 + away[0] * KNOCKBACK;
+                mob.knockback[1] = mob.knockback[1] / 2.0 + away[1] * KNOCKBACK;
+                if mob.on_ground {
+                    mob.vel[1] = (mob.vel[1] / 2.0 + KNOCKBACK).min(KNOCKBACK);
+                }
             }
         }
         let kind = SyncedRegistry::get("minecraft:damage_type")

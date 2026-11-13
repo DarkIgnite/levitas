@@ -217,7 +217,8 @@ impl World {
             }
             Hit::Mob(id) => {
                 let immune = self.mobs.get(&id).is_some_and(|m| m.kind.fire_immune());
-                if !(immune && !f.large) {
+                // A breeze deflects it: no fire either.
+                let landed = !(immune && !f.large) && {
                     let away = normalized([f.vel[0], 0.0, f.vel[2]]);
                     self.hit_mob(
                         id,
@@ -225,9 +226,9 @@ impl World {
                         by_player,
                         [away[0], away[2]],
                         "minecraft:fireball",
-                    );
-                }
-                if !f.large && !immune {
+                    )
+                };
+                if !f.large && !immune && landed {
                     self.ignite_mob(id, SMALL_FIRE_TICKS);
                 }
             }
