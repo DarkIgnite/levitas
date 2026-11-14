@@ -4,6 +4,7 @@
 
 mod admin;
 mod advancements;
+mod ai;
 mod allays;
 mod archaeology;
 mod armadillos;

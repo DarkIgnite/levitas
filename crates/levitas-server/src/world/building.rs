@@ -508,7 +508,7 @@ fn sound_family(name: &str) -> &'static str {
     }
 }
 
-fn toggle_sound(state: u16, opening: bool) -> String {
+pub(super) fn toggle_sound(state: u16, opening: bool) -> String {
     let name = blocks::name(state);
     let family = sound_family(name);
     let action = if opening { "open" } else { "close" };

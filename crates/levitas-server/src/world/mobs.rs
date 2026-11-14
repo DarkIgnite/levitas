@@ -1260,6 +1260,8 @@ pub struct Mob {
     /// State of a mob whose module keeps its own (see `kin.rs`), downcast there.
     #[allow(dead_code)]
     pub kin: Option<Box<dyn std::any::Any + Send>>,
+    /// Its own walking goals: wandering, fleeing, doors (`ai.rs`).
+    pub(super) ai: super::ai::Ai,
 }
 
 impl Mob {
@@ -1351,6 +1353,7 @@ impl Mob {
             egg: false,
             home: None,
             kin: None,
+            ai: Default::default(),
             owner: None,
             variant: match kind {
                 MobKind::Cat => rng.below(cat_variants().max(1)) as u8,
@@ -1712,6 +1715,7 @@ impl Mob {
         super::bees::write_nbt(self, &mut nbt);
         super::critters::write_nbt(self, &mut nbt);
         super::kin::write_nbt(self, &mut nbt);
+        super::ai::write_nbt(self, &mut nbt);
         if let (MobKind::Parrot, Some(owner)) = (self.kind, self.owner) {
             let owner = [
                 (owner >> 96) as i32,
@@ -1834,6 +1838,7 @@ impl Mob {
         super::bees::read_nbt(&mut mob, nbt);
         super::critters::read_nbt(&mut mob, nbt);
         super::kin::read_nbt(&mut mob, nbt);
+        super::ai::read_nbt(&mut mob, nbt);
         if mob.horse.is_some() {
             mob.health = nbt
                 .get("Health")
@@ -2362,6 +2367,7 @@ impl World {
             {
                 self.hurt_mob(id, &mut mob, 1.0, "minecraft:dry_out");
             }
+            self.mob_doors(id, &mut mob);
             if self.ride_along(&mut mob) {
                 // Sitting in a boat or minecart: carried, not walking.
             } else if Self::horse_steered(&mob) {
@@ -2471,7 +2477,7 @@ impl World {
     }
 
     /// Picks where to walk and how to face.
-    fn think(&mut self, mob: &mut Mob) {
+    pub(super) fn think(&mut self, mob: &mut Mob) {
         mob.hurt_ticks = mob.hurt_ticks.saturating_sub(1);
         let panicking = mob.panic > 0;
         mob.panic = mob.panic.saturating_sub(1);
@@ -2491,27 +2497,23 @@ impl World {
         // Rabbits and wild cats bolt from players who come close.
         let shy = mob.kind == MobKind::Rabbit
             || (matches!(mob.kind, MobKind::Cat | MobKind::Fox) && mob.owner.is_none());
-        if shy
-            && !panicking
-            && self.players.values().any(|p| {
-                p.alive && (p.pos[0] - mob.pos[0]).hypot(p.pos[2] - mob.pos[2]) < RABBIT_SHY
+        let scared_of = (shy && !panicking)
+            .then(|| {
+                self.players.values().find(|p| {
+                    p.alive && (p.pos[0] - mob.pos[0]).hypot(p.pos[2] - mob.pos[2]) < RABBIT_SHY
+                })
             })
-        {
+            .flatten()
+            .map(|p| p.pos);
+        if let Some(p) = scared_of {
             mob.panic = 40;
             mob.target = None;
+            let (dx, dz) = (mob.pos[0] - p[0], mob.pos[2] - p[2]);
+            let length = dx.hypot(dz).max(1e-6);
+            mob.ai.flee = Some([dx / length, dz / length]);
         }
         // Wandering starts now and then; panic keeps picking new spots nearby.
-        let wants_target = if panicking {
-            mob.target.is_none()
-        } else {
-            mob.target.is_none() && self.rng.below(120) == 0
-        };
-        if wants_target {
-            let reach = if panicking { 5.0 } else { 10.0 };
-            let dx = (self.rng.f64() * 2.0 - 1.0) * reach;
-            let dz = (self.rng.f64() * 2.0 - 1.0) * reach;
-            mob.target = Some(([mob.pos[0] + dx, mob.pos[2] + dz], 200));
-        }
+        self.wander(mob, panicking);
 
         // Look at a nearby player now and then.
         let eyes = [mob.pos[0], mob.pos[1] + mob.size().1 * 0.85, mob.pos[2]];
@@ -2666,7 +2668,7 @@ impl World {
     }
 
     /// Moves the mob one tick: walking, jumping, swimming, gravity and collisions.
-    fn step(&mut self, mob: &mut Mob) {
+    pub(super) fn step(&mut self, mob: &mut Mob) {
         let in_water = self
             .loaded_state(feet(mob.pos))
             .and_then(fluid_at)
@@ -3127,6 +3129,7 @@ impl World {
             if !mob.kind.is_monster() && mob.kind != MobKind::Wolf {
                 mob.panic = PANIC_TICKS;
                 mob.target = None;
+                mob.ai.flee = Some(away);
             }
             // Wardens are not knocked back at all.
             if mob.kind != MobKind::Warden {

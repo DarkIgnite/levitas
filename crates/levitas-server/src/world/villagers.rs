@@ -1290,13 +1290,21 @@ impl World {
         // every tenth tick (spread by ID); its panic lasts far longer than that.
         let looks = (tick + u64::from(id.unsigned_abs())).is_multiple_of(10);
         let monster_near = looks
-            && self.mobs.values().any(|m| {
-                m.alive()
-                    && m.kind.is_monster()
-                    && (m.pos[0] - pos[0]).hypot(m.pos[2] - pos[2]) <= 16.0
-            });
-        if monster_near {
+            .then(|| {
+                self.mobs.values().find(|m| {
+                    m.alive()
+                        && m.kind.is_monster()
+                        && (m.pos[0] - pos[0]).hypot(m.pos[2] - pos[2]) <= 16.0
+                })
+            })
+            .flatten()
+            .map(|m| m.pos);
+        if let Some(monster) = monster_near {
             mob.panic_ticks = 100;
+            // It runs away from it (`ai.rs`).
+            let (dx, dz) = (pos[0] - monster[0], pos[2] - monster[2]);
+            let length = dx.hypot(dz).max(1e-6);
+            mob.ai.flee = Some([dx / length, dz / length]);
         } else {
             mob.panic_ticks = mob.panic_ticks.saturating_sub(1);
         }
