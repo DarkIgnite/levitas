@@ -2271,6 +2271,10 @@ impl World {
                         *timer -= 1;
                     }
                     if *timer == 0 {
+                        // A cured baby is a newborn villager.
+                        if mob.age < 0 {
+                            mob.age = -24000;
+                        }
                         mob.kind = MobKind::Villager;
                         mob.converting = None;
                         mob.health = MobKind::Villager.max_health();
@@ -2411,8 +2415,11 @@ impl World {
             Some(pos) => {
                 mob.pos = pos;
                 mob.vel = [0.0; 3];
-                mob.target = None;
-                mob.path.clear();
+                // A mob's rider keeps its aim: its mount walks there.
+                if !self.mobs.contains_key(&v) {
+                    mob.target = None;
+                    mob.path.clear();
+                }
                 mob.on_ground = true;
                 mob.fall_distance = 0.0;
                 true
@@ -3267,8 +3274,15 @@ impl World {
             mob.looting.level_of("minecraft:looting"),
         );
         super::jockeys::killed(self, id, mob, by_player, looting);
-        // Baby animals drop nothing; baby zombies do.
-        if mob.age < 0 && !mob.kind.is_monster() {
+        // Baby animals drop nothing; baby zombies and zoglins do, baby hoglins give
+        // only experience.
+        if mob.age < 0 && !(super::jockeys::zombie_kin(mob.kind) || mob.kind == MobKind::Zoglin) {
+            if mob.kind == MobKind::Hoglin
+                && mob.killed_by_player
+                && crate::rules::bool("mob_drops")
+            {
+                self.mob_xp(mob.pos, mob.kind);
+            }
             return;
         }
         if mob.is_patrol_leader {

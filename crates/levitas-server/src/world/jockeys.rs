@@ -5,9 +5,10 @@
 //! Behaviour follows the Minecraft Wiki (Riding, Spider Jockey, Chicken Jockey, Zombie,
 //! Drowned, Skeleton Horse, Difficulty):
 //! - A mob can ride another mob. Players see it through the passengers packet; the rider
-//!   stays where its mount is, and in Java Edition the rider steers: the mount walks
-//!   where the rider wants to go. A rider whose mount dies, or a mount whose rider dies,
-//!   is left on its own. Riders are saved inside their mount, in its `Passengers` list.
+//!   sits on its mount's back, and in Java Edition the rider steers: the mount walks
+//!   towards what the rider hunts. A rider never hits its own mount. A rider whose mount
+//!   dies, or a mount whose rider dies, is left on its own. Riders are saved inside their
+//!   mount, in its `Passengers` list. A player cannot get on a horse a mob rides.
 //! - A spider has a 1% chance to spawn with a skeleton riding it (only skeletons, in
 //!   Java Edition, even in the Nether).
 //! - Zombies, husks, drowned, zombie villagers and zombified piglins are babies in 5% of
@@ -25,15 +26,17 @@
 //!   own.
 //! - Drowned spawn holding a trident (6.25%) or a fishing rod (3.75%), and with a
 //!   nautilus shell in the off hand (3%). One with a trident throws it at its target
-//!   every 1.5 seconds within 20 blocks. Each spawned item drops with a chance of 8.5%
-//!   (1% more a level of Looting) when a player kills it.
+//!   every 1.5 seconds within 20 blocks. The nautilus shell always drops on death; the
+//!   other spawned items drop with a chance of 8.5% (1% more a level of Looting) when a
+//!   player kills it.
 //! - In a thunderstorm, a natural lightning strike (not one drawn by a lightning rod)
-//!   leaves a skeleton trap horse with a chance of one hundredth of the regional
+//!   leaves a skeleton trap horse (while mobs may spawn) with a chance of one hundredth of the regional
 //!   difficulty (0.75-1.5% on Easy, 1.5-4% on Normal, 2.25-6.75% on Hard). That
-//!   strike neither burns nor hurts. The trap despawns after 15 minutes; a player who
-//!   comes within 10 blocks sets it off: a harmless lightning strike, and it turns into
-//!   four skeleton horsemen, skeletons with an enchanted iron helmet and an enchanted
-//!   bow riding skeleton horses. They do not despawn. A helmet keeps a skeleton or
+//!   strike neither burns nor hurts. The trap despawns after 15 minutes; a player (not a
+//!   spectator) who comes within 10 blocks sets it off: a harmless lightning strike, and
+//!   it turns into four skeleton horsemen, skeletons with an enchanted iron helmet and an
+//!   enchanted bow riding skeleton horses, enchanted at a level that grows with the
+//!   regional difficulty (always 5 on Easy). They do not despawn. A helmet keeps a skeleton or
 //!   zombie from burning in the sun. Saved as vanilla: `SkeletonTrap`,
 //!   `SkeletonTrapTime`.
 //!
@@ -95,6 +98,10 @@ const EQUIPMENT_DROP: f64 = 0.085;
 const TRAP_REACH: f64 = 10.0;
 const TRAP_TICKS: u32 = 18_000;
 const HORSEMEN: usize = 4;
+/// Game mode 3: spectators do not set off skeleton traps.
+const GAME_MODE_SPECTATOR: u8 = 3;
+/// How far up its mount's height a rider sits.
+const SEAT_HEIGHT: f64 = 0.75;
 /// Ticks a lightning bolt is shown.
 const BOLT_TICKS: u64 = 10;
 
@@ -170,9 +177,20 @@ pub(super) fn mount_of(mob: &Mob) -> Option<i32> {
     mob.jockey.as_ref().and_then(|j| j.mount)
 }
 
-/// Where a rider sits on the mob `mount`, if that is a living mob.
+/// Where a rider sits on the mob `mount`, if that is a living mob: on its back, not at
+/// its feet, so that what it shoots clears its mount.
 pub(super) fn seat(w: &World, mount: i32) -> Option<[f64; 3]> {
-    w.mobs.get(&mount).filter(|m| m.alive()).map(|m| m.pos)
+    w.mobs
+        .get(&mount)
+        .filter(|m| m.alive())
+        .map(|m| [m.pos[0], m.pos[1] + m.size().1 * SEAT_HEIGHT, m.pos[2]])
+}
+
+/// Whether a mob rides the mob (a player cannot get on then).
+pub(super) fn has_riders(mob: &Mob) -> bool {
+    mob.jockey
+        .as_ref()
+        .is_some_and(|j| !j.passengers.is_empty())
 }
 
 /// Whether the mob is saved inside its mount rather than on its own.
@@ -391,8 +409,10 @@ pub(super) fn tick(w: &mut World, id: i32, mob: &mut Mob) -> bool {
             w.send_to_viewers(mob, items::remove_entity(id));
             return true;
         }
+        // Spectators do not set it off.
         let near = w.players.values().any(|p| {
             p.alive
+                && p.mode != GAME_MODE_SPECTATOR
                 && (0..3).map(|i| (p.pos[i] - mob.pos[i]).powi(2)).sum::<f64>()
                     <= TRAP_REACH * TRAP_REACH
         });
@@ -443,13 +463,36 @@ fn keep_seats(w: &mut World, id: i32, mob: &mut Mob) {
         let packet = passengers_packet(id, &j.passengers);
         w.send_to_viewers(mob, packet);
     }
-    // In Java Edition the rider steers.
-    if let Some(rider) = first.and_then(|r| w.mobs.get(&r)) {
-        mob.target = rider.target;
-        mob.path.clone_from(&rider.path);
-        if rider.hunting.is_some() || rider.target.is_some() {
-            mob.yaw = rider.yaw;
-        }
+    // In Java Edition the rider steers: when it hunts something, the mount finds the way
+    // there (riders themselves never work out paths). Otherwise the mount goes its own way.
+    let Some(rider) = first.and_then(|r| w.mobs.get(&r)) else {
+        return;
+    };
+    let goal = rider
+        .hunting
+        .and_then(|p| w.players.get(&p))
+        .filter(|p| p.alive)
+        .map(|p| p.pos)
+        .or_else(|| {
+            rider
+                .prey
+                .and_then(|m| w.mobs.get(&m))
+                .filter(|m| m.alive())
+                .map(|m| m.pos)
+        });
+    let Some(goal) = goal else {
+        return;
+    };
+    mob.yaw = rider.yaw;
+    if mob.kind.family() == MobKind::Spider {
+        mob.target = Some(([goal[0], goal[2]], 20));
+    } else {
+        let goal = BlockPos::new(
+            goal[0].floor() as i32,
+            (goal[1] + 0.01).floor() as i32,
+            goal[2].floor() as i32,
+        );
+        w.follow_path(mob, goal);
     }
 }
 
@@ -533,12 +576,17 @@ pub(super) fn killed(w: &mut World, id: i32, mob: &mut Mob, by_player: bool, loo
             w.mobs.insert(m, mm);
         }
     }
+    // A drowned's spawned nautilus shell always drops, whoever killed it.
+    let shell = mob.kind == MobKind::Drowned && holds(mob, OFF_HAND, "minecraft:nautilus_shell");
+    if shell {
+        w.scatter_item(mob.pos, equipment[OFF_HAND]);
+    }
     if !by_player {
         return;
     }
     let chance = EQUIPMENT_DROP + 0.01 * f64::from(looting);
-    for stack in equipment {
-        if !stack.is_empty() && w.rng.f64() < chance {
+    for (slot, stack) in equipment.into_iter().enumerate() {
+        if !stack.is_empty() && !(shell && slot == OFF_HAND) && w.rng.f64() < chance {
             w.scatter_item(mob.pos, stack);
         }
     }
@@ -704,6 +752,9 @@ pub(super) fn lightning_trap(w: &mut World, at: BlockPos) -> bool {
     if below.is_some_and(|s| block_has_tag(s, "minecraft:lightning_rods")) {
         return false;
     }
+    if !crate::rules::bool("spawn_mobs") {
+        return false;
+    }
     let chance = regional_difficulty(w, difficulty) * 0.01;
     if w.rng.f64() >= chance {
         return false;
@@ -795,7 +846,10 @@ fn spring_trap(w: &mut World, id: i32, mob: &mut Mob) {
 fn horseman(w: &mut World, at: [f64; 3]) -> i32 {
     let mut skeleton = Mob::new(MobKind::Skeleton, at, &mut w.rng);
     skeleton.persistent = true;
-    let level = 5 + w.rng.below(18);
+    // The enchanting level grows with the clamped regional difficulty: always 5 on Easy.
+    let regional = regional_difficulty(w, crate::rules::difficulty());
+    let special = ((regional - 2.0) / 2.0).clamp(0.0, 1.0);
+    let level = 5 + (special * f64::from(w.rng.below(18))).floor() as u32;
     for (slot, name) in [
         (HEAD, "minecraft:iron_helmet"),
         (MAIN_HAND, "minecraft:bow"),
@@ -968,11 +1022,11 @@ mod tests {
         let skeleton = add(&mut w, MobKind::Skeleton, [3.5, -60.0, 3.5]);
         link(&mut w, skeleton, spider);
         assert_eq!(w.mobs[&skeleton].vehicle, Some(spider));
-        assert_eq!(w.mobs[&skeleton].pos, w.mobs[&spider].pos);
         w.mobs.get_mut(&spider).unwrap().pos = [5.5, -60.0, 2.5];
         w.tick_mobs();
         let (s, k) = (&w.mobs[&spider], &w.mobs[&skeleton]);
-        assert_eq!(k.pos, s.pos, "carried along");
+        assert_eq!(k.pos, seat(&w, spider).unwrap(), "carried along");
+        assert!(k.pos[1] > s.pos[1], "on its back");
         assert_eq!(s.jockey.as_ref().unwrap().passengers, vec![skeleton]);
 
         let mut dead = w.mobs.remove(&spider).unwrap();
@@ -988,10 +1042,18 @@ mod tests {
         let chicken = add(&mut w, MobKind::Chicken, [0.5, -60.0, 0.5]);
         let zombie = add(&mut w, MobKind::Zombie, [0.5, -60.0, 0.5]);
         link(&mut w, zombie, chicken);
-        w.mobs.get_mut(&zombie).unwrap().target = Some(([9.5, 0.5], 40));
         let mut c = w.mobs.remove(&chicken).unwrap();
         keep_seats(&mut w, chicken, &mut c);
-        assert_eq!(c.target.map(|t| t.0), Some([9.5, 0.5]), "the rider steers");
+        assert!(
+            c.target.is_none(),
+            "its own way while the rider hunts nothing"
+        );
+        let player = add_player(&mut w, [9.5, -60.0, 0.5]);
+        w.mobs.get_mut(&zombie).unwrap().hunting = Some(player);
+        keep_seats(&mut w, chicken, &mut c);
+        assert!(!c.path.is_empty(), "the rider steers");
+        let aim = c.target.expect("walking").0;
+        assert!(aim[0] > 0.5, "towards the player: {aim:?}");
         w.mobs.insert(chicken, c);
 
         let mut z = w.mobs.remove(&zombie).unwrap();
@@ -1249,5 +1311,114 @@ mod tests {
         state(w.mobs.get_mut(&trap).unwrap()).trap = Some(TRAP_TICKS - 1);
         w.tick_mobs();
         assert!(!w.mobs.contains_key(&trap));
+    }
+
+    #[test]
+    fn riders_hunt_through_their_mount_and_work_out_no_paths() {
+        let mut w = flat_world();
+        w.day_time = 18_000;
+        let player = add_player(&mut w, [12.5, -60.0, 0.5]);
+        let chicken = add(&mut w, MobKind::Chicken, [0.5, -60.0, 0.5]);
+        let zombie = add(&mut w, MobKind::Zombie, [0.5, -60.0, 0.5]);
+        link(&mut w, zombie, chicken);
+        for _ in 0..5 {
+            w.tick_mobs();
+        }
+        let (c, z) = (&w.mobs[&chicken], &w.mobs[&zombie]);
+        assert_eq!(z.hunting, Some(player));
+        assert!(z.path.is_empty(), "the rider works out no path");
+        assert!(z.target.is_some(), "but keeps its aim");
+        assert!(!c.path.is_empty(), "its chicken does");
+        assert!(c.pos[0] > 0.5, "and walks there: {:?}", c.pos);
+    }
+
+    #[test]
+    fn a_horseman_does_not_shoot_its_own_horse() {
+        let mut w = flat_world();
+        w.day_time = 18_000;
+        // Someone near, or the skeleton despawns.
+        add_player(&mut w, [0.5, -60.0, 30.5]);
+        let horse = add(&mut w, MobKind::SkeletonHorse, [0.5, -60.0, 0.5]);
+        let skeleton = add(&mut w, MobKind::Skeleton, [0.5, -60.0, 0.5]);
+        link(&mut w, skeleton, horse);
+        w.tick_mobs();
+        let s = &w.mobs[&skeleton];
+        let eye = [s.pos[0], s.pos[1] + s.size().1 * 0.85, s.pos[2]];
+        let health = w.mobs[&horse].health;
+        w.shoot_arrow(
+            skeleton,
+            false,
+            Shot {
+                from: eye,
+                dir: [1.0, -0.3, 0.0],
+                speed: 1.6,
+                base_damage: 2.0,
+                ..Default::default()
+            },
+        );
+        for _ in 0..5 {
+            w.tick_arrows();
+        }
+        assert_eq!(w.mobs[&horse].health, health);
+    }
+
+    #[test]
+    fn a_player_cannot_get_on_a_horse_a_skeleton_rides() {
+        let mut w = flat_world();
+        let player = add_player(&mut w, [1.5, -60.0, 0.5]);
+        let horse = add(&mut w, MobKind::SkeletonHorse, [0.5, -60.0, 0.5]);
+        w.mobs.get_mut(&horse).unwrap().age = 0;
+        let skeleton = add(&mut w, MobKind::Skeleton, [0.5, -60.0, 0.5]);
+        link(&mut w, skeleton, horse);
+        w.use_on_horse(player, horse, 36, "minecraft:air");
+        assert_eq!(w.players[&player].riding, None);
+        assert!(w.mobs[&horse].horse.as_ref().unwrap().rider.is_none());
+    }
+
+    #[test]
+    fn a_drowned_always_drops_its_nautilus_shell() {
+        let mut w = flat_world();
+        let mut d = Mob::new(MobKind::Drowned, [0.5, -60.0, 0.5], &mut w.rng);
+        let shell = item("minecraft:nautilus_shell").unwrap();
+        state(&mut d).equipment[OFF_HAND] = shell;
+        let id = next_entity_id();
+        killed(&mut w, id, &mut d, false, 0);
+        assert!(
+            w.items.values().any(|i| i.stack().item == shell.item),
+            "dropped without a player"
+        );
+    }
+
+    #[test]
+    fn baby_hoglins_drop_no_loot() {
+        let mut w = flat_world();
+        let mut hoglin = Mob::new(MobKind::Hoglin, [0.5, -60.0, 0.5], &mut w.rng);
+        hoglin.age = -24_000;
+        w.kill_mob(next_entity_id(), &mut hoglin);
+        assert!(w.items.is_empty(), "no porkchops");
+    }
+
+    #[test]
+    fn a_cured_baby_zombie_villager_stays_a_baby() {
+        let mut w = flat_world();
+        let zv = add(&mut w, MobKind::ZombieVillager, [0.5, -60.0, 0.5]);
+        let m = w.mobs.get_mut(&zv).unwrap();
+        m.age = -1;
+        m.converting = Some(1);
+        w.tick_mobs();
+        let m = &w.mobs[&zv];
+        assert_eq!(m.kind, MobKind::Villager);
+        assert!(m.age < -20_000, "{}", m.age);
+    }
+
+    #[test]
+    fn spectators_do_not_set_off_a_trap() {
+        let mut w = flat_world();
+        let trap = spawn_trap(&mut w, [0.5, -60.0, 0.5]);
+        let p = add_player(&mut w, [3.5, -60.0, 0.5]);
+        w.players.get_mut(&p).unwrap().mode = GAME_MODE_SPECTATOR;
+        w.tick_mobs();
+        assert_eq!(w.mobs.len(), 1);
+        assert!(w.mobs[&trap].jockey.as_ref().unwrap().trap.is_some());
     }
 }

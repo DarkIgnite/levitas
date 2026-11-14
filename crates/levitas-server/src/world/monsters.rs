@@ -184,8 +184,8 @@ impl World {
             return false;
         };
         mob.head_yaw = yaw_towards(mob.pos, target);
-        if mob.kind.family() == MobKind::Spider {
-            // Spiders climb over whatever is in the way.
+        if mob.kind.family() == MobKind::Spider || super::jockeys::mount_of(mob).is_some() {
+            // Spiders climb over whatever is in the way; a rider's mount finds the way.
             mob.target = Some(([target[0], target[2]], 20));
         } else if mob.kind.family() == MobKind::MagmaCube || mob.kind.flies() {
             // Magma cubes hop towards their prey, ghasts and blazes fly.

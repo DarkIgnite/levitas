@@ -316,10 +316,16 @@ impl World {
                 return Some(Hit::Player(id));
             }
         }
+        // A rider never hits the mob it rides.
+        let mount = self
+            .mobs
+            .get(&arrow.shooter)
+            .and_then(super::jockeys::mount_of);
         for (&id, m) in &self.mobs {
             let (width, height) = m.size();
             if m.alive()
                 && !(skip_shooter && id == arrow.shooter)
+                && mount != Some(id)
                 && !arrow.pierced.contains(&id)
                 && inside(m.pos, width, height)
             {
