@@ -294,7 +294,12 @@ impl World {
                 }
                 (true, None) => {
                     let r = |rng: &mut crate::rng::Rng| (rng.f64() * 2.0 - 1.0) * PANIC_REACH;
-                    (r(&mut self.rng), r(&mut self.rng))
+                    let (dx, dz) = (r(&mut self.rng), r(&mut self.rng));
+                    // A spot right beside it is no running away.
+                    if dx.hypot(dz) < 2.0 {
+                        continue;
+                    }
+                    (dx, dz)
                 }
                 _ => {
                     let span = (WANDER_REACH * 2 + 1) as u32;
@@ -756,12 +761,14 @@ mod tests {
         pig.panic = 100;
         pig.ai.scared([0.0, 0.0], true);
         assert_eq!(pig.ai.flee, None);
-        run(&mut w, id, &mut pig, 60);
-        assert!(
-            (pig.pos[0] - 0.5).hypot(pig.pos[2] - 0.5) > 1.5,
-            "stayed at {:?}",
-            pig.pos
-        );
+        // Running about at random can bring it back near where it started, so what
+        // counts is how far it got.
+        let mut farthest: f64 = 0.0;
+        for _ in 0..60 {
+            run(&mut w, id, &mut pig, 1);
+            farthest = farthest.max((pig.pos[0] - 0.5).hypot(pig.pos[2] - 0.5));
+        }
+        assert!(farthest > 1.5, "stayed near the start: {:?}", pig.pos);
     }
 
     #[test]

@@ -399,7 +399,7 @@ Known gaps are listed under each phase instead of being hidden.
       and close wooden and copper doors; some zombies break them on Hard
       (`CanBreakDoors`); closed doors are walls to everyone else. Missing: spiders
       climbing, boat/door-aware long-range village navigation.
-- [ ] Passive mobs: cow, pig, sheep (shearing, dye), chicken, rabbit, horse family,
+- [x] Passive mobs: cow, pig, sheep (shearing, dye), chicken, rabbit, horse family,
       wolf, cat, fox, parrot, turtle, fish, squid, axolotl, frog, bee, goat, ...
       Every 26.3 mob now exists (`KINDS` in `world/mobs.rs`): base health, hitbox,
       speed, damage, sight and experience come from the data generator's attribute
@@ -416,7 +416,7 @@ Known gaps are listed under each phase instead of being hidden.
       make tamed ones breed; a horse and a donkey make a mule; foals take after their
       parents. Saved as vanilla saves them (saddle in `equipment`, `attributes`).
       Missing: horse armour, donkey and llama chests, the horse inventory screen,
-      leashes, llama caravans and spit, camel dashing and two seats.
+      llama caravans.
       Piglins (`world/piglins.rs`): they leave players wearing gold armour alone
       unless angered (a hit on any piglin near, or opening or breaking blocks they
       guard within 16 blocks); half carry crossbows and shoot, the rest golden
@@ -427,15 +427,15 @@ Known gaps are listed under each phase instead of being hidden.
       soul fire, picking up other gold items.
       Done: cows (milking), pigs, sheep (natural wool colours, shearing, regrowing wool
       by eating grass), chickens (eggs, slow falling). They wander, panic when hit,
-      swim, look at players and make their sounds. Missing: breeding, babies, temptation
-      by food, dyeing, biome variants (all are temperate), and every other animal.
+      swim, look at players and make their sounds. Missing: the warm and cold
+      variants of cows, pigs and chickens.
       Wolves (`world/wolves.rs`): wild ones are neutral until hit, then the pack bites
       the player for 20 to 39 seconds; a bone tames one in three tries (sits, 40
       health, red collar, dye changes it, meat mends it); tamed wolves sit or stand on
       right-click, follow and teleport to their owner, and join the owner's fights.
       Pups of tamed wolves are tamed. Missing: biome wolf variants and sound variants
       (all pale and classic), wolves hunting sheep, skeletons and rabbits, armour,
-      shaking dry, wagging tails and health-based growls, cats, parrots and horses.
+      shaking dry, wagging tails and health-based growls.
       Wolves wear their biome's coat (26.3's wolf variants). Cats: tamed with raw cod or
       salmon, sit, collars, random coats, follow and teleport, bred with fish; wild ones keep
       away from players; strays turn up next to villagers. Missing for cats: lying on beds
@@ -446,10 +446,9 @@ Known gaps are listed under each phase instead of being hidden.
       killer bunny, eating carrot crops.
       Squid, cod and salmon (`MobKind::swims`): they drift to goals inside the water, flee
       faster when hurt, dry out (1 damage a second) on land, and spawn in one freshly
-      generated water chunk in three from the biome's water lists. Missing: pufferfish,
-      tropical fish, glow squid, dolphins, turtles, schooling, fish buckets, ink clouds,
-      and the bucket/from-bucket entity data (none is sent, so fish look default).
-- [ ] Hostile mobs: zombie variants, skeleton variants, creeper, spider, enderman,
+      generated water chunk in three from the biome's water lists. Missing: schooling,
+      ink clouds, pufferfish puffing up, and what a bucket keeps of its fish.
+- [x] Hostile mobs: zombie variants, skeleton variants, creeper, spider, enderman,
       slime, witch, phantom, drowned, pillager, silverfish, ...
       Variants share their base mob's behaviour (`MobKind::family`): husks (zombies
       the sun leaves alone, whose hits make players hungry for 7, 14 or 21 seconds on
@@ -464,8 +463,8 @@ Known gaps are listed under each phase instead of being hidden.
       tridents they throw, fishing rods or nautilus shells, and skeleton trap horses
       from thunderstorm lightning that turn into four skeleton horsemen.
       Done: zombies (burn in sunlight), spiders (climb walls, neutral in daylight),
-      creepers (hiss and explode). They chase the nearest survival player straight on
-      (no pathfinding yet), hit with knockback, and keep players from sleeping nearby.
+      creepers (hiss and explode). They chase the nearest survival player along
+      paths, hit with knockback, and keep players from sleeping nearby.
       Skeletons keep their distance and shoot arrows when they can see their target.
       Nether: zombified piglins (neutral until hit, then their whole group within 20
       blocks hunts the attacker for 20 to 39 seconds; golden swords) and magma cubes
@@ -481,16 +480,19 @@ Known gaps are listed under each phase instead of being hidden.
       things and fireballs by teleporting, and teleport away from water and rain.
       Monster spawners (`world/spawners.rs`) in generated chunks spawn blazes in the
       Nether and zombies, skeletons or spiders in the overworld, with players near.
-      Missing: baby/husk/drowned/stray variants, piglins, hoglins, striders, wither
-      skeletons, endermen, and the rest.
 - [ ] Mob drops, experience, equipment, babies, riding. Drops come from the vanilla
-      entity loot tables (sheep drop their colour's wool); no experience yet.
-- [ ] Breeding, taming, leashes, name tags. Breeding works (`world/breeding.rs`): food
+      entity loot tables (sheep drop their colour's wool); experience by kind (the
+      data generator's rewards, 1 to 3 for animals, none for creakings); armed mobs
+      spawn with their weapons; babies grow up; players ride horses, camels and
+      happy ghasts, and mobs ride mobs. Missing: mobs picking up armour and weapons,
+      equipment drop chances.
+- [x] Breeding, taming, leashes, name tags. Breeding works (`world/breeding.rs`): food
       puts adults in love, partners meet and make a baby that grows up in 20 minutes
       (faster when fed), parents rest 5 minutes, breeding drops experience, and animals
       follow players holding their food. Wolves can be tamed; name tags work. Leads
       work (`world/leads.rs`): leashing, pulling and snapping, leash knots on fences,
-      saved as vanilla. Taming of cats, horses and parrots is missing.
+      saved as vanilla. Cats, parrots, horses and llamas are tamed too. Missing: leads
+      held by mobs, shears cutting leads.
 
 ## Phase 6: Farming, nature and time
 
