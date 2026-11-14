@@ -56,6 +56,7 @@ mod hoppers;
 mod horses;
 mod huge_mushroom;
 mod items;
+mod jockeys;
 mod jukebox;
 mod kin;
 mod lectern;

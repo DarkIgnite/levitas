@@ -1260,6 +1260,8 @@ pub struct Mob {
     /// State of a mob whose module keeps its own (see `kin.rs`), downcast there.
     #[allow(dead_code)]
     pub kin: Option<Box<dyn std::any::Any + Send>>,
+    /// Riders, mounts, spawned equipment and traps (see `jockeys.rs`).
+    pub jockey: Option<Box<super::jockeys::Jockey>>,
 }
 
 impl Mob {
@@ -1351,6 +1353,7 @@ impl Mob {
             egg: false,
             home: None,
             kin: None,
+            jockey: None,
             owner: None,
             variant: match kind {
                 MobKind::Cat => rng.below(cat_variants().max(1)) as u8,
@@ -1583,6 +1586,8 @@ impl Mob {
                 packets.push(crate::inventory::write_stack(packet, Stack::new(axe, 1)));
             }
         }
+        // After the default weapons, which spawned equipment replaces.
+        packets.extend(super::jockeys::spawn_extras(id, self));
         for effect in &self.effects {
             packets.push(super::effects::update_packet(id, effect));
         }
@@ -1712,6 +1717,7 @@ impl Mob {
         super::bees::write_nbt(self, &mut nbt);
         super::critters::write_nbt(self, &mut nbt);
         super::kin::write_nbt(self, &mut nbt);
+        super::jockeys::write_nbt(self, &mut nbt);
         if let (MobKind::Parrot, Some(owner)) = (self.kind, self.owner) {
             let owner = [
                 (owner >> 96) as i32,
@@ -1834,6 +1840,7 @@ impl Mob {
         super::bees::read_nbt(&mut mob, nbt);
         super::critters::read_nbt(&mut mob, nbt);
         super::kin::read_nbt(&mut mob, nbt);
+        super::jockeys::read_nbt(&mut mob, nbt);
         if mob.horse.is_some() {
             mob.health = nbt
                 .get("Health")
@@ -1859,6 +1866,8 @@ const MANAGED_TAGS: &[&str] = &[
     "Owner",
     "powered",
     "AngerTime",
+    // Riders are their own mobs, saved back by `jockeys::to_nbt`.
+    "Passengers",
 ];
 
 /// What a mob holds in its main hand when it spawns, for mobs Levitas does not arm in
@@ -2362,6 +2371,9 @@ impl World {
             {
                 self.hurt_mob(id, &mut mob, 1.0, "minecraft:dry_out");
             }
+            if super::jockeys::tick(self, id, &mut mob) {
+                continue; // a skeleton trap that ran out
+            }
             if self.ride_along(&mut mob) {
                 // Sitting in a boat or minecart: carried, not walking.
             } else if Self::horse_steered(&mob) {
@@ -2393,7 +2405,8 @@ impl World {
             .boats
             .get(&v)
             .map(|b| b.pos)
-            .or_else(|| self.carts.get(&v).map(|c| c.pos));
+            .or_else(|| self.carts.get(&v).map(|c| c.pos))
+            .or_else(|| super::jockeys::seat(self, v));
         match at {
             Some(pos) => {
                 mob.pos = pos;
@@ -2675,6 +2688,7 @@ impl World {
             let (dx, dz) = (target[0] - mob.pos[0], target[1] - mob.pos[2]);
             let distance = dx.hypot(dz).max(1e-6);
             let mut speed = mob.kind.speed() * if mob.panic > 0 { 2.0 } else { 1.0 };
+            speed *= super::jockeys::speed_factor(mob);
             let speed_boost = mob.effect_level(levitas_registry::mob_effect::SPEED);
             let slowness = mob.effect_level(levitas_registry::mob_effect::SLOWNESS);
             if speed_boost > 0 || slowness > 0 {
@@ -2898,7 +2912,7 @@ impl World {
             self.mob_sound(mob, &sound);
         }
         match mob.kind {
-            MobKind::Chicken => {
+            MobKind::Chicken if !super::jockeys::chicken_jockey(mob) => {
                 mob.egg_ticks = mob.egg_ticks.saturating_sub(1);
                 if mob.egg_ticks == 0 {
                     mob.egg_ticks = 6000 + self.rng.below(6000);
@@ -3248,8 +3262,14 @@ impl World {
         }
         let sound = format!("minecraft:entity.{}.death", super::kin::sound_name(mob));
         self.mob_sound(mob, &sound);
-        if mob.age < 0 {
-            return; // babies drop nothing
+        let (by_player, looting) = (
+            mob.killed_by_player,
+            mob.looting.level_of("minecraft:looting"),
+        );
+        super::jockeys::killed(self, id, mob, by_player, looting);
+        // Baby animals drop nothing; baby zombies do.
+        if mob.age < 0 && !mob.kind.is_monster() {
+            return;
         }
         if mob.is_patrol_leader {
             if let Some(bottle) = ItemInfo::id_of("minecraft:ominous_bottle") {
@@ -3534,8 +3554,10 @@ impl World {
         let mut entities: Vec<Tag> = self
             .mobs
             .values()
-            .filter(|m| m.dying.is_none() && m.chunk() == (cx, cz))
-            .map(|m| Tag::Compound(m.to_nbt()))
+            .filter(|m| {
+                m.dying.is_none() && m.chunk() == (cx, cz) && !super::jockeys::carried(self, m)
+            })
+            .map(|m| Tag::Compound(super::jockeys::to_nbt(self, m)))
             .collect();
         entities.extend(
             self.items
@@ -3621,7 +3643,7 @@ impl World {
         let ids: Vec<i32> = self
             .mobs
             .iter()
-            .filter(|(_, m)| m.chunk() == (x, z))
+            .filter(|(_, m)| super::jockeys::save_chunk(self, m) == (x, z))
             .map(|(&id, _)| id)
             .collect();
         let item_ids: Vec<i32> = self
@@ -3767,6 +3789,7 @@ impl World {
                 let id = next_entity_id();
                 self.mobs.insert(id, mob);
                 self.rejoin_raid(id);
+                super::jockeys::load_passengers(self, id, entity, (x, z));
                 continue;
             }
             // An entity Levitas does not handle yet: it goes back on disk unchanged.

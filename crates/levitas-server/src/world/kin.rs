@@ -111,6 +111,8 @@ pub(super) fn hurt(w: &mut World, id: i32, mob: &mut Mob, attacker: Option<i32>)
         MobKind::Bat => super::bats::hurt(w, id, mob, attacker),
         MobKind::CopperGolem => super::copper_golems::hurt(w, id, mob, attacker),
         MobKind::HappyGhast => super::happy_ghasts::hurt(w, id, mob, attacker),
+        // The zombies call for help (`jockeys.rs`).
+        other if super::jockeys::zombie_kin(other) => super::jockeys::hurt(w, id, mob, attacker),
         _ => {}
     }
 }
