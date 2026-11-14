@@ -491,6 +491,7 @@ impl World {
         };
         mob.pos = self.hive_door(pos);
         mob.fly_goal = None;
+        mob.leash = None; // its lead dropped when it went in
         if let Some(bee) = mob.bee.as_mut() {
             bee.hive = Some(pos);
             bee.cannot_enter = 400;

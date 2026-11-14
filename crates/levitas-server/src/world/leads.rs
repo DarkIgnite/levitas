@@ -13,17 +13,21 @@
 //!   if the player holds none, hands all the mobs tied there to the player. Hitting the
 //!   knot, or the fence going away, unties everything on it.
 //! - Using a leashed mob again (held by this player or tied to a knot) takes the lead
-//!   off. Using a lead on a mob someone else leads snaps that lead and leashes the mob to
-//!   the player. A lead taken off or broken drops at the mob, except that taking one off
-//!   in creative drops nothing. A mob that dies or vanishes drops its lead; so does one
-//!   whose holder leaves or dies.
+//!   off; a mob tied to a knot is untied only with an empty hand, so it can still be fed,
+//!   sheared or ridden. Using a lead on a mob someone else leads snaps that lead and
+//!   leashes the mob to the player. A lead taken off or broken drops at the mob, except
+//!   that taking one off in creative drops nothing. A mob that dies or vanishes drops its
+//!   lead; so does one whose holder leaves or dies.
+//! - A trader llama leashed by a player leaves its wandering trader and no longer
+//!   despawns with it (Trader Llama, "Despawning").
 //! - Saved as vanilla: the mob's `leash` tag holds its holder's UUID (`{UUID: [I; ..]}`)
 //!   or, for a knot, the fence's position as an int array. Knots are saved with their
 //!   chunk as `minecraft:leash_knot` entities. A mob whose holder cannot be found within
 //!   5 seconds of loading drops its lead; one tied to a fence gets a knot there again,
-//!   or drops its lead if the fence is gone.
+//!   or drops its lead if the fence is gone. A trader llama saved on its wandering
+//!   trader's lead follows that trader again.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use levitas_nbt::{Compound, Tag};
 use levitas_registry::{block_has_tag, entity_type};
@@ -124,12 +128,14 @@ impl Knot {
     }
 }
 
-/// The knots in the world, and the leashed mobs seen last tick (to tell when one
-/// vanished).
+/// The knots in the world, and the leashed mobs with where each was seen last (the
+/// index the tick walks, and how it tells that one vanished).
 #[derive(Default)]
 struct Leads {
     knots: HashMap<i32, Knot>,
     leashed: HashMap<i32, [f64; 3]>,
+    /// The goal each mob pulled by its lead last had its path worked out for.
+    goals: HashMap<i32, BlockPos>,
 }
 
 fn state(w: &World) -> Option<&Leads> {
@@ -172,6 +178,21 @@ fn reach_of(kind: MobKind) -> (f64, f64) {
     } else {
         (FREE, BREAK)
     }
+}
+
+/// Whether a player uses up leads, and gets them back when they come off: everyone but
+/// creative players (adventure ones too).
+fn pays(p: &Player) -> bool {
+    p.mode != GAME_MODE_CREATIVE
+}
+
+fn holds_lead(stack: Stack) -> bool {
+    ItemInfo::get(stack.item).is_some_and(|i| i.name == "minecraft:lead")
+}
+
+/// How far apart two block positions are, block by block.
+fn blocks_apart(a: BlockPos, b: BlockPos) -> i32 {
+    (a.x - b.x).abs() + (a.y - b.y).abs() + (a.z - b.z).abs()
 }
 
 fn is_fence(state: u16) -> bool {
@@ -234,12 +255,30 @@ pub(super) fn read_nbt(mob: &mut Mob, nbt: &Compound) {
 }
 
 impl World {
+    /// Adds a mob that came with a lead (loaded from its chunk) to those the tick looks
+    /// after.
+    pub(super) fn track_leash(&mut self, mob: i32) {
+        if let Some(pos) = self
+            .mobs
+            .get(&mob)
+            .filter(|m| m.leash.is_some())
+            .map(|m| m.pos)
+        {
+            state_mut(self).leashed.insert(mob, pos);
+        }
+    }
+
     /// Puts `mob` on a lead held by `holder`, telling its viewers.
     fn leash_mob(&mut self, mob: i32, holder: Leash) {
         let Some(m) = self.mobs.get_mut(&mob) else {
             return;
         };
         m.leash = Some(holder);
+        if m.kind == MobKind::TraderLlama && holder.holder().is_some() {
+            // Taken from its trader: it stays (Trader Llama, "Despawning").
+            m.leader = None;
+            m.persistent = true;
+        }
         let pos = m.pos;
         state_mut(self).leashed.insert(mob, pos);
         if let Some(h) = holder.holder() {
@@ -259,9 +298,12 @@ impl World {
         if m.leash.take().is_none() {
             return;
         }
+        m.leash_pull = false;
         let pos = m.pos;
         let viewers: Vec<i32> = m.viewers.iter().copied().collect();
-        state_mut(self).leashed.remove(&mob);
+        let leads = state_mut(self);
+        leads.leashed.remove(&mob);
+        leads.goals.remove(&mob);
         for v in viewers {
             self.send(v, link(mob, -1));
         }
@@ -279,10 +321,18 @@ impl World {
 
     /// The mobs `holder` holds directly.
     fn held_by(&self, holder: i32) -> Vec<i32> {
-        self.mobs
-            .iter()
-            .filter(|(_, m)| m.leash.and_then(Leash::holder) == Some(holder))
-            .map(|(&id, _)| id)
+        let Some(leads) = state(self) else {
+            return Vec::new();
+        };
+        leads
+            .leashed
+            .keys()
+            .copied()
+            .filter(|id| {
+                self.mobs
+                    .get(id)
+                    .is_some_and(|m| m.leash.and_then(Leash::holder) == Some(holder))
+            })
             .collect()
     }
 
@@ -292,18 +342,19 @@ impl World {
         let (Some(p), Some(mob)) = (self.players.get(&player), self.mobs.get(&target)) else {
             return false;
         };
-        let holding_lead =
-            ItemInfo::get(p.inventory.slots[slot].item).is_some_and(|i| i.name == "minecraft:lead");
-        let survival = p.survival();
+        let stack = p.inventory.slots[slot];
+        let holding_lead = holds_lead(stack);
+        let drop = pays(p);
         let uuid = p.profile.uuid;
         let to_player = Leash::Player { id: player, uuid };
         match mob.leash {
             Some(Leash::Player { id, .. }) if id == player => {
-                self.unleash_mob(target, survival, "minecraft:item.lead.untied");
+                self.unleash_mob(target, drop, "minecraft:item.lead.untied");
                 true
             }
-            Some(Leash::Knot { .. }) if !holding_lead => {
-                self.unleash_mob(target, survival, "minecraft:item.lead.untied");
+            // With something in hand it is fed, sheared, ridden ... as usual.
+            Some(Leash::Knot { .. }) if stack.is_empty() => {
+                self.unleash_mob(target, drop, "minecraft:item.lead.untied");
                 true
             }
             Some(_) if holding_lead => {
@@ -331,7 +382,7 @@ impl World {
         let Some(p) = self.players.get_mut(&player) else {
             return;
         };
-        if p.survival() {
+        if pays(p) {
             p.inventory.take(slot, 1);
             let update = p.inventory.set_slot_packet(slot);
             self.send(player, update);
@@ -392,7 +443,12 @@ impl World {
     /// A player uses a block: on a fence, their leashed mobs are tied to it. Returns
     /// whether that happened.
     pub(super) fn use_fence(&mut self, player: i32, pos: BlockPos, state: u16) -> bool {
-        is_fence(state) && self.tie_to_fence(player, pos)
+        // Sneaking with something in hand uses the item instead (a lead still ties).
+        let uses = self.players.get(&player).is_some_and(|p| {
+            let stack = p.inventory.slots[p.hand_slot(0)];
+            p.alive && (!p.sneaking || stack.is_empty() || holds_lead(stack))
+        });
+        uses && is_fence(state) && self.tie_to_fence(player, pos)
     }
 
     /// A player uses an entity: a knot takes the player's mobs, or gives its own to a
@@ -428,10 +484,17 @@ impl World {
     /// A player hits an entity: a knot unties all its mobs and goes. Returns whether
     /// `target` is a knot.
     pub(super) fn hit_knot(&mut self, attacker: i32, target: i32) -> bool {
-        if !state(self).is_some_and(|s| s.knots.contains_key(&target)) {
+        let Some(centre) = state(self).and_then(|s| s.knots.get(&target).map(Knot::centre)) else {
             return false;
-        }
-        let drop = self.players.get(&attacker).is_none_or(|p| p.survival());
+        };
+        let Some(p) = self
+            .players
+            .get(&attacker)
+            .filter(|p| super::hanging::reaches(p, centre))
+        else {
+            return true; // out of reach, or dead
+        };
+        let drop = pays(p);
         self.break_knot(target, drop);
         true
     }
@@ -446,8 +509,11 @@ impl World {
     }
 
     /// Once a tick: knots lose their fences, loaded leads find their holders, and
-    /// leashed mobs are kept near what holds them.
+    /// leashed mobs are kept near what holds them. Only the leashed mobs are looked at.
     pub(super) fn tick_leads(&mut self) {
+        if state(self).is_none_or(|s| s.leashed.is_empty() && s.knots.is_empty()) {
+            return; // nothing on a lead and no knots
+        }
         // Knots whose fence is gone break.
         let fenceless: Vec<i32> = state(self)
             .map(|s| {
@@ -462,53 +528,64 @@ impl World {
             self.break_knot(id, true);
         }
 
-        let leashed: Vec<i32> = self
-            .mobs
-            .iter()
-            .filter(|(_, m)| m.leash.is_some() && self.chunks.contains_key(&m.chunk()))
-            .map(|(&id, _)| id)
-            .collect();
-        for &id in &leashed {
-            self.tick_leashed(id);
-        }
-
-        // Leashed mobs gone without being unloaded (into a hive, converted away, ...)
-        // drop their leads where they were.
-        if leashed.is_empty()
-            && state(self).is_none_or(|s| s.leashed.is_empty() && s.knots.is_empty())
-        {
-            return; // nothing on a lead and no knots
-        }
-        let seen = std::mem::take(&mut state_mut(self).leashed);
-        for (id, at) in seen {
-            let chunk = (
-                (at[0].floor() as i32).div_euclid(16),
-                (at[2].floor() as i32).div_euclid(16),
-            );
-            if !self.mobs.contains_key(&id) && self.chunks.contains_key(&chunk) {
-                self.drop_lead(at);
+        let leashed: Vec<(i32, [f64; 3])> = state(self)
+            .map(|s| s.leashed.iter().map(|(&id, &at)| (id, at)).collect())
+            .unwrap_or_default();
+        for (id, at) in leashed {
+            let Some(m) = self.mobs.get(&id) else {
+                // Gone without being unloaded (into a hive, converted away, ...): the
+                // lead drops where it was. One unloaded with its chunk comes back with it.
+                let leads = state_mut(self);
+                leads.leashed.remove(&id);
+                leads.goals.remove(&id);
+                let chunk = (
+                    (at[0].floor() as i32).div_euclid(16),
+                    (at[2].floor() as i32).div_euclid(16),
+                );
+                if self.chunks.contains_key(&chunk) {
+                    self.drop_lead(at);
+                }
+                continue;
+            };
+            if m.leash.is_none() {
+                state_mut(self).leashed.remove(&id);
+                continue;
+            }
+            if self.chunks.contains_key(&m.chunk()) {
+                self.tick_leashed(id);
+            }
+            if let Some(pos) = self
+                .mobs
+                .get(&id)
+                .filter(|m| m.leash.is_some())
+                .map(|m| m.pos)
+            {
+                state_mut(self).leashed.insert(id, pos);
             }
         }
-        let now: HashMap<i32, [f64; 3]> = self
-            .mobs
-            .iter()
-            .filter(|(_, m)| m.leash.is_some())
-            .map(|(&id, m)| (id, m.pos))
-            .collect();
-        state_mut(self).leashed = now;
 
         // Knots with nothing tied to them go.
+        let mut used = HashSet::new();
+        let mut fences = HashSet::new();
+        for id in state(self).into_iter().flat_map(|s| s.leashed.keys()) {
+            match self.mobs.get(id).and_then(|m| m.leash) {
+                Some(Leash::Knot { id: knot, .. }) => {
+                    used.insert(knot);
+                }
+                Some(Leash::Fence(pos)) => {
+                    fences.insert(pos);
+                }
+                _ => {}
+            }
+        }
         let empty: Vec<i32> = state(self)
             .map(|s| {
                 s.knots
                     .iter()
-                    .filter(|(_, k)| self.chunks.contains_key(&k.chunk()))
-                    .filter(|&(&id, k)| {
-                        !self.mobs.values().any(|m| match m.leash {
-                            Some(Leash::Knot { id: on, .. }) => on == id,
-                            Some(Leash::Fence(pos)) => pos == k.pos,
-                            _ => false,
-                        })
+                    .filter(|&(id, k)| {
+                        self.chunks.contains_key(&k.chunk())
+                            && !used.contains(id)
+                            && !fences.contains(&k.pos)
                     })
                     .map(|(&id, _)| id)
                     .collect()
@@ -538,17 +615,41 @@ impl World {
                     .iter()
                     .find(|(_, p)| p.alive && p.profile.uuid == uuid)
                     .map(|(&pid, _)| pid);
-                match found {
-                    Some(pid) => {
+                // A mob holder (looked for now and then: it takes a walk over all mobs).
+                let by_mob = if found.is_none() && waited.is_multiple_of(20) {
+                    self.mobs
+                        .iter()
+                        .find(|(_, m)| m.uuid == uuid && m.alive())
+                        .map(|(&hid, m)| (hid, m.kind))
+                } else {
+                    None
+                };
+                match (found, by_mob) {
+                    (Some(pid), _) => {
                         let holder = Leash::Player { id: pid, uuid };
                         self.leash_mob(id, holder);
                         holder
                     }
-                    None if waited >= HOLDER_WAIT_TICKS => {
+                    (None, Some((trader, MobKind::WanderingTrader)))
+                        if mob.kind == MobKind::TraderLlama =>
+                    {
+                        // Back with its trader, which leads it as Levitas's traders do.
+                        let m = self.mobs.get_mut(&id).expect("checked above");
+                        m.leash = None;
+                        m.leader = Some(trader);
+                        state_mut(self).leashed.remove(&id);
+                        return;
+                    }
+                    // Levitas has no mobs leading mobs: such a lead snaps too.
+                    (None, Some(_)) => {
                         self.unleash_mob(id, true, "minecraft:item.lead.break");
                         return;
                     }
-                    None => {
+                    (None, None) if waited >= HOLDER_WAIT_TICKS => {
+                        self.unleash_mob(id, true, "minecraft:item.lead.break");
+                        return;
+                    }
+                    (None, None) => {
                         let m = self.mobs.get_mut(&id).expect("checked above");
                         m.leash = Some(Leash::Uuid {
                             uuid,
@@ -573,18 +674,22 @@ impl World {
             },
             held => held,
         };
+        // Where the lead is held, and the block to walk back to (the holder's feet).
         let at = match leash {
-            Leash::Player { id: pid, .. } => self
-                .players
-                .get(&pid)
-                .filter(|p| p.alive)
-                .map(|p| [p.pos[0], p.pos[1] + 1.0, p.pos[2]]),
-            Leash::Knot { id: knot, .. } => {
-                state(self).and_then(|s| s.knots.get(&knot).map(Knot::centre))
-            }
+            Leash::Player { id: pid, .. } => self.players.get(&pid).filter(|p| p.alive).map(|p| {
+                let feet = BlockPos::new(
+                    p.pos[0].floor() as i32,
+                    p.pos[1].floor() as i32,
+                    p.pos[2].floor() as i32,
+                );
+                ([p.pos[0], p.pos[1] + 1.0, p.pos[2]], feet)
+            }),
+            Leash::Knot { id: knot, pos } => state(self)
+                .and_then(|s| s.knots.get(&knot))
+                .map(|k| (k.centre(), pos)),
             _ => None,
         };
-        let Some(at) = at else {
+        let Some((at, feet)) = at else {
             // The holder left, died or went.
             self.unleash_mob(id, true, "minecraft:item.lead.break");
             return;
@@ -607,21 +712,29 @@ impl World {
         }
         if distance > free {
             // Back towards the holder, and pulled the harder the more the lead stretches.
-            let goal = BlockPos::new(
-                at[0].floor() as i32,
-                mob.pos[1].floor() as i32,
-                at[2].floor() as i32,
-            );
+            // The lead steers it then (its own pathing waits), working its path out again
+            // only now and then or when the holder has moved on.
+            mob.leash_pull = true;
             if mob.kind.flies() {
                 mob.fly_goal = Some(at);
             } else {
-                self.follow_path(&mut mob, goal);
+                let goals = &mut state_mut(self).goals;
+                let search = goals.get(&id).is_none_or(|&g| blocks_apart(g, feet) > 2);
+                if search {
+                    goals.insert(id, feet);
+                }
+                self.steer_along(&mut mob, feet, search);
             }
             let pull = ((distance - free) * 0.05).min(MAX_PULL) / distance;
             mob.push([d[0] * pull, 0.0, d[2] * pull]);
             if d[1] > 1.0 {
                 mob.vel[1] = mob.vel[1].max(d[1] * pull);
             }
+        } else if mob.leash_pull {
+            // Back within the lead: its own ways again.
+            mob.leash_pull = false;
+            mob.path.clear();
+            state_mut(self).goals.remove(&id);
         }
         self.mobs.insert(id, mob);
     }
@@ -927,6 +1040,9 @@ mod tests {
             uuid: 99,
             waited: 0,
         });
+        for id in [a, b, c] {
+            w.track_leash(id);
+        }
         w.tick_leads();
         assert!(matches!(w.mobs[&a].leash, Some(Leash::Knot { pos, .. }) if pos == post));
         assert_eq!(state(&w).unwrap().knots.len(), 1);
@@ -986,5 +1102,131 @@ mod tests {
             1,
             "the saved knot, not a new one"
         );
+    }
+
+    #[test]
+    fn a_pulled_mob_does_not_search_again_every_tick() {
+        let (mut w, alice) = world_with_player();
+        let id = cow(&mut w, [7.5, -60.0, 0.5]);
+        let slot = hold(&mut w, alice, "minecraft:lead", 1);
+        w.use_lead_on_mob(alice, id, slot);
+        // The holder up in the air, where no path leads.
+        w.players.get_mut(&alice).unwrap().pos = [0.5, -55.0, 0.5];
+        w.tick_leads();
+        assert!(w.mobs[&id].leash_pull);
+        let first = w.mobs[&id].path_ticks;
+        w.tick_leads();
+        assert_eq!(w.mobs[&id].path_ticks, first - 1, "no new search");
+        // Its own AI leaves the steering to the lead meanwhile.
+        let mut mob = w.mobs.remove(&id).unwrap();
+        let target = mob.target;
+        w.follow_path(&mut mob, BlockPos::new(20, -60, 20));
+        assert_eq!(mob.target, target);
+        w.mobs.insert(id, mob);
+        // Back within the lead: its own ways again.
+        w.players.get_mut(&alice).unwrap().pos = [6.5, -60.0, 0.5];
+        w.tick_leads();
+        assert!(!w.mobs[&id].leash_pull);
+    }
+
+    #[test]
+    fn adventure_players_use_up_leads_too() {
+        let (mut w, alice) = world_with_player();
+        w.players.get_mut(&alice).unwrap().mode = 2;
+        let id = cow(&mut w, [2.5, -60.0, 0.5]);
+        let slot = hold(&mut w, alice, "minecraft:lead", 1);
+        w.use_lead_on_mob(alice, id, slot);
+        assert!(w.players[&alice].inventory.slots[slot].is_empty());
+        // Taking it off gives it back.
+        w.use_lead_on_mob(alice, id, slot);
+        assert_eq!(leads_on_ground(&w), 1);
+        // A creative player neither uses one up nor gets one.
+        w.players.get_mut(&alice).unwrap().mode = GAME_MODE_CREATIVE;
+        let slot = hold(&mut w, alice, "minecraft:lead", 1);
+        w.use_lead_on_mob(alice, id, slot);
+        assert_eq!(w.players[&alice].inventory.slots[slot].count, 1);
+        w.use_lead_on_mob(alice, id, slot);
+        assert_eq!(leads_on_ground(&w), 1);
+    }
+
+    #[test]
+    fn a_mob_tied_to_a_knot_is_untied_only_with_an_empty_hand() {
+        let (mut w, alice) = world_with_player();
+        let post = BlockPos::new(2, -60, 2);
+        fence(&mut w, post);
+        let a = cow(&mut w, [3.5, -60.0, 0.5]);
+        let slot = hold(&mut w, alice, "minecraft:lead", 1);
+        w.use_lead_on_mob(alice, a, slot);
+        let fence_state = w.block(post);
+        w.use_fence(alice, post, fence_state);
+        let slot = hold(&mut w, alice, "minecraft:wheat", 1);
+        assert!(!w.use_lead_on_mob(alice, a, slot), "fed as usual");
+        assert!(matches!(w.mobs[&a].leash, Some(Leash::Knot { .. })));
+        w.players.get_mut(&alice).unwrap().inventory.slots[slot] = Stack::EMPTY;
+        assert!(w.use_lead_on_mob(alice, a, slot));
+        assert!(w.mobs[&a].leash.is_none());
+    }
+
+    #[test]
+    fn knots_cannot_be_hit_from_afar_and_sneaking_places_blocks() {
+        let (mut w, alice) = world_with_player();
+        let post = BlockPos::new(2, -60, 2);
+        fence(&mut w, post);
+        let a = cow(&mut w, [3.5, -60.0, 0.5]);
+        let slot = hold(&mut w, alice, "minecraft:lead", 1);
+        w.use_lead_on_mob(alice, a, slot);
+        let fence_state = w.block(post);
+        // Sneaking with a block in hand: no knot.
+        hold(&mut w, alice, "minecraft:dirt", 1);
+        w.players.get_mut(&alice).unwrap().sneaking = true;
+        assert!(!w.use_fence(alice, post, fence_state));
+        w.players.get_mut(&alice).unwrap().sneaking = false;
+        assert!(w.use_fence(alice, post, fence_state));
+        let knot = *state(&w).unwrap().knots.keys().next().unwrap();
+        w.players.get_mut(&alice).unwrap().pos = [40.5, -60.0, 0.5];
+        assert!(w.hit_knot(alice, knot));
+        assert!(w.mobs[&a].leash.is_some(), "out of reach");
+        assert_eq!(state(&w).unwrap().knots.len(), 1);
+    }
+
+    #[test]
+    fn a_trader_llama_taken_from_its_trader_stays() {
+        let (mut w, alice) = world_with_player();
+        let trader = next_entity_id();
+        let t = Mob::new(MobKind::WanderingTrader, [0.5, -60.0, 3.5], &mut w.rng);
+        w.mobs.insert(trader, t);
+        let llama = next_entity_id();
+        let mut l = Mob::new(MobKind::TraderLlama, [2.5, -60.0, 0.5], &mut w.rng);
+        l.leader = Some(trader);
+        w.mobs.insert(llama, l);
+        let slot = hold(&mut w, alice, "minecraft:lead", 1);
+        w.use_lead_on_mob(alice, llama, slot);
+        assert!(w.mobs[&llama].leader.is_none());
+        assert!(w.mobs[&llama].persistent);
+        // The trader goes: the llama does not.
+        w.mobs.remove(&trader);
+        w.tick_mobs();
+        assert!(w.mobs.contains_key(&llama));
+    }
+
+    #[test]
+    fn a_trader_llama_saved_on_its_traders_lead_follows_it_again() {
+        let (mut w, _) = world_with_player();
+        let trader = next_entity_id();
+        let t = Mob::new(MobKind::WanderingTrader, [0.5, -60.0, 3.5], &mut w.rng);
+        let trader_uuid = t.uuid;
+        w.mobs.insert(trader, t);
+        let llama = next_entity_id();
+        let mut l = Mob::new(MobKind::TraderLlama, [2.5, -60.0, 0.5], &mut w.rng);
+        l.leash = Some(Leash::Uuid {
+            uuid: trader_uuid,
+            waited: 0,
+        });
+        w.mobs.insert(llama, l);
+        w.track_leash(llama);
+        w.tick_leads();
+        assert_eq!(w.mobs[&llama].leader, Some(trader));
+        assert!(w.mobs[&llama].leash.is_none());
+        assert_eq!(leads_on_ground(&w), 0);
     }
 }

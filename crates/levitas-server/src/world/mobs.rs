@@ -1262,6 +1262,8 @@ pub struct Mob {
     pub kin: Option<Box<dyn std::any::Any + Send>>,
     /// What holds it on a lead (`leads.rs`).
     pub leash: Option<super::leads::Leash>,
+    /// Set while its lead is stretched: the lead steers it, and its own pathing waits.
+    pub leash_pull: bool,
 }
 
 impl Mob {
@@ -1354,6 +1356,7 @@ impl Mob {
             home: None,
             kin: None,
             leash: None,
+            leash_pull: false,
             owner: None,
             variant: match kind {
                 MobKind::Cat => rng.below(cat_variants().max(1)) as u8,
@@ -2314,7 +2317,8 @@ impl World {
             if mob.kind == MobKind::TraderLlama {
                 self.tick_trader_llama(id, &mut mob);
                 let led = mob.leader.is_some_and(|l| self.mobs.contains_key(&l));
-                if !led && mob.name.is_none() {
+                // One taken from its trader on a lead stays (`leads.rs`).
+                if !led && mob.name.is_none() && mob.leash.is_none() && !mob.persistent {
                     self.send_to_viewers(&mob, items::remove_entity(id));
                     continue;
                 }
@@ -3778,7 +3782,11 @@ impl World {
             if let Some(mob) = Mob::from_nbt(entity, &mut self.rng) {
                 self.mob_chunks.insert(mob.chunk());
                 let id = next_entity_id();
+                let leashed = mob.leash.is_some();
                 self.mobs.insert(id, mob);
+                if leashed {
+                    self.track_leash(id);
+                }
                 self.rejoin_raid(id);
                 continue;
             }

@@ -150,6 +150,18 @@ impl World {
     /// Steers a mob along a path to `goal`, working the path out again now and then.
     /// Without a path it heads straight for the goal.
     pub(super) fn follow_path(&mut self, mob: &mut Mob, goal: BlockPos) {
+        if mob.leash_pull {
+            return; // its stretched lead steers it (`leads.rs`)
+        }
+        let goal_moved = mob.path.last().is_some_and(|end| {
+            (end.x - goal.x).abs() + (end.y - goal.y).abs() + (end.z - goal.z).abs() > 2
+        });
+        self.steer_along(mob, goal, mob.path.is_empty() || goal_moved);
+    }
+
+    /// Steers a mob along its path to `goal`, working the path out again when `search`
+    /// or once the path is old.
+    pub(super) fn steer_along(&mut self, mob: &mut Mob, goal: BlockPos, search: bool) {
         let height = mob.size().1.ceil() as i32;
         let feet = BlockPos::new(
             mob.pos[0].floor() as i32,
@@ -157,10 +169,7 @@ impl World {
             mob.pos[2].floor() as i32,
         );
         mob.path_ticks = mob.path_ticks.saturating_sub(1);
-        let goal_moved = mob.path.last().is_some_and(|end| {
-            (end.x - goal.x).abs() + (end.y - goal.y).abs() + (end.z - goal.z).abs() > 2
-        });
-        if mob.path.is_empty() || mob.path_ticks == 0 || goal_moved {
+        if search || mob.path_ticks == 0 {
             mob.path = self.find_path(feet, goal, height).unwrap_or_default();
             mob.path_ticks = REPATH_TICKS;
         }
