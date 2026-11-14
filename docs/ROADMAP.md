@@ -390,10 +390,15 @@ Known gaps are listed under each phase instead of being hidden.
       harnessed ones carry four players, steered by the first. Missing: camel husk
       jockeys, leads, the riding input beyond what Move Vehicle and riding jumps
       carry, copper weathering of other blocks.
-- [ ] Pathfinding and AI goals. A* over walkable blocks (`world/pathfinding.rs`):
-      walking, one-block jumps, drops of up to three blocks, avoiding lava; monsters
-      (except climbing spiders) follow paths to their target. Animals still wander
-      straight, and there are no other AI goals (doors, avoiding water, ...).
+- [x] Pathfinding and AI goals. A* over walkable blocks (`world/pathfinding.rs`):
+      walking, one-block jumps, drops of up to three blocks, with the wiki's per-mob
+      penalties (lava, fire, magma, cactus, berry bushes, powder snow, water, fences);
+      monsters (except climbing spiders) follow paths to their target. Wandering and
+      panicking mobs (`world/ai.rs`) walk paths to reachable harmless spots, fleeing
+      away from what hurt them; non-swimmers in water head for land. Villagers open
+      and close wooden and copper doors; some zombies break them on Hard
+      (`CanBreakDoors`); closed doors are walls to everyone else. Missing: spiders
+      climbing, boat/door-aware long-range village navigation.
 - [ ] Passive mobs: cow, pig, sheep (shearing, dye), chicken, rabbit, horse family,
       wolf, cat, fox, parrot, turtle, fish, squid, axolotl, frog, bee, goat, ...
       Every 26.3 mob now exists (`KINDS` in `world/mobs.rs`): base health, hitbox,

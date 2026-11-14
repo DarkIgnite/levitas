@@ -1264,6 +1264,8 @@ pub struct Mob {
     pub leash: Option<super::leads::Leash>,
     /// Set while its lead is stretched: the lead steers it, and its own pathing waits.
     pub leash_pull: bool,
+    /// Its own walking goals: wandering, fleeing, doors (`ai.rs`).
+    pub(super) ai: super::ai::Ai,
 }
 
 impl Mob {
@@ -1357,6 +1359,7 @@ impl Mob {
             kin: None,
             leash: None,
             leash_pull: false,
+            ai: Default::default(),
             owner: None,
             variant: match kind {
                 MobKind::Cat => rng.below(cat_variants().max(1)) as u8,
@@ -1720,6 +1723,7 @@ impl Mob {
         super::critters::write_nbt(self, &mut nbt);
         super::kin::write_nbt(self, &mut nbt);
         super::leads::write_nbt(self, &mut nbt);
+        super::ai::write_nbt(self, &mut nbt);
         if let (MobKind::Parrot, Some(owner)) = (self.kind, self.owner) {
             let owner = [
                 (owner >> 96) as i32,
@@ -1843,6 +1847,7 @@ impl Mob {
         super::critters::read_nbt(&mut mob, nbt);
         super::kin::read_nbt(&mut mob, nbt);
         super::leads::read_nbt(&mut mob, nbt);
+        super::ai::read_nbt(&mut mob, nbt);
         if mob.horse.is_some() {
             mob.health = nbt
                 .get("Health")
@@ -2236,6 +2241,9 @@ impl World {
             if mob.dying.is_some() && mob.villager.as_ref().is_some_and(|v| v.sleeping.is_some()) {
                 self.wake_villager(id, &mut mob);
             }
+            if mob.dying.is_some() || !mob.alive() {
+                self.stop_breaking(id, &mut mob);
+            }
             if let Some(ticks) = mob.dying.as_mut() {
                 *ticks += 1;
                 if *ticks >= DEATH_TICKS {
@@ -2248,6 +2256,7 @@ impl World {
             // Peaceful leaves no monsters about.
             let peaceful = crate::rules::difficulty() == crate::rules::Difficulty::Peaceful;
             if self.despawns(&mob) || (peaceful && mob.kind.is_monster()) {
+                self.stop_breaking(id, &mut mob);
                 self.send_to_viewers(&mob, items::remove_entity(id));
                 continue;
             }
@@ -2373,6 +2382,7 @@ impl World {
             {
                 self.hurt_mob(id, &mut mob, 1.0, "minecraft:dry_out");
             }
+            self.mob_doors(id, &mut mob);
             if self.ride_along(&mut mob) {
                 // Sitting in a boat or minecart: carried, not walking.
             } else if Self::horse_steered(&mob) {
@@ -2482,7 +2492,7 @@ impl World {
     }
 
     /// Picks where to walk and how to face.
-    fn think(&mut self, mob: &mut Mob) {
+    pub(super) fn think(&mut self, mob: &mut Mob) {
         mob.hurt_ticks = mob.hurt_ticks.saturating_sub(1);
         let panicking = mob.panic > 0;
         mob.panic = mob.panic.saturating_sub(1);
@@ -2502,27 +2512,21 @@ impl World {
         // Rabbits and wild cats bolt from players who come close.
         let shy = mob.kind == MobKind::Rabbit
             || (matches!(mob.kind, MobKind::Cat | MobKind::Fox) && mob.owner.is_none());
-        if shy
-            && !panicking
-            && self.players.values().any(|p| {
-                p.alive && (p.pos[0] - mob.pos[0]).hypot(p.pos[2] - mob.pos[2]) < RABBIT_SHY
+        let scared_of = (shy && !panicking)
+            .then(|| {
+                self.players.values().find(|p| {
+                    p.alive && (p.pos[0] - mob.pos[0]).hypot(p.pos[2] - mob.pos[2]) < RABBIT_SHY
+                })
             })
-        {
+            .flatten()
+            .map(|p| p.pos);
+        if let Some(p) = scared_of {
             mob.panic = 40;
             mob.target = None;
+            mob.ai.scared([mob.pos[0] - p[0], mob.pos[2] - p[2]], true);
         }
         // Wandering starts now and then; panic keeps picking new spots nearby.
-        let wants_target = if panicking {
-            mob.target.is_none()
-        } else {
-            mob.target.is_none() && self.rng.below(120) == 0
-        };
-        if wants_target {
-            let reach = if panicking { 5.0 } else { 10.0 };
-            let dx = (self.rng.f64() * 2.0 - 1.0) * reach;
-            let dz = (self.rng.f64() * 2.0 - 1.0) * reach;
-            mob.target = Some(([mob.pos[0] + dx, mob.pos[2] + dz], 200));
-        }
+        self.wander(mob, panicking || mob.panic > 0);
 
         // Look at a nearby player now and then.
         let eyes = [mob.pos[0], mob.pos[1] + mob.size().1 * 0.85, mob.pos[2]];
@@ -2677,7 +2681,7 @@ impl World {
     }
 
     /// Moves the mob one tick: walking, jumping, swimming, gravity and collisions.
-    fn step(&mut self, mob: &mut Mob) {
+    pub(super) fn step(&mut self, mob: &mut Mob) {
         let in_water = self
             .loaded_state(feet(mob.pos))
             .and_then(fluid_at)
@@ -3138,6 +3142,7 @@ impl World {
             if !mob.kind.is_monster() && mob.kind != MobKind::Wolf {
                 mob.panic = PANIC_TICKS;
                 mob.target = None;
+                mob.ai.scared(away, true);
             }
             // Wardens are not knocked back at all.
             if mob.kind != MobKind::Warden {
