@@ -217,6 +217,10 @@ impl World {
         if !self.raining_at(target) {
             return;
         }
+        // Now and then a harmless strike that leaves a skeleton trap horse.
+        if super::jockeys::lightning_trap(self, target) {
+            return;
+        }
         self.strike_lightning([
             f64::from(target.x) + 0.5,
             f64::from(target.y),
@@ -531,7 +535,7 @@ impl World {
     }
 
     /// A sound in the weather category, heard as far as its volume carries.
-    fn weather_sound(&mut self, name: &str, at: [f64; 3], volume: f32, pitch: f32) {
+    pub(super) fn weather_sound(&mut self, name: &str, at: [f64; 3], volume: f32, pitch: f32) {
         let Some(sound) = levitas_registry::sound_id(name) else {
             return;
         };

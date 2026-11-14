@@ -458,8 +458,11 @@ Known gaps are listed under each phase instead of being hidden.
       Normal and Hard; from mineshaft spawners) and slimes (three sizes by size squared
       health, size as damage and none for the smallest, split when they die, hop;
       swamps). Husks and strays spawn only under open sky. Missing: slime chunks
-      underground (and moon phases in swamps), drowned, jockeys, baby husks,
-      reinforcements, converting under water or in powder snow.
+      underground (and moon phases in swamps), converting under water or in powder
+      snow. Mobs ride mobs (`world/jockeys.rs`): spider jockeys, baby zombies (5%)
+      that may ride chickens, zombie reinforcements on Hard, drowned spawning with
+      tridents they throw, fishing rods or nautilus shells, and skeleton trap horses
+      from thunderstorm lightning that turn into four skeleton horsemen.
       Done: zombies (burn in sunlight), spiders (climb walls, neutral in daylight),
       creepers (hiss and explode). They chase the nearest survival player straight on
       (no pathfinding yet), hit with knockback, and keep players from sleeping nearby.

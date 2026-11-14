@@ -184,8 +184,8 @@ impl World {
             return false;
         };
         mob.head_yaw = yaw_towards(mob.pos, target);
-        if mob.kind.family() == MobKind::Spider {
-            // Spiders climb over whatever is in the way.
+        if mob.kind.family() == MobKind::Spider || super::jockeys::mount_of(mob).is_some() {
+            // Spiders climb over whatever is in the way; a rider's mount finds the way.
             mob.target = Some(([target[0], target[2]], 20));
         } else if mob.kind.family() == MobKind::MagmaCube || mob.kind.flies() {
             // Magma cubes hop towards their prey, ghasts and blazes fly.
@@ -719,6 +719,7 @@ impl World {
         } else if in_water {
             mob.fire_ticks = 0;
         } else if mob.kind.burns_in_daylight()
+            && !super::jockeys::wears_helmet(mob)
             && mob.effect_level(levitas_registry::mob_effect::FIRE_RESISTANCE) == 0
             && !self.weather.is_raining()
         {
@@ -806,7 +807,7 @@ impl World {
         // Structure mobs (elder guardians, mansion illagers, witches in huts) and
         // shulkers stay put.
         // Wardens leave only by digging back down.
-        if !mob.kind.is_monster()
+        if !(mob.kind.is_monster() || super::jockeys::chicken_jockey(mob))
             || mob.persistent
             || mob.kind == MobKind::Shulker
             || mob.kind == MobKind::Warden
@@ -988,7 +989,7 @@ impl World {
                     kind
                 };
                 let mob = Mob::new(actual_kind, at, &mut self.rng);
-                self.mobs.insert(next_entity_id(), mob);
+                super::jockeys::spawn_natural(self, mob);
             }
         }
     }

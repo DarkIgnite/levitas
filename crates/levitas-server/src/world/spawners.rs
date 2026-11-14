@@ -177,7 +177,7 @@ impl World {
                 || ground.is_some_and(|g| crate::blocks::sturdy(g, crate::blocks::Dir::Up));
             if stands && self.mob_fits(kind, at) {
                 let mob = Mob::new(kind, at, &mut self.rng);
-                self.mobs.insert(next_entity_id(), mob);
+                super::jockeys::spawn_natural(self, mob);
                 self.broadcast(
                     Writer::packet(clientbound::LEVEL_EVENT)
                         .i32(LEVEL_EVENT_SPAWNER_SPAWN)

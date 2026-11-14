@@ -367,7 +367,9 @@ impl World {
         let Some(horse) = mob.horse.as_ref() else {
             return false;
         };
-        let (saddled, ridden) = (horse.saddled, horse.rider.is_some());
+        // A mob on its back (a skeleton horseman's skeleton) keeps the seat too.
+        let ridden = horse.rider.is_some() || super::jockeys::has_riders(mob);
+        let saddled = horse.saddled;
         let survival = self.players.get(&id).is_some_and(|p| p.survival());
         if let Some((heal, temper, breeds)) = food_value(kind, held) {
             let mob = self.mobs.get_mut(&target).expect("checked");
