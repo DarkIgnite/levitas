@@ -73,6 +73,9 @@ pub struct Ai {
     /// get there.
     path: Vec<BlockPos>,
     ticks: u32,
+    /// The spot it last aimed for along that path: a different target means another
+    /// goal took over.
+    aim: Option<[f64; 2]>,
     /// The way away from what last hurt or scared it (a horizontal unit vector).
     pub(super) flee: Option<[f64; 2]>,
     /// Ticks until a mob floating in water looks for land again.
@@ -89,6 +92,19 @@ impl Ai {
     /// Whether it is on its way somewhere it picked itself.
     pub(super) fn walking(&self) -> bool {
         !self.path.is_empty()
+    }
+
+    /// Something hurt or scared it from the other side of `away` (a horizontal
+    /// direction): it drops where it was going and, once `fresh`, runs off that way.
+    /// A direction too short to tell (harming clouds, conduits) leaves it running
+    /// about at random.
+    pub(super) fn scared(&mut self, away: [f64; 2], fresh: bool) {
+        let length = away[0].hypot(away[1]);
+        self.flee = (length > 0.1).then(|| [away[0] / length, away[1] / length]);
+        if fresh {
+            self.path.clear();
+            self.aim = None;
+        }
     }
 }
 
@@ -180,6 +196,10 @@ impl World {
             mob.ai.path.clear();
             return;
         }
+        // Hunting or chasing prey steers along its own path.
+        if mob.hunting.is_some() || mob.prey.is_some() {
+            mob.ai.path.clear();
+        }
         let panicking = panicking || mob.panic_ticks > 0;
         if !panicking {
             mob.ai.flee = None;
@@ -191,11 +211,18 @@ impl World {
         mob.ai.land_wait = mob.ai.land_wait.saturating_sub(1);
 
         if mob.ai.walking() {
+            if mob.target.is_some_and(|(t, _)| Some(t) != mob.ai.aim) {
+                // Another goal (food, a partner, a module of its own) sent it elsewhere.
+                mob.ai.path.clear();
+                mob.ai.aim = None;
+                return;
+            }
             mob.ai.ticks = mob.ai.ticks.saturating_sub(1);
             advance_path(mob.pos, &mut mob.ai.path);
             match mob.ai.path.first().copied() {
                 Some(next) if mob.ai.ticks > 0 && distance_to(mob, next) <= OFF_PATH => {
                     mob.target = Some((centre(next), 20));
+                    mob.ai.aim = Some(centre(next));
                     return;
                 }
                 // Arrived, too late, or pushed off the way.
@@ -220,6 +247,7 @@ impl World {
             Some(path) => {
                 mob.ai.ticks = (path.len() as u32 * TICKS_PER_SPOT + SLACK_TICKS).min(400);
                 mob.target = Some((centre(path[0]), 20));
+                mob.ai.aim = Some(centre(path[0]));
                 mob.ai.path = path;
             }
             None if panicking => {
@@ -349,10 +377,14 @@ impl World {
             self.villager_doors(mob);
         } else if breaks_doors(mob.kind) {
             if mob.ai.break_doors.is_none() {
+                let inhabited = self
+                    .kept
+                    .get(&mob.chunk())
+                    .map_or(0, |k| k.inhabited_time());
                 let regional = regional_difficulty(
                     crate::rules::difficulty(),
                     self.day_time,
-                    0,
+                    inhabited,
                     self.day_time.div_euclid(24_000),
                 );
                 mob.ai.break_doors = Some(self.rng.f64() < BREAK_DOORS_CHANCE * clamped(regional));
@@ -367,10 +399,15 @@ impl World {
     /// close enough to reach.
     fn door_ahead(&self, mob: &Mob) -> Option<BlockPos> {
         let feet = mob_feet(mob);
-        mob.path
-            .iter()
+        // Only the path it is steering along: a hunting or villager-life path, else
+        // its wander path.
+        let path = if mob.path.is_empty() {
+            &mob.ai.path
+        } else {
+            &mob.path
+        };
+        path.iter()
             .take(2)
-            .chain(mob.ai.path.iter().take(2))
             .flat_map(|&p| [p, BlockPos::new(p.x, p.y + 1, p.z)])
             .find(|&p| {
                 (p.y - feet.y).abs() <= 1
@@ -473,6 +510,13 @@ impl World {
         self.set_block(BlockPos::new(door.x, door.y + 1, door.z), block::AIR);
         self.set_block_updating(door, block::AIR);
         mob.path.clear();
+    }
+
+    /// A mob that dies or goes away while hitting a door takes its crack away.
+    pub(super) fn stop_breaking(&mut self, id: i32, mob: &mut Mob) {
+        if let Some((door, _)) = mob.ai.breaking.take() {
+            self.send_destroy_stage(id, door, None);
+        }
     }
 
     /// The crack on a block being broken by mob `id`; `None` takes it away.
@@ -680,6 +724,67 @@ mod tests {
         pig.ai.flee = Some([1.0, 0.0]);
         run(&mut w, id, &mut pig, 80);
         assert!(pig.pos[0] > 4.0, "ran to {:?}", pig.pos);
+    }
+
+    #[test]
+    fn shy_rabbits_run_away_from_players() {
+        let mut w = flat_world();
+        let (out, _frames) = tokio::sync::mpsc::channel(1_000);
+        let profile = Profile {
+            name: "Indy".to_owned(),
+            uuid: 7,
+            properties: Vec::new(),
+        };
+        w.players.insert(
+            next_entity_id(),
+            Player::new(profile, out, [-2.5, -60.0, 0.5]),
+        );
+        let id = next_entity_id();
+        let mut rabbit = Mob::new(MobKind::Rabbit, [0.5, -60.0, 0.5], &mut w.rng);
+        // Walking a wander path towards the player when it notices them.
+        rabbit.ai.path = vec![BlockPos::new(-1, -60, 0), BlockPos::new(-6, -60, 0)];
+        rabbit.ai.ticks = 400;
+        run(&mut w, id, &mut rabbit, 30);
+        assert!(rabbit.pos[0] > 3.0, "ran to {:?}", rabbit.pos);
+    }
+
+    #[test]
+    fn panic_without_a_direction_still_runs() {
+        let mut w = flat_world();
+        let id = next_entity_id();
+        let mut pig = Mob::new(MobKind::Pig, [0.5, -60.0, 0.5], &mut w.rng);
+        pig.panic = 100;
+        pig.ai.scared([0.0, 0.0], true);
+        assert_eq!(pig.ai.flee, None);
+        run(&mut w, id, &mut pig, 60);
+        assert!(
+            (pig.pos[0] - 0.5).hypot(pig.pos[2] - 0.5) > 1.5,
+            "stayed at {:?}",
+            pig.pos
+        );
+    }
+
+    #[test]
+    fn other_goals_take_over_from_a_wander_path() {
+        let mut w = flat_world();
+        let id = next_entity_id();
+        let mut cow = Mob::new(MobKind::Cow, [0.5, -60.0, 0.5], &mut w.rng);
+        cow.ai.path = w
+            .find_path_for(
+                mob_feet(&cow),
+                BlockPos::new(8, -60, 0),
+                2,
+                PathRules::of(&cow),
+            )
+            .unwrap();
+        cow.ai.ticks = 400;
+        run(&mut w, id, &mut cow, 5);
+        assert!(cow.ai.walking());
+        // Another module sends it the other way.
+        cow.target = Some(([-8.0, 0.5], 200));
+        run(&mut w, id, &mut cow, 1);
+        assert!(!cow.ai.walking());
+        assert_eq!(cow.target.map(|t| t.0), Some([-8.0, 0.5]));
     }
 
     #[test]

@@ -2231,6 +2231,9 @@ impl World {
             if mob.dying.is_some() && mob.villager.as_ref().is_some_and(|v| v.sleeping.is_some()) {
                 self.wake_villager(id, &mut mob);
             }
+            if mob.dying.is_some() || !mob.alive() {
+                self.stop_breaking(id, &mut mob);
+            }
             if let Some(ticks) = mob.dying.as_mut() {
                 *ticks += 1;
                 if *ticks >= DEATH_TICKS {
@@ -2243,6 +2246,7 @@ impl World {
             // Peaceful leaves no monsters about.
             let peaceful = crate::rules::difficulty() == crate::rules::Difficulty::Peaceful;
             if self.despawns(&mob) || (peaceful && mob.kind.is_monster()) {
+                self.stop_breaking(id, &mut mob);
                 self.send_to_viewers(&mob, items::remove_entity(id));
                 continue;
             }
@@ -2508,12 +2512,10 @@ impl World {
         if let Some(p) = scared_of {
             mob.panic = 40;
             mob.target = None;
-            let (dx, dz) = (mob.pos[0] - p[0], mob.pos[2] - p[2]);
-            let length = dx.hypot(dz).max(1e-6);
-            mob.ai.flee = Some([dx / length, dz / length]);
+            mob.ai.scared([mob.pos[0] - p[0], mob.pos[2] - p[2]], true);
         }
         // Wandering starts now and then; panic keeps picking new spots nearby.
-        self.wander(mob, panicking);
+        self.wander(mob, panicking || mob.panic > 0);
 
         // Look at a nearby player now and then.
         let eyes = [mob.pos[0], mob.pos[1] + mob.size().1 * 0.85, mob.pos[2]];
@@ -3129,7 +3131,7 @@ impl World {
             if !mob.kind.is_monster() && mob.kind != MobKind::Wolf {
                 mob.panic = PANIC_TICKS;
                 mob.target = None;
-                mob.ai.flee = Some(away);
+                mob.ai.scared(away, true);
             }
             // Wardens are not knocked back at all.
             if mob.kind != MobKind::Warden {

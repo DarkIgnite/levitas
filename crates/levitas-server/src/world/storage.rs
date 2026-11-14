@@ -480,6 +480,16 @@ pub struct KeptChunkData {
     block_entities: Vec<(BlockPos, &'static str, Compound)>,
 }
 
+impl KeptChunkData {
+    /// The chunk's `InhabitedTime`, in ticks (0 if it never had one).
+    pub(super) fn inhabited_time(&self) -> i64 {
+        match self.inhabited_time {
+            Some(Tag::Long(t)) => t,
+            _ => 0,
+        }
+    }
+}
+
 impl Player {
     /// The vanilla `players/data/<uuid>.dat` contents.
     pub(super) fn to_nbt(&self) -> Compound {
